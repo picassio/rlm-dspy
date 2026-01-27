@@ -15,6 +15,22 @@ from .batch import (
 from .batch import (
     BatchResult as BatchJobResult,
 )
+from .debug import (
+    Verbosity,
+    configure_debug,
+    debug_chunk,
+    debug_log,
+    debug_request,
+    debug_response,
+    debug_summary,
+    get_verbosity,
+    is_debug,
+    is_verbose,
+    setup_logging,
+    timer,
+    trace,
+    truncate_for_log,
+)
 from .fileutils import (
     atomic_write,
     ensure_dir,
@@ -138,4 +154,19 @@ __all__ = [
     "path_to_module",
     "ensure_dir",
     "atomic_write",
+    # Debug utilities (from modaic patterns)
+    "Verbosity",
+    "get_verbosity",
+    "is_verbose",
+    "is_debug",
+    "configure_debug",
+    "setup_logging",
+    "timer",
+    "trace",
+    "truncate_for_log",
+    "debug_log",
+    "debug_request",
+    "debug_response",
+    "debug_chunk",
+    "debug_summary",
 ]

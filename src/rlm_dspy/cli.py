@@ -102,6 +102,10 @@ def ask(
         bool,
         typer.Option("--verbose", "-v", help="Show detailed progress"),
     ] = False,
+    debug: Annotated[
+        bool,
+        typer.Option("--debug", "-d", help="Show full debug output with API calls"),
+    ] = False,
 ) -> None:
     """
     Ask a question about files or piped content.
@@ -110,9 +114,38 @@ def ask(
         rlm-dspy ask "What does main() do?" src/
         cat large_file.txt | rlm-dspy ask "Summarize this" --stdin
         rlm-dspy ask "Find bugs" src/*.py --model claude-3-opus
+        rlm-dspy ask "Explain" file.py -v  # verbose
+        rlm-dspy ask "Debug" file.py -d    # full debug
     """
+    import os
+
+    # Set debug/verbose environment before importing debug module
+    if debug:
+        os.environ["RLM_DEBUG"] = "1"
+        os.environ["RLM_VERBOSE"] = "1"
+    elif verbose:
+        os.environ["RLM_VERBOSE"] = "1"
+
+    # Import and setup debug logging
+    from .core.debug import debug_summary, is_debug, setup_logging, timer
+
+    if verbose or debug:
+        setup_logging()
+
     config = _get_config(model, budget, timeout, chunk_size, strategy)
     rlm = RLM(config=config)
+
+    if is_debug():
+        console.print(
+            Panel(
+                f"[bold]Model:[/bold] {config.model}\n"
+                f"[bold]API:[/bold] {config.api_base}\n"
+                f"[bold]Chunk Size:[/bold] {config.default_chunk_size:,}\n"
+                f"[bold]Strategy:[/bold] {config.strategy}",
+                title="[bold blue]Debug Mode[/bold blue]",
+                border_style="blue",
+            )
+        )
 
     # Load context
     if stdin:
@@ -133,19 +166,21 @@ def ask(
         console.print("[red]Error: Provide paths or use --stdin[/red]")
         raise typer.Exit(1)
 
-    if verbose:
-        console.print(f"[dim]Context: {len(context):,} chars from {len(paths or [])} path(s)[/dim]")
+    if verbose or debug:
+        src = f"{len(paths or [])} path(s)" if paths else "stdin"
+        console.print(f"\n[dim]Context: {len(context):,} chars from {src}[/dim]")
 
     # Execute query
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-        transient=not verbose,
-    ) as progress:
-        task = progress.add_task("Analyzing...", total=None)
-        result = rlm.query(query, context)
-        progress.update(task, description="Done!")
+    with timer("Total query time", log=verbose or debug):
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+            transient=not (verbose or debug),
+        ) as progress:
+            task = progress.add_task("Analyzing...", total=None)
+            result = rlm.query(query, context)
+            progress.update(task, description="Done!")
 
     # Output
     if output_json:
@@ -171,8 +206,16 @@ def ask(
                     border_style="green",
                 )
             )
-            if verbose:
+            if verbose or debug:
                 _print_stats(result)
+            if debug:
+                debug_summary(
+                    chunks_processed=result.chunks_processed,
+                    chunks_relevant=result.chunks_with_relevant_info,
+                    total_tokens=result.total_tokens,
+                    total_cost=result.total_cost,
+                    elapsed=result.elapsed_time,
+                )
         else:
             console.print(f"[red]Error: {result.error}[/red]")
             if result.partial_answer:
