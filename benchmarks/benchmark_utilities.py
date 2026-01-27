@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
-"""Benchmark modaic patterns for performance."""
+"""Benchmark RLM-DSPy utility modules performance.
+
+Tests the performance of utility modules:
+- secrets: API key masking
+- types: FailedChunk, BatchResult
+- progress: Rich progress display
+- observability: Tracker, spans
+- registry: Plugin system
+- batch: JSONL handling
+- fileutils: Cross-platform operations
+"""
 
 import asyncio
 import json
