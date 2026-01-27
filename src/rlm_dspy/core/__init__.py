@@ -64,7 +64,7 @@ from .registry import (
     processors,
     strategies,
 )
-from .retry import retry_sync, retry_with_backoff
+from .retry import is_rate_limit_error, parse_retry_after, retry_sync, retry_with_backoff
 from .rlm import RLM, RLMConfig, RLMResult
 from .secrets import (
     MissingSecretError,
@@ -77,6 +77,13 @@ from .secrets import (
 )
 from .signatures import AggregateAnswers, AnalyzeChunk, DecomposeTask, ExtractAnswer
 from .types import BatchResult, ChunkResult, FailedChunk, ProcessingStats
+from .validation import (
+    PreflightResult,
+    ValidationResult,
+    preflight_check,
+    validate_jsonl_file,
+    validate_project_name,
+)
 
 __all__ = [
     # Core
@@ -169,4 +176,13 @@ __all__ = [
     "debug_response",
     "debug_chunk",
     "debug_summary",
+    # Validation utilities (from modaic patterns)
+    "ValidationResult",
+    "PreflightResult",
+    "preflight_check",
+    "validate_project_name",
+    "validate_jsonl_file",
+    # Rate limit utilities
+    "parse_retry_after",
+    "is_rate_limit_error",
 ]

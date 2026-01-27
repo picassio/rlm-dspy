@@ -106,6 +106,10 @@ def ask(
         bool,
         typer.Option("--debug", "-d", help="Show full debug output with API calls"),
     ] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", "-n", help="Validate config without running query"),
+    ] = False,
 ) -> None:
     """
     Ask a question about files or piped content.
@@ -116,6 +120,7 @@ def ask(
         rlm-dspy ask "Find bugs" src/*.py --model claude-3-opus
         rlm-dspy ask "Explain" file.py -v  # verbose
         rlm-dspy ask "Debug" file.py -d    # full debug
+        rlm-dspy ask "Test" file.py -n     # dry run (validate only)
     """
     import os
 
@@ -128,12 +133,17 @@ def ask(
 
     # Import and setup debug logging
     from .core.debug import debug_summary, is_debug, setup_logging, timer
+    from .core.validation import preflight_check
 
     if verbose or debug:
         setup_logging()
 
     config = _get_config(model, budget, timeout, chunk_size, strategy)
     rlm = RLM(config=config)
+
+    # Dry run mode - validate and exit
+    if dry_run:
+        console.print("[bold]Dry Run Mode - Validating configuration...[/bold]\n")
 
     if is_debug():
         console.print(
@@ -169,6 +179,25 @@ def ask(
     if verbose or debug:
         src = f"{len(paths or [])} path(s)" if paths else "stdin"
         console.print(f"\n[dim]Context: {len(context):,} chars from {src}[/dim]")
+
+    # Dry run - run preflight checks and exit
+    if dry_run:
+        preflight = preflight_check(
+            api_key_required=True,
+            model=config.model,
+            api_base=config.api_base,
+            budget=config.max_budget,
+            context=context,
+            chunk_size=config.default_chunk_size,
+            check_network=True,
+        )
+        preflight.print_report()
+
+        if preflight.passed:
+            console.print("\n[green]✓ Ready to run! Remove --dry-run to execute.[/green]")
+            raise typer.Exit(0)
+        else:
+            raise typer.Exit(1)
 
     # Execute query
     with timer("Total query time", log=verbose or debug):
@@ -478,6 +507,60 @@ def _print_stats(result: RLMResult) -> None:
     table.add_row("Depth", f"{result.depth_reached}")
 
     console.print(table)
+
+
+@app.command()
+def preflight(
+    paths: Annotated[
+        Optional[list[Path]],
+        typer.Argument(help="Files or directories to check"),
+    ] = None,
+    check_network: Annotated[
+        bool,
+        typer.Option("--network/--no-network", help="Check API endpoint connectivity"),
+    ] = True,
+) -> None:
+    """
+    Run preflight checks to validate configuration.
+
+    Validates:
+    - API key is set
+    - Model format is valid
+    - API endpoint is reachable (optional)
+    - Context size estimation
+
+    Examples:
+        rlm-dspy preflight src/
+        rlm-dspy preflight --no-network
+    """
+    from .core.validation import preflight_check
+
+    config = RLMConfig()
+
+    # Load context if paths provided
+    context = None
+    if paths:
+        rlm = RLM(config=config)
+        context = rlm.load_context([str(p) for p in paths])
+        console.print(f"[dim]Loaded {len(context):,} chars from {len(paths)} path(s)[/dim]\n")
+
+    # Run checks
+    result = preflight_check(
+        api_key_required=True,
+        model=config.model,
+        api_base=config.api_base,
+        budget=config.max_budget,
+        context=context,
+        chunk_size=config.default_chunk_size,
+        check_network=check_network,
+    )
+
+    result.print_report()
+
+    if result.passed:
+        raise typer.Exit(0)
+    else:
+        raise typer.Exit(1)
 
 
 if __name__ == "__main__":

@@ -8,12 +8,73 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import re
 from functools import wraps
 from typing import Any, Callable, TypeVar
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
+
+
+def parse_retry_after(response: httpx.Response | None) -> float | None:
+    """
+    Parse Retry-After header from HTTP 429 response.
+
+    Learned from modaic: intelligent rate limit handling.
+
+    Supports:
+    - Seconds: "Retry-After: 120"
+    - HTTP date: "Retry-After: Wed, 21 Oct 2015 07:28:00 GMT"
+
+    Returns:
+        Delay in seconds, or None if not present/parseable
+    """
+    if response is None:
+        return None
+
+    retry_after = response.headers.get("retry-after") or response.headers.get("Retry-After")
+    if not retry_after:
+        return None
+
+    # Try as integer seconds
+    try:
+        return float(retry_after)
+    except ValueError:
+        pass
+
+    # Try as HTTP date
+    try:
+        import time
+        from email.utils import parsedate_to_datetime
+
+        dt = parsedate_to_datetime(retry_after)
+        delay = dt.timestamp() - time.time()
+        return max(0, delay)
+    except Exception:
+        pass
+
+    # Try to extract number from error message (some APIs include it)
+    match = re.search(r"(\d+)\s*(?:seconds?|s)", retry_after, re.IGNORECASE)
+    if match:
+        return float(match.group(1))
+
+    return None
+
+
+def is_rate_limit_error(response: httpx.Response | None = None, error: Exception | None = None) -> bool:
+    """Check if an error is a rate limit (429) error."""
+    if response is not None and response.status_code == 429:
+        return True
+
+    if error is not None:
+        error_str = str(error).lower()
+        if "429" in error_str or "rate limit" in error_str or "too many requests" in error_str:
+            return True
+
+    return False
 
 
 async def retry_with_backoff(
