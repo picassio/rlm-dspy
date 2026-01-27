@@ -279,34 +279,42 @@ When should you use RLM vs direct LLM calls?
 
 ### Complete Comparison Table
 
-| Context | Method | Time | Accuracy | Hallucination | Max Size |
-|---------|--------|------|----------|---------------|----------|
-| 8-256KB | Bare LLM | 3-5s | ✅ 100% | None | ~2MB |
-| | RLM-DSPy | 14-30s | ✅ 100% | None | **Unlimited** |
-| 500KB-2MB | Bare LLM | 3-13s | ✅ 100% | None | ~2MB |
-| | RLM-DSPy | 13-32s | ✅ 100% | None | **Unlimited** |
-| **5MB+** | Bare LLM | ❌ FAILS | ❌ | N/A | **Exceeded** |
-| | RLM-DSPy | 25-50s | ✅ 100% | None | **Works!** |
+| Context | Method | Time | Accuracy | Hallucination | Status |
+|---------|--------|------|----------|---------------|--------|
+| 8KB | Bare LLM | 1.4s | ✅ | 0% | OK |
+| | RLM-DSPy | 6.3s | ✅ | 0% | OK |
+| 64KB | Bare LLM | 8.1s | ✅ | 0% | OK |
+| | RLM-DSPy | 8.6s | ✅ | 0% | OK |
+| 256KB | Bare LLM | 2.4s | ✅ | 0% | OK |
+| | RLM-DSPy | 9.6s | ✅ | 0% | OK |
+| 1MB | Bare LLM | 5.3s | ✅ | 0% | OK |
+| | RLM-DSPy | 14.7s | ✅ | 0% | OK |
+| 2MB | Bare LLM | 16.3s | ✅ | 0% | OK |
+| | RLM-DSPy | 15.4s | ✅ | 0% | OK |
+| **4MB** | Bare LLM | ❌ | ❌ | N/A | **HTTP 400** |
+| | RLM-DSPy | 29.5s | ✅ | 0% | **OK** |
 
-### Summary
+### Summary Statistics
 
-| Metric | Bare LLM | RLM-DSPy |
-|--------|----------|----------|
-| **Speed** (small) | ⚡ 4x faster | Slower |
-| **Speed** (large) | ❌ Fails | ✅ Works |
-| **Accuracy** | 80% (12/15) | **100%** (15/15) |
-| **Hallucination** | 0% | 0% |
-| **Max Context** | ~2MB | **Unlimited** |
+| Metric | Bare LLM | RLM-DSPy | Winner |
+|--------|----------|----------|--------|
+| **Accuracy** | 89% (8/9) | **100%** (9/9) | RLM-DSPy |
+| **Error Rate** | 11% | **0%** | RLM-DSPy |
+| **Hallucination** | 0% | 0% | Tie |
+| **Avg Time** | **5.1s** | 12.6s | Bare LLM |
+| **Max Context** | 2MB | **4MB+** | RLM-DSPy |
 
 ### Key Insights
 
-1. **No hallucination** - Both methods are reliable within their limits
+1. **No hallucination** - Both methods are reliable (0% hallucination rate)
 2. **RLM wins at scale** - Only option for >2MB contexts
-3. **Bare LLM wins at speed** - 4-6x faster for small contexts
-4. **Choose based on size:**
+3. **Bare LLM wins at speed** - 2-4x faster for small contexts
+4. **RLM-DSPy catches up at 2MB** - Similar speed at large contexts
+5. **Choose based on size:**
    ```
    context < 2MB + speed critical → Bare LLM
-   context > 2MB OR accuracy critical → RLM-DSPy
+   context > 2MB                  → RLM-DSPy (only option)
+   accuracy critical              → RLM-DSPy (100% vs 89%)
    ```
 
 See [benchmarks/RESULTS.md](benchmarks/RESULTS.md) for detailed results.

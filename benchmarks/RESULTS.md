@@ -3,9 +3,9 @@
 ## Complete Comparison: Bare LLM vs RLM-DSPy
 
 ### Test Configuration
-- **Model:** google/gemini-3-flash-preview (1M token context)
+- **Model:** google/gemini-2.5-flash (1M token context)
 - **API:** OpenRouter
-- **Test:** Needle in haystack (find "PHOENIX-7742" in code)
+- **Test:** Needle in haystack (find specific facts in code)
 
 ---
 
@@ -123,3 +123,48 @@ if context_size < 2MB and speed_critical:
 else:
     use rlm_dspy()  # Works for ANY size
 ```
+
+---
+
+## Comprehensive Benchmark (Jan 2026)
+
+### Full Test Results
+
+| Context | Test Name | Bare LLM Time | Bare LLM Acc | RLM Time | RLM Acc |
+|---------|-----------|---------------|--------------|----------|---------|
+| 8KB | Simple Fact | 1.4s | ✅ | 6.3s | ✅ |
+| 16KB | Number | 1.6s | ✅ | 6.1s | ✅ |
+| 64KB | Config Value | 8.1s | ✅ | 8.6s | ✅ |
+| 128KB | Hidden Deep | 2.5s | ✅ | 10.1s | ✅ |
+| 256KB | Technical Spec | 2.4s | ✅ | 9.6s | ✅ |
+| 512KB | Version Number | 3.0s | ✅ | 12.9s | ✅ |
+| 1024KB | UUID | 5.3s | ✅ | 14.7s | ✅ |
+| 2048KB | Project Code | 16.3s | ✅ | 15.4s | ✅ |
+| **4096KB** | Secret | **HTTP 400** | ❌ | 29.5s | ✅ |
+
+### Statistics Summary
+
+| Metric | Bare LLM | RLM-DSPy | Winner |
+|--------|----------|----------|--------|
+| Accuracy | 89% (8/9) | **100%** (9/9) | **RLM-DSPy** |
+| Error Rate | 11% | **0%** | **RLM-DSPy** |
+| Hallucination | 0% | 0% | Tie |
+| Avg Time | **5.1s** | 12.6s | Bare LLM |
+| Max Context | 2MB | **4MB+** | **RLM-DSPy** |
+
+### Key Observations
+
+1. **Speed crossover at 2MB**: At 2MB, RLM-DSPy (15.4s) is actually faster than Bare LLM (16.3s)
+2. **Zero hallucination**: Neither method made up answers - both are reliable
+3. **Graceful degradation**: RLM-DSPy chunks large contexts instead of failing
+4. **Bare LLM limit**: Fails with HTTP 400 at ~4MB (model context limit)
+
+### Decision Matrix
+
+| Scenario | Recommendation |
+|----------|----------------|
+| Context < 1MB, speed critical | Bare LLM |
+| Context 1-2MB | Either (similar performance) |
+| Context > 2MB | RLM-DSPy (only option) |
+| Accuracy critical | RLM-DSPy (100% vs 89%) |
+| Production system | RLM-DSPy (graceful error handling) |
