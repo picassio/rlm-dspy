@@ -316,37 +316,54 @@ class RLM:
         trace: list[dict[str, Any]],
     ) -> str:
         """Process chunks in parallel (map) then aggregate (reduce)."""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
         chunks = self._chunk_context(context, chunk_size)
         trace.append({"step": "chunk", "num_chunks": len(chunks)})
 
-        # Map: analyze each chunk
-        partial_answers = []
-        for i, chunk in enumerate(chunks):
-            self._check_limits()
+        # Map: analyze each chunk IN PARALLEL
+        partial_answers: list[tuple[int, str, str]] = []  # (index, info, confidence)
+
+        def analyze_chunk(i: int, chunk: str) -> tuple[int, str, str]:
+            """Analyze a single chunk - runs in thread pool."""
             result = self.chunk_analyzer(
                 query=query,
                 chunk=chunk,
                 chunk_index=i,
                 total_chunks=len(chunks),
             )
-            if result.confidence != "none":
-                partial_answers.append(result.relevant_info)
-                trace.append(
-                    {
-                        "step": "analyze_chunk",
-                        "chunk_index": i,
-                        "confidence": result.confidence,
-                    }
-                )
+            return (i, result.relevant_info, result.confidence)
+
+        # Process chunks in parallel with thread pool
+        with ThreadPoolExecutor(max_workers=self.config.parallel_chunks) as executor:
+            futures = {executor.submit(analyze_chunk, i, chunk): i for i, chunk in enumerate(chunks)}
+
+            for future in as_completed(futures):
+                self._check_limits()
+                i, info, confidence = future.result()
+                if confidence != "none":
+                    partial_answers.append((i, info, confidence))
+                    trace.append(
+                        {
+                            "step": "analyze_chunk",
+                            "chunk_index": i,
+                            "confidence": confidence,
+                        }
+                    )
+
+        # Sort by chunk index to maintain order
+        partial_answers.sort(key=lambda x: x[0])
 
         # Reduce: aggregate answers
         if not partial_answers:
             return "No relevant information found in the context."
 
         self._check_limits()
+        # Extract just the info strings from tuples for aggregation
+        answer_texts = [info for _, info, _ in partial_answers]
         aggregated = self.aggregator(
             query=query,
-            partial_answers=partial_answers,
+            partial_answers=answer_texts,
         )
 
         trace.append(
