@@ -31,10 +31,11 @@ class AsyncLLMClient:
     Async client for concurrent LLM requests via OpenRouter.
 
     Uses semaphore to limit concurrent requests and avoid rate limits.
+    Supports prompt caching and thinking mode control.
 
     Example:
         ```python
-        client = AsyncLLMClient(max_concurrent=10)
+        client = AsyncLLMClient(max_concurrent=20, enable_cache=True)
         prompts = ["What is 1+1?", "What is 2+2?", "What is 3+3?"]
         results = await client.batch_complete(prompts)
         ```
@@ -42,17 +43,21 @@ class AsyncLLMClient:
 
     def __init__(
         self,
-        model: str = "anthropic/claude-sonnet-4",
+        model: str = "google/gemini-2.5-flash",
         api_key: str | None = None,
         api_base: str = "https://openrouter.ai/api/v1",
-        max_concurrent: int = 10,
+        max_concurrent: int = 20,
         timeout: float = 120.0,
+        disable_thinking: bool = True,
+        enable_cache: bool = True,
     ):
         self.model = model
         self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
         self.api_base = api_base.rstrip("/")
         self.max_concurrent = max_concurrent
         self.timeout = timeout
+        self.disable_thinking = disable_thinking
+        self.enable_cache = enable_cache
         self._semaphore: asyncio.Semaphore | None = None
 
     async def _ensure_semaphore(self) -> asyncio.Semaphore:
@@ -87,18 +92,35 @@ class AsyncLLMClient:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
-        payload = {
+        payload: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
 
+        # Disable thinking/reasoning for faster responses
+        if self.disable_thinking:
+            # OpenRouter provider preferences to disable extended thinking
+            payload["provider"] = {
+                "allow_fallbacks": True,
+                "require_parameters": False,
+            }
+            # For models that support it, disable reasoning tokens
+            if "gemini" in self.model.lower():
+                payload["reasoning"] = {"effort": "none"}
+            elif "claude" in self.model.lower():
+                payload["thinking"] = {"type": "disabled"}
+
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
             "HTTP-Referer": "https://github.com/rlm-dspy",
         }
+
+        # Enable prompt caching for repeated similar requests
+        if self.enable_cache:
+            headers["X-Use-Prompt-Cache"] = "true"
 
         start = time.perf_counter()
 
@@ -164,8 +186,10 @@ class AsyncLLMClient:
 async def analyze_chunks_async(
     query: str,
     chunks: list[str],
-    model: str = "anthropic/claude-sonnet-4",
-    max_concurrent: int = 10,
+    model: str = "google/gemini-2.5-flash",
+    max_concurrent: int = 20,
+    disable_thinking: bool = True,
+    enable_cache: bool = True,
 ) -> list[dict[str, Any]]:
     """
     Analyze multiple chunks concurrently.
@@ -175,18 +199,27 @@ async def analyze_chunks_async(
         chunks: List of text chunks
         model: Model to use
         max_concurrent: Max concurrent requests
+        disable_thinking: Disable extended thinking for speed
+        enable_cache: Enable prompt caching
 
     Returns:
         List of analysis results with relevant_info and confidence
     """
-    client = AsyncLLMClient(model=model, max_concurrent=max_concurrent)
+    client = AsyncLLMClient(
+        model=model,
+        max_concurrent=max_concurrent,
+        disable_thinking=disable_thinking,
+        enable_cache=enable_cache,
+    )
 
     system = """You are analyzing a chunk of content to answer a query.
-Extract information relevant to the query. Be specific and cite evidence.
+Extract ALL information relevant to the query. Be thorough and specific.
+If the chunk contains relevant information, extract it completely.
+If no relevant information, say "None".
 
-Respond in this exact format:
-RELEVANT_INFO: <information found, or "None" if not relevant>
-CONFIDENCE: <high|medium|low|none>"""
+Your response format:
+CONFIDENCE: high|medium|low|none
+RELEVANT_INFO: <extracted information or "None">"""
 
     prompts = [f"Query: {query}\n\nChunk {i + 1} of {len(chunks)}:\n{chunk}" for i, chunk in enumerate(chunks)]
 
@@ -204,25 +237,40 @@ CONFIDENCE: <high|medium|low|none>"""
                 }
             )
         else:
-            # Parse response
-            content = resp.content
+            # Parse response - robust multi-line parsing
+            content = resp.content.strip()
             info = ""
-            confidence = "none"
+            confidence = "medium"  # Default if not specified
 
-            if "RELEVANT_INFO:" in content:
-                info_line = content.split("RELEVANT_INFO:")[1].split("\n")[0].strip()
-                if info_line.lower() != "none":
-                    info = info_line
-
+            # Parse CONFIDENCE
             if "CONFIDENCE:" in content:
-                conf_line = content.split("CONFIDENCE:")[1].split("\n")[0].strip().lower()
-                if conf_line in ("high", "medium", "low", "none"):
-                    confidence = conf_line
+                conf_part = content.split("CONFIDENCE:")[1]
+                conf_line = conf_part.split("\n")[0].strip().lower()
+                for c in ("high", "medium", "low", "none"):
+                    if c in conf_line:
+                        confidence = c
+                        break
+
+            # Parse RELEVANT_INFO (can be multi-line)
+            if "RELEVANT_INFO:" in content:
+                info_part = content.split("RELEVANT_INFO:")[1].strip()
+                if info_part.lower().startswith("none"):
+                    info = ""
+                    confidence = "none"
+                else:
+                    info = info_part
+            else:
+                # No structured format - use full content if not "none"
+                lower = content.lower()
+                if any(x in lower for x in ["no relevant", "not relevant", "none found"]):
+                    confidence = "none"
+                else:
+                    info = content
 
             results.append(
                 {
                     "index": i,
-                    "relevant_info": info or content,  # Fallback to full content
+                    "relevant_info": info,
                     "confidence": confidence,
                     "latency_ms": resp.latency_ms,
                     "usage": resp.usage,
@@ -235,7 +283,9 @@ CONFIDENCE: <high|medium|low|none>"""
 async def aggregate_answers_async(
     query: str,
     partial_answers: list[str],
-    model: str = "anthropic/claude-sonnet-4",
+    model: str = "google/gemini-2.5-flash",
+    disable_thinking: bool = True,
+    enable_cache: bool = True,
 ) -> str:
     """
     Aggregate partial answers into final answer.
@@ -243,11 +293,18 @@ async def aggregate_answers_async(
     Args:
         query: Original query
         partial_answers: List of partial answers from chunks
+        model: Model to use
+        disable_thinking: Disable extended thinking for speed
+        enable_cache: Enable prompt caching
 
     Returns:
         Final aggregated answer
     """
-    client = AsyncLLMClient(model=model)
+    client = AsyncLLMClient(
+        model=model,
+        disable_thinking=disable_thinking,
+        enable_cache=enable_cache,
+    )
 
     system = """You are synthesizing multiple partial answers into a comprehensive final answer.
 Combine the information coherently, remove redundancy, and provide a complete response."""

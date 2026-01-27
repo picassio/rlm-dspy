@@ -17,9 +17,9 @@ from .signatures import AggregateAnswers, AnalyzeChunk, DecomposeTask
 class RLMConfig:
     """Configuration for RLM execution."""
 
-    # Model settings
-    model: str = "openrouter/anthropic/claude-sonnet-4"
-    sub_model: str = "openrouter/anthropic/claude-sonnet-4"  # For sub-queries
+    # Model settings - Gemini Flash is fast and cheap
+    model: str = "google/gemini-2.5-flash"
+    sub_model: str = "google/gemini-2.5-flash"  # For sub-queries
     api_base: str | None = None
     api_key: str | None = None
 
@@ -36,8 +36,12 @@ class RLMConfig:
 
     # Processing settings
     strategy: Literal["auto", "map_reduce", "iterative", "hierarchical"] = "auto"
-    parallel_chunks: int = 10  # Max parallel chunk processing
+    parallel_chunks: int = 20  # Max parallel chunk processing (increased)
     use_async: bool = True  # Use async HTTP client (faster than DSPy)
+
+    # Model-specific settings
+    disable_thinking: bool = True  # Disable extended thinking for speed
+    enable_cache: bool = True  # Enable prompt caching for repeated queries
 
     # DSPy optimization
     use_compiled_prompts: bool = True
@@ -350,6 +354,8 @@ class RLM:
                     chunks=chunks,
                     model=model,
                     max_concurrent=self.config.parallel_chunks,
+                    disable_thinking=self.config.disable_thinking,
+                    enable_cache=self.config.enable_cache,
                 )
             )
 
@@ -371,7 +377,15 @@ class RLM:
                 return "No relevant information found in the context."
 
             # Aggregate
-            final_answer = loop.run_until_complete(aggregate_answers_async(query, partial_answers, model))
+            final_answer = loop.run_until_complete(
+                aggregate_answers_async(
+                    query,
+                    partial_answers,
+                    model,
+                    disable_thinking=self.config.disable_thinking,
+                    enable_cache=self.config.enable_cache,
+                )
+            )
 
             trace.append(
                 {
