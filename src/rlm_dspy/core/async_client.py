@@ -152,40 +152,61 @@ class AsyncLLMClient:
         start = time.perf_counter()
 
         async with semaphore:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            # Retry with exponential backoff for transient errors
+            last_error: str | None = None
+
+            for attempt in range(3):  # Max 3 attempts
                 try:
-                    response = await client.post(
-                        f"{self.api_base}/chat/completions",
-                        json=payload,
-                        headers=headers,
-                    )
-                    response.raise_for_status()
-                    data = response.json()
+                    async with httpx.AsyncClient(timeout=self.timeout) as client:
+                        response = await client.post(
+                            f"{self.api_base}/chat/completions",
+                            json=payload,
+                            headers=headers,
+                        )
+                        response.raise_for_status()
+                        data = response.json()
 
-                    latency = (time.perf_counter() - start) * 1000
+                        latency = (time.perf_counter() - start) * 1000
 
-                    return AsyncResponse(
-                        content=data["choices"][0]["message"]["content"],
-                        model=data.get("model", self.model),
-                        usage=data.get("usage", {}),
-                        latency_ms=latency,
-                    )
+                        return AsyncResponse(
+                            content=data["choices"][0]["message"]["content"],
+                            model=data.get("model", self.model),
+                            usage=data.get("usage", {}),
+                            latency_ms=latency,
+                        )
                 except httpx.HTTPStatusError as e:
-                    return AsyncResponse(
-                        content="",
-                        model=self.model,
-                        usage={},
-                        latency_ms=(time.perf_counter() - start) * 1000,
-                        error=f"HTTP {e.response.status_code}: {e.response.text[:200]}",
-                    )
+                    # Don't retry 4xx errors (client errors)
+                    if 400 <= e.response.status_code < 500:
+                        return AsyncResponse(
+                            content="",
+                            model=self.model,
+                            usage={},
+                            latency_ms=(time.perf_counter() - start) * 1000,
+                            error=f"HTTP {e.response.status_code}: {e.response.text[:200]}",
+                        )
+                    # Retry 5xx errors
+                    last_error = f"HTTP {e.response.status_code}: {e.response.text[:100]}"
+                except (httpx.ConnectError, httpx.TimeoutException) as e:
+                    # Retry network errors
+                    last_error = str(e)
                 except Exception as e:
-                    return AsyncResponse(
-                        content="",
-                        model=self.model,
-                        usage={},
-                        latency_ms=(time.perf_counter() - start) * 1000,
-                        error=str(e),
-                    )
+                    last_error = str(e)
+
+                # Exponential backoff with jitter before retry
+                if attempt < 2:
+                    import random
+
+                    delay = (2**attempt) + random.random() * 2
+                    await asyncio.sleep(delay)
+
+            # All retries failed
+            return AsyncResponse(
+                content="",
+                model=self.model,
+                usage={},
+                latency_ms=(time.perf_counter() - start) * 1000,
+                error=last_error or "Unknown error after retries",
+            )
 
     async def batch_complete(
         self,
