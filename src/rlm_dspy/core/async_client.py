@@ -43,7 +43,7 @@ class AsyncLLMClient:
 
     def __init__(
         self,
-        model: str = "google/gemini-2.5-flash",
+        model: str = "google/gemini-3-flash-preview",
         api_key: str | None = None,
         api_base: str = "https://openrouter.ai/api/v1",
         max_concurrent: int = 20,
@@ -186,7 +186,7 @@ class AsyncLLMClient:
 async def analyze_chunks_async(
     query: str,
     chunks: list[str],
-    model: str = "google/gemini-2.5-flash",
+    model: str = "google/gemini-3-flash-preview",
     max_concurrent: int = 20,
     disable_thinking: bool = True,
     enable_cache: bool = True,
@@ -283,7 +283,7 @@ RELEVANT_INFO: <extracted information or "None">"""
 async def aggregate_answers_async(
     query: str,
     partial_answers: list[str],
-    model: str = "google/gemini-2.5-flash",
+    model: str = "google/gemini-3-flash-preview",
     disable_thinking: bool = True,
     enable_cache: bool = True,
 ) -> str:

@@ -17,9 +17,10 @@ from .signatures import AggregateAnswers, AnalyzeChunk, DecomposeTask
 class RLMConfig:
     """Configuration for RLM execution."""
 
-    # Model settings - Gemini Flash is fast and cheap
-    model: str = "google/gemini-2.5-flash"
-    sub_model: str = "google/gemini-2.5-flash"  # For sub-queries
+    # Model settings - Gemini 3 Flash is fastest and high quality
+    # Use openrouter/ prefix for DSPy compatibility
+    model: str = "openrouter/google/gemini-3-flash-preview"
+    sub_model: str = "openrouter/google/gemini-3-flash-preview"  # For sub-queries
     api_base: str | None = None
     api_key: str | None = None
 
