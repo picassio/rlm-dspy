@@ -277,23 +277,39 @@ When should you use RLM vs direct LLM calls?
 - Simple queries
 - Speed is critical
 
-### Accuracy Test: Needle in Haystack
+### Complete Comparison Table
 
-Can the model find specific information buried in large contexts?
+| Context | Method | Time | Accuracy | Hallucination | Max Size |
+|---------|--------|------|----------|---------------|----------|
+| 8-256KB | Bare LLM | 3-5s | ✅ 100% | None | ~2MB |
+| | RLM-DSPy | 14-30s | ✅ 100% | None | **Unlimited** |
+| 500KB-2MB | Bare LLM | 3-13s | ✅ 100% | None | ~2MB |
+| | RLM-DSPy | 13-32s | ✅ 100% | None | **Unlimited** |
+| **5MB+** | Bare LLM | ❌ FAILS | ❌ | N/A | **Exceeded** |
+| | RLM-DSPy | 25-50s | ✅ 100% | None | **Works!** |
 
-| Context Size | Bare LLM | RLM-DSPy | Notes |
-|--------------|----------|----------|-------|
-| 100KB | ✅ CORRECT | ✅ CORRECT | Both find needle |
-| 500KB | ✅ CORRECT | ✅ CORRECT | Both find needle |
-| 1MB | ✅ CORRECT | ✅ CORRECT | Both find needle |
-| 2MB | ✅ CORRECT | ✅ CORRECT | Both find needle |
-| **5MB** | ❌ ERROR | ✅ CORRECT | **Bare LLM fails!** |
+### Summary
 
-**Results:**
-- **Bare LLM:** 80% accuracy (12/15) - fails when context exceeds model window
-- **RLM-DSPy:** 100% accuracy (15/15) - handles arbitrarily large contexts
+| Metric | Bare LLM | RLM-DSPy |
+|--------|----------|----------|
+| **Speed** (small) | ⚡ 4x faster | Slower |
+| **Speed** (large) | ❌ Fails | ✅ Works |
+| **Accuracy** | 80% (12/15) | **100%** (15/15) |
+| **Hallucination** | 0% | 0% |
+| **Max Context** | ~2MB | **Unlimited** |
 
-**Key insight:** RLM-DSPy's chunking approach allows processing contexts **far beyond model limits** while maintaining accuracy. No hallucination observed in either approach within their limits.
+### Key Insights
+
+1. **No hallucination** - Both methods are reliable within their limits
+2. **RLM wins at scale** - Only option for >2MB contexts
+3. **Bare LLM wins at speed** - 4-6x faster for small contexts
+4. **Choose based on size:**
+   ```
+   context < 2MB + speed critical → Bare LLM
+   context > 2MB OR accuracy critical → RLM-DSPy
+   ```
+
+See [benchmarks/RESULTS.md](benchmarks/RESULTS.md) for detailed results.
 
 ### Cost Comparison
 
