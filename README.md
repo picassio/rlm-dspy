@@ -252,12 +252,30 @@ Tested on 45K character codebase with query "List all DSPy signatures and their 
 | Gemini 2.5 Flash (async) | 27.4s | 3.7x |
 | **Gemini 3 Flash (async)** | **25.4s** | **4x** |
 
-Small context (4K chars):
+### Bare LLM vs RLM-DSPy
 
-| Model | Time |
-|-------|------|
-| Gemini 2.5 Flash | 15.5s |
-| **Gemini 3 Flash** | **7.7s** |
+When should you use RLM vs direct LLM calls?
+
+| Context Size | Bare LLM | RLM-DSPy | Winner |
+|--------------|----------|----------|--------|
+| 8KB | 4.6s | 14.5s | Bare LLM |
+| 32KB | 3.4s | 14.7s | Bare LLM |
+| 128KB | 4.2s | 30.0s | Bare LLM |
+| 256KB | 4.6s | 15.9s | Bare LLM |
+
+**Key insight:** With models that have large context windows (Gemini 3 Flash = 1M tokens), bare LLM calls are faster for most use cases.
+
+**Use RLM-DSPy when:**
+- Context exceeds model's context window
+- Using cheaper/smaller models for chunk analysis
+- Need structured multi-pass reasoning
+- Want typed DSPy signatures for reliability
+- Processing very large codebases (500K+ chars)
+
+**Use Bare LLM when:**
+- Context fits in model's window
+- Simple queries
+- Speed is critical
 
 ### Cost Comparison
 
