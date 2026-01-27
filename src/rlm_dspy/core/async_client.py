@@ -33,7 +33,13 @@ def _env(key: str, default: str) -> str:
 
 def _env_int(key: str, default: int) -> int:
     """Get environment variable as int."""
-    return int(os.environ.get(key, str(default)))
+    val = os.environ.get(key)
+    if val is None:
+        return default
+    try:
+        return int(val)
+    except ValueError:
+        return default
 
 
 def _env_bool(key: str, default: bool) -> bool:

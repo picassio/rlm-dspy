@@ -21,12 +21,24 @@ def _env(key: str, default: str) -> str:
 
 def _env_int(key: str, default: int) -> int:
     """Get environment variable as int with default."""
-    return int(os.environ.get(key, str(default)))
+    val = os.environ.get(key)
+    if val is None:
+        return default
+    try:
+        return int(val)
+    except ValueError:
+        return default
 
 
 def _env_float(key: str, default: float) -> float:
     """Get environment variable as float with default."""
-    return float(os.environ.get(key, str(default)))
+    val = os.environ.get(key)
+    if val is None:
+        return default
+    try:
+        return float(val)
+    except ValueError:
+        return default
 
 
 def _env_bool(key: str, default: bool) -> bool:
@@ -351,13 +363,20 @@ class RLM:
 
     def _chunk_context(self, context: str, chunk_size: int) -> list[str]:
         """Split context into overlapping chunks."""
+        # Ensure chunk_size is larger than overlap to prevent infinite loops
+        overlap = min(self.config.overlap, chunk_size - 1) if chunk_size > 1 else 0
+        if chunk_size <= 0:
+            chunk_size = self.config.default_chunk_size
+        
         chunks = []
         start = 0
         while start < len(context):
             end = min(start + chunk_size, len(context))
             chunks.append(context[start:end])
-            start = end - self.config.overlap
-            if start >= len(context) - self.config.overlap:
+            # Move forward by at least 1 character to prevent infinite loop
+            step = max(1, chunk_size - overlap)
+            start += step
+            if end >= len(context):
                 break
         return chunks
 
