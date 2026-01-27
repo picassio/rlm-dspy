@@ -1,6 +1,32 @@
 """Core RLM-DSPy modules."""
 
 from .async_client import AsyncLLMClient, aggregate_answers_async, analyze_chunks_async
+from .batch import (
+    BATCH_DIR,
+    BatchPoller,
+    BatchRequest,
+    BatchStatus,
+    cleanup_batch_files,
+    create_jsonl,
+    parse_jsonl,
+    sort_results_by_custom_id,
+    stream_download,
+)
+from .batch import (
+    BatchResult as BatchJobResult,
+)
+from .fileutils import (
+    atomic_write,
+    ensure_dir,
+    get_cache_dir,
+    is_linux,
+    is_macos,
+    is_windows,
+    path_to_module,
+    smart_link,
+    smart_rmtree,
+    sync_directory,
+)
 from .observability import (
     OperationMetrics,
     Span,
@@ -90,4 +116,26 @@ __all__ = [
     "builtin_strategy",
     "builtin_processor",
     "load_class",
+    # Batch processing (from modaic patterns)
+    "BatchRequest",
+    "BatchJobResult",
+    "BatchStatus",
+    "BatchPoller",
+    "BATCH_DIR",
+    "create_jsonl",
+    "parse_jsonl",
+    "stream_download",
+    "sort_results_by_custom_id",
+    "cleanup_batch_files",
+    # File utilities (from modaic patterns)
+    "is_windows",
+    "is_macos",
+    "is_linux",
+    "get_cache_dir",
+    "smart_link",
+    "smart_rmtree",
+    "sync_directory",
+    "path_to_module",
+    "ensure_dir",
+    "atomic_write",
 ]
