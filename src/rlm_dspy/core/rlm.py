@@ -35,6 +35,25 @@ def _env_bool(key: str, default: bool) -> bool:
     return val in ("true", "1", "yes", "on")
 
 
+def _normalize_model(model: str) -> str:
+    """Normalize model name for DSPy compatibility.
+    
+    DSPy requires provider prefix (e.g., openrouter/) for LiteLLM routing.
+    Auto-adds 'openrouter/' prefix when using OpenRouter API.
+    """
+    api_base = _env("RLM_API_BASE", "https://openrouter.ai/api/v1")
+    
+    # Already has a provider prefix
+    if "/" in model and model.split("/")[0] in ("openrouter", "openai", "anthropic", "together"):
+        return model
+    
+    # Using OpenRouter API - add prefix
+    if "openrouter" in api_base.lower():
+        return f"openrouter/{model}"
+    
+    return model
+
+
 @dataclass
 class RLMConfig:
     """Configuration for RLM execution.
@@ -52,9 +71,9 @@ class RLMConfig:
     """
 
     # Model settings - all from environment
-    model: str = field(default_factory=lambda: _env("RLM_MODEL", "openrouter/google/gemini-3-flash-preview"))
+    model: str = field(default_factory=lambda: _normalize_model(_env("RLM_MODEL", "google/gemini-3-flash-preview")))
     sub_model: str = field(
-        default_factory=lambda: _env("RLM_SUB_MODEL", _env("RLM_MODEL", "openrouter/google/gemini-3-flash-preview"))
+        default_factory=lambda: _normalize_model(_env("RLM_SUB_MODEL", _env("RLM_MODEL", "google/gemini-3-flash-preview")))
     )
     api_base: str = field(default_factory=lambda: _env("RLM_API_BASE", "https://openrouter.ai/api/v1"))
     api_key: str | None = field(
