@@ -36,7 +36,8 @@ class RLMConfig:
 
     # Processing settings
     strategy: Literal["auto", "map_reduce", "iterative", "hierarchical"] = "auto"
-    parallel_chunks: int = 5  # Max parallel chunk processing
+    parallel_chunks: int = 10  # Max parallel chunk processing
+    use_async: bool = True  # Use async HTTP client (faster than DSPy)
 
     # DSPy optimization
     use_compiled_prompts: bool = True
@@ -316,10 +317,81 @@ class RLM:
         trace: list[dict[str, Any]],
     ) -> str:
         """Process chunks in parallel (map) then aggregate (reduce)."""
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-
         chunks = self._chunk_context(context, chunk_size)
         trace.append({"step": "chunk", "num_chunks": len(chunks)})
+
+        # Use async client for faster processing
+        if self.config.use_async:
+            return self._process_map_reduce_async(query, chunks, trace)
+
+        # Fallback to thread pool with DSPy
+        return self._process_map_reduce_threads(query, chunks, trace)
+
+    def _process_map_reduce_async(
+        self,
+        query: str,
+        chunks: list[str],
+        trace: list[dict[str, Any]],
+    ) -> str:
+        """Process using async HTTP client - fastest method."""
+        from .async_client import aggregate_answers_async, analyze_chunks_async
+
+        # Get model name without openrouter/ prefix for direct API
+        model = self.config.model
+        if model.startswith("openrouter/"):
+            model = model[len("openrouter/") :]
+
+        # Run async analysis
+        loop = asyncio.new_event_loop()
+        try:
+            results = loop.run_until_complete(
+                analyze_chunks_async(
+                    query=query,
+                    chunks=chunks,
+                    model=model,
+                    max_concurrent=self.config.parallel_chunks,
+                )
+            )
+
+            # Collect partial answers
+            partial_answers = []
+            for r in results:
+                if r["confidence"] != "none" and r["relevant_info"]:
+                    partial_answers.append(r["relevant_info"])
+                    trace.append(
+                        {
+                            "step": "analyze_chunk",
+                            "chunk_index": r["index"],
+                            "confidence": r["confidence"],
+                            "latency_ms": r.get("latency_ms", 0),
+                        }
+                    )
+
+            if not partial_answers:
+                return "No relevant information found in the context."
+
+            # Aggregate
+            final_answer = loop.run_until_complete(aggregate_answers_async(query, partial_answers, model))
+
+            trace.append(
+                {
+                    "step": "aggregate",
+                    "num_partial_answers": len(partial_answers),
+                }
+            )
+
+            return final_answer
+        finally:
+            loop.close()
+
+    def _process_map_reduce_threads(
+        self,
+        query: str,
+        chunks: list[str],
+        trace: list[dict[str, Any]],
+    ) -> str:
+        """Process using thread pool with DSPy - fallback method."""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
         # Map: analyze each chunk IN PARALLEL
         partial_answers: list[tuple[int, str, str]] = []  # (index, info, confidence)
