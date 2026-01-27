@@ -99,14 +99,34 @@ result = processor(
 
 ### Environment Variables
 
+All settings are configurable via environment variables:
+
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `RLM_MODEL` | `google/gemini-3-flash-preview` | Model to use |
-| `OPENROUTER_API_KEY` | - | OpenRouter API key (required) |
+| `RLM_MODEL` | `openrouter/google/gemini-3-flash-preview` | Model to use |
+| `RLM_SUB_MODEL` | (same as RLM_MODEL) | Model for sub-queries |
+| `RLM_API_BASE` | `https://openrouter.ai/api/v1` | API endpoint |
+| `RLM_API_KEY` | - | API key (or use `OPENROUTER_API_KEY`) |
+| `OPENROUTER_API_KEY` | - | OpenRouter API key (fallback) |
 | `RLM_MAX_BUDGET` | `1.0` | Maximum cost in USD |
 | `RLM_MAX_TIMEOUT` | `300` | Maximum time in seconds |
-| `RLM_CHUNK_SIZE` | `100000` | Default chunk size |
+| `RLM_MAX_TOKENS` | `500000` | Maximum tokens |
+| `RLM_CHUNK_SIZE` | `100000` | Default chunk size (chars) |
+| `RLM_OVERLAP` | `500` | Chunk overlap (chars) |
 | `RLM_PARALLEL_CHUNKS` | `20` | Max concurrent chunk processing |
+| `RLM_DISABLE_THINKING` | `true` | Disable extended thinking |
+| `RLM_ENABLE_CACHE` | `true` | Enable prompt caching |
+| `RLM_USE_ASYNC` | `true` | Use async HTTP client |
+
+Example `.env` file:
+```bash
+RLM_API_KEY=sk-or-v1-xxx
+RLM_MODEL=openrouter/google/gemini-3-flash-preview
+RLM_API_BASE=https://openrouter.ai/api/v1
+RLM_PARALLEL_CHUNKS=20
+RLM_DISABLE_THINKING=true
+RLM_ENABLE_CACHE=true
+```
 
 ### Programmatic Configuration
 

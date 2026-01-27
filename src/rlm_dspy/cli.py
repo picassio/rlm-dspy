@@ -6,7 +6,6 @@ Provides a command-line interface for recursive language model queries.
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 from typing import Annotated, Optional
@@ -35,16 +34,33 @@ def _get_config(
     chunk_size: int | None = None,
     strategy: str | None = None,
 ) -> RLMConfig:
-    """Build config from CLI args and environment."""
-    return RLMConfig(
-        model=model or os.getenv("RLM_MODEL", "openrouter/anthropic/claude-sonnet-4"),
-        api_key=os.getenv("OPENROUTER_API_KEY") or os.getenv("ANTHROPIC_API_KEY"),
-        api_base=os.getenv("RLM_API_BASE"),
-        max_budget=budget or float(os.getenv("RLM_MAX_BUDGET", "1.0")),
-        max_timeout=timeout or float(os.getenv("RLM_MAX_TIMEOUT", "300")),
-        default_chunk_size=chunk_size or int(os.getenv("RLM_CHUNK_SIZE", "100000")),
-        strategy=strategy or "auto",  # type: ignore
-    )
+    """Build config from CLI args and environment.
+
+    Environment variables (all optional):
+    - RLM_MODEL: Model name (default: openrouter/google/gemini-3-flash-preview)
+    - RLM_API_BASE: API endpoint (default: https://openrouter.ai/api/v1)
+    - RLM_API_KEY or OPENROUTER_API_KEY: API key
+    - RLM_MAX_BUDGET: Max cost in USD
+    - RLM_MAX_TIMEOUT: Max time in seconds
+    - RLM_CHUNK_SIZE: Chunk size in chars
+    - RLM_PARALLEL_CHUNKS: Max concurrent chunks
+    """
+    # RLMConfig reads from env by default, only override if CLI args provided
+    config = RLMConfig()
+
+    if model:
+        config.model = model
+        config.sub_model = model
+    if budget:
+        config.max_budget = budget
+    if timeout:
+        config.max_timeout = timeout
+    if chunk_size:
+        config.default_chunk_size = chunk_size
+    if strategy:
+        config.strategy = strategy  # type: ignore
+
+    return config
 
 
 @app.command()
@@ -379,20 +395,31 @@ def config(
         table = Table(title="RLM-DSPy Configuration")
         table.add_column("Setting", style="cyan")
         table.add_column("Value", style="green")
-        table.add_column("Source", style="dim")
+        table.add_column("Env Var", style="dim")
+
+        # Get actual config values
+        cfg = RLMConfig()
+
+        api_key_status = "***" if cfg.api_key else "[red](not set)[/red]"
 
         settings = [
-            ("Model", os.getenv("RLM_MODEL", "openrouter/anthropic/claude-sonnet-4"), "env/default"),
-            ("API Key", "***" if os.getenv("OPENROUTER_API_KEY") else "(not set)", "env"),
-            ("Max Budget", os.getenv("RLM_MAX_BUDGET", "$1.00"), "env/default"),
-            ("Max Timeout", os.getenv("RLM_MAX_TIMEOUT", "300s"), "env/default"),
-            ("Chunk Size", os.getenv("RLM_CHUNK_SIZE", "100000"), "env/default"),
+            ("Model", cfg.model, "RLM_MODEL"),
+            ("API Base", cfg.api_base, "RLM_API_BASE"),
+            ("API Key", api_key_status, "RLM_API_KEY / OPENROUTER_API_KEY"),
+            ("Max Budget", f"${cfg.max_budget:.2f}", "RLM_MAX_BUDGET"),
+            ("Max Timeout", f"{cfg.max_timeout:.0f}s", "RLM_MAX_TIMEOUT"),
+            ("Chunk Size", f"{cfg.default_chunk_size:,}", "RLM_CHUNK_SIZE"),
+            ("Parallel Chunks", str(cfg.parallel_chunks), "RLM_PARALLEL_CHUNKS"),
+            ("Disable Thinking", str(cfg.disable_thinking), "RLM_DISABLE_THINKING"),
+            ("Enable Cache", str(cfg.enable_cache), "RLM_ENABLE_CACHE"),
+            ("Use Async", str(cfg.use_async), "RLM_USE_ASYNC"),
         ]
 
-        for name, value, source in settings:
-            table.add_row(name, str(value), source)
+        for name, value, env_var in settings:
+            table.add_row(name, str(value), env_var)
 
         console.print(table)
+        console.print("\n[dim]Set environment variables to override defaults.[/dim]")
 
 
 def _print_stats(result: RLMResult) -> None:

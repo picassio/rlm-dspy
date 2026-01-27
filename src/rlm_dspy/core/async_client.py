@@ -26,12 +26,36 @@ class AsyncResponse:
     error: str | None = None
 
 
+def _env(key: str, default: str) -> str:
+    """Get environment variable with default."""
+    return os.environ.get(key, default)
+
+
+def _env_int(key: str, default: int) -> int:
+    """Get environment variable as int."""
+    return int(os.environ.get(key, str(default)))
+
+
+def _env_bool(key: str, default: bool) -> bool:
+    """Get environment variable as bool."""
+    val = os.environ.get(key, str(default)).lower()
+    return val in ("true", "1", "yes", "on")
+
+
 class AsyncLLMClient:
     """
     Async client for concurrent LLM requests via OpenRouter.
 
     Uses semaphore to limit concurrent requests and avoid rate limits.
     Supports prompt caching and thinking mode control.
+
+    All settings can be overridden via environment variables:
+    - RLM_MODEL: Model name
+    - RLM_API_BASE: API endpoint
+    - RLM_API_KEY or OPENROUTER_API_KEY: API key
+    - RLM_PARALLEL_CHUNKS: Max concurrent requests
+    - RLM_DISABLE_THINKING: Disable extended thinking
+    - RLM_ENABLE_CACHE: Enable prompt caching
 
     Example:
         ```python
@@ -43,21 +67,24 @@ class AsyncLLMClient:
 
     def __init__(
         self,
-        model: str = "google/gemini-3-flash-preview",
+        model: str | None = None,
         api_key: str | None = None,
-        api_base: str = "https://openrouter.ai/api/v1",
-        max_concurrent: int = 20,
+        api_base: str | None = None,
+        max_concurrent: int | None = None,
         timeout: float = 120.0,
-        disable_thinking: bool = True,
-        enable_cache: bool = True,
+        disable_thinking: bool | None = None,
+        enable_cache: bool | None = None,
     ):
-        self.model = model
-        self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
-        self.api_base = api_base.rstrip("/")
-        self.max_concurrent = max_concurrent
+        # All settings from env with fallbacks
+        self.model = model or _env("RLM_MODEL", "google/gemini-3-flash-preview")
+        self.api_key = api_key or os.getenv("RLM_API_KEY") or os.getenv("OPENROUTER_API_KEY")
+        self.api_base = (api_base or _env("RLM_API_BASE", "https://openrouter.ai/api/v1")).rstrip("/")
+        self.max_concurrent = max_concurrent if max_concurrent is not None else _env_int("RLM_PARALLEL_CHUNKS", 20)
         self.timeout = timeout
-        self.disable_thinking = disable_thinking
-        self.enable_cache = enable_cache
+        self.disable_thinking = (
+            disable_thinking if disable_thinking is not None else _env_bool("RLM_DISABLE_THINKING", True)
+        )
+        self.enable_cache = enable_cache if enable_cache is not None else _env_bool("RLM_ENABLE_CACHE", True)
         self._semaphore: asyncio.Semaphore | None = None
 
     async def _ensure_semaphore(self) -> asyncio.Semaphore:

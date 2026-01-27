@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,39 +14,75 @@ import dspy
 from .signatures import AggregateAnswers, AnalyzeChunk, DecomposeTask
 
 
+def _env(key: str, default: str) -> str:
+    """Get environment variable with default."""
+    return os.environ.get(key, default)
+
+
+def _env_int(key: str, default: int) -> int:
+    """Get environment variable as int with default."""
+    return int(os.environ.get(key, str(default)))
+
+
+def _env_float(key: str, default: float) -> float:
+    """Get environment variable as float with default."""
+    return float(os.environ.get(key, str(default)))
+
+
+def _env_bool(key: str, default: bool) -> bool:
+    """Get environment variable as bool with default."""
+    val = os.environ.get(key, str(default)).lower()
+    return val in ("true", "1", "yes", "on")
+
+
 @dataclass
 class RLMConfig:
-    """Configuration for RLM execution."""
+    """Configuration for RLM execution.
 
-    # Model settings - Gemini 3 Flash is fastest and high quality
-    # Use openrouter/ prefix for DSPy compatibility
-    model: str = "openrouter/google/gemini-3-flash-preview"
-    sub_model: str = "openrouter/google/gemini-3-flash-preview"  # For sub-queries
-    api_base: str | None = None
-    api_key: str | None = None
+    All settings can be overridden via environment variables:
+    - RLM_MODEL: Model name (default: google/gemini-3-flash-preview)
+    - RLM_API_BASE: API endpoint (default: https://openrouter.ai/api/v1)
+    - RLM_API_KEY or OPENROUTER_API_KEY: API key
+    - RLM_MAX_BUDGET: Max cost in USD (default: 1.0)
+    - RLM_MAX_TIMEOUT: Max time in seconds (default: 300)
+    - RLM_CHUNK_SIZE: Chunk size in chars (default: 100000)
+    - RLM_PARALLEL_CHUNKS: Max concurrent chunks (default: 20)
+    - RLM_DISABLE_THINKING: Disable extended thinking (default: true)
+    - RLM_ENABLE_CACHE: Enable prompt caching (default: true)
+    """
+
+    # Model settings - all from environment
+    model: str = field(default_factory=lambda: _env("RLM_MODEL", "openrouter/google/gemini-3-flash-preview"))
+    sub_model: str = field(
+        default_factory=lambda: _env("RLM_SUB_MODEL", _env("RLM_MODEL", "openrouter/google/gemini-3-flash-preview"))
+    )
+    api_base: str = field(default_factory=lambda: _env("RLM_API_BASE", "https://openrouter.ai/api/v1"))
+    api_key: str | None = field(
+        default_factory=lambda: os.environ.get("RLM_API_KEY") or os.environ.get("OPENROUTER_API_KEY")
+    )
 
     # Execution limits
-    max_budget: float = 1.0  # Maximum cost in USD
-    max_timeout: float = 300.0  # Maximum time in seconds
-    max_tokens: int = 500_000  # Maximum tokens
-    max_iterations: int = 30  # Maximum REPL iterations
-    max_depth: int = 3  # Maximum recursion depth
+    max_budget: float = field(default_factory=lambda: _env_float("RLM_MAX_BUDGET", 1.0))
+    max_timeout: float = field(default_factory=lambda: _env_float("RLM_MAX_TIMEOUT", 300.0))
+    max_tokens: int = field(default_factory=lambda: _env_int("RLM_MAX_TOKENS", 500_000))
+    max_iterations: int = field(default_factory=lambda: _env_int("RLM_MAX_ITERATIONS", 30))
+    max_depth: int = field(default_factory=lambda: _env_int("RLM_MAX_DEPTH", 3))
 
     # Chunking settings
-    default_chunk_size: int = 100_000  # Characters per chunk
-    overlap: int = 500  # Character overlap between chunks
+    default_chunk_size: int = field(default_factory=lambda: _env_int("RLM_CHUNK_SIZE", 100_000))
+    overlap: int = field(default_factory=lambda: _env_int("RLM_OVERLAP", 500))
 
     # Processing settings
     strategy: Literal["auto", "map_reduce", "iterative", "hierarchical"] = "auto"
-    parallel_chunks: int = 20  # Max parallel chunk processing (increased)
-    use_async: bool = True  # Use async HTTP client (faster than DSPy)
+    parallel_chunks: int = field(default_factory=lambda: _env_int("RLM_PARALLEL_CHUNKS", 20))
+    use_async: bool = field(default_factory=lambda: _env_bool("RLM_USE_ASYNC", True))
 
     # Model-specific settings
-    disable_thinking: bool = True  # Disable extended thinking for speed
-    enable_cache: bool = True  # Enable prompt caching for repeated queries
+    disable_thinking: bool = field(default_factory=lambda: _env_bool("RLM_DISABLE_THINKING", True))
+    enable_cache: bool = field(default_factory=lambda: _env_bool("RLM_ENABLE_CACHE", True))
 
     # DSPy optimization
-    use_compiled_prompts: bool = True
+    use_compiled_prompts: bool = field(default_factory=lambda: _env_bool("RLM_USE_COMPILED_PROMPTS", True))
     prompt_cache_dir: Path | None = None
 
 
