@@ -179,6 +179,12 @@ def ask(
             console.print("[red]Error: No input received from stdin[/red]")
             raise typer.Exit(1)
     elif paths:
+        # Check if paths exist first
+        missing = [p for p in paths if not p.exists()]
+        if missing:
+            for p in missing:
+                console.print(f"[yellow]Warning: Path not found: {p}[/yellow]")
+
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -187,6 +193,10 @@ def ask(
         ) as progress:
             progress.add_task("Loading files...", total=None)
             context = rlm.load_context([str(p) for p in paths])
+
+        if not context.strip():
+            console.print("[red]Error: No content loaded from provided paths[/red]")
+            raise typer.Exit(1)
     else:
         console.print("[red]Error: Provide paths or use --stdin[/red]")
         raise typer.Exit(1)
