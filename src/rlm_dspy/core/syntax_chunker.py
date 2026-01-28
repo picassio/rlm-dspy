@@ -241,11 +241,6 @@ def _parse_code(content: str, language: str) -> ParseResult:
     )
 
 
-def _find_boundaries(content: str, language: str) -> list[tuple[int, int, str, str | None]]:
-    """Find syntax boundaries (start_byte, end_byte, node_type, name)."""
-    return _parse_code(content, language).boundaries
-
-
 def extract_imports(content: str, language: str | None = None) -> str:
     """Extract import/include statements from code.
 

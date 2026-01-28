@@ -10,7 +10,6 @@ import dspy
 from .signatures import (
     AggregateAnswers,
     AnalyzeChunk,
-    SummarizeSection,
     ValidateAnswer,
 )
 
@@ -30,7 +29,6 @@ class RecursiveAnalyzer(dspy.Module):
         self.max_depth = max_depth
         self.analyzer = dspy.ChainOfThought(AnalyzeChunk)
         self.aggregator = dspy.ChainOfThought(AggregateAnswers)
-        self.summarizer = dspy.ChainOfThought(SummarizeSection)
 
     def forward(
         self,

@@ -474,8 +474,9 @@ class SalsaDB:
             }
 
             save_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(save_path, "w") as f:
-                json.dump(state, f, indent=2)
+            # Use atomic write to prevent corruption on crash
+            from .fileutils import atomic_write
+            atomic_write(save_path, json.dumps(state, indent=2))
 
             logger.info(f"Saved SalsaDB state to {save_path}")
 
