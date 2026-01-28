@@ -63,6 +63,23 @@ BOUNDARY_NODES = {
     "lua": {"function_definition_statement", "local_function_definition_statement"},
 }
 
+# Import/include node types (by language)
+IMPORT_NODES = {
+    "python": {"import_statement", "import_from_statement"},
+    "typescript": {"import_statement", "import_clause"},
+    "javascript": {"import_statement"},
+    "go": {"import_declaration", "import_spec"},
+    "rust": {"use_declaration", "extern_crate_declaration"},
+    "java": {"import_declaration", "package_declaration"},
+    "c": {"preproc_include"},
+    "cpp": {"preproc_include", "using_declaration"},
+    "ruby": {"require_statement", "require_relative_statement"},
+    "php": {"namespace_use_declaration", "require_expression", "include_expression"},
+    "csharp": {"using_directive"},
+    "kotlin": {"import_header", "import_list"},
+    "lua": {"require_statement"},
+}
+
 
 @dataclass
 class CodeChunk:
@@ -188,12 +205,57 @@ def _find_boundaries(content: str, language: str) -> list[tuple[int, int, str, s
     return sorted(boundaries, key=lambda x: x[0])
 
 
+def extract_imports(content: str, language: str | None = None) -> str:
+    """Extract import/include statements from code.
+
+    This is used to create a "preamble" for each chunk so the LLM
+    knows what's available in the namespace.
+
+    Args:
+        content: Source code
+        language: Programming language (auto-detected if None)
+
+    Returns:
+        Import statements as a string (empty if none found)
+    """
+    if language is None:
+        language = _detect_language(content)
+    if not language:
+        return ""
+
+    parser = _get_parser(language)
+    if not parser:
+        return ""
+
+    source_bytes = content.encode("utf-8")
+    tree = parser.parse(source_bytes)
+
+    import_types = IMPORT_NODES.get(language, set())
+    imports: list[str] = []
+
+    def visit(node):
+        if node.type in import_types:
+            # Extract the full import statement text
+            start = node.start_byte
+            end = node.end_byte
+            import_text = source_bytes[start:end].decode("utf-8", errors="replace").strip()
+            if import_text and import_text not in imports:
+                imports.append(import_text)
+        else:
+            for child in node.children:
+                visit(child)
+
+    visit(tree.root_node)
+    return "\n".join(imports)
+
+
 def chunk_code_syntax_aware(
     content: str,
     chunk_size: int = 100_000,
     overlap: int = 500,
     language: str | None = None,
     filename: str | None = None,
+    include_imports: bool = True,
 ) -> list[CodeChunk]:
     """Chunk code respecting syntax boundaries.
 
@@ -203,6 +265,7 @@ def chunk_code_syntax_aware(
         overlap: Overlap between chunks (for context)
         language: Programming language (auto-detected if None)
         filename: Filename for language detection
+        include_imports: If True, prepend imports to each chunk as preamble
 
     Returns:
         List of CodeChunk objects
@@ -214,9 +277,26 @@ def chunk_code_syntax_aware(
     if language is None:
         language = _detect_language(content, filename)
 
+    # Extract imports for preamble (before checking tree-sitter availability)
+    imports_preamble = ""
+    if include_imports and language:
+        imports_preamble = extract_imports(content, language)
+        if imports_preamble:
+            imports_preamble = f"# File imports:\n{imports_preamble}\n\n# Code:\n"
+
     # If no language detected or no tree-sitter, fall back to character chunking
     if language is None or not TREE_SITTER_AVAILABLE:
-        return _chunk_by_characters(content, chunk_size, overlap)
+        chunks = _chunk_by_characters(content, chunk_size, overlap)
+        # Add preamble to first chunk only for character-based chunking
+        if imports_preamble and chunks:
+            chunks[0] = CodeChunk(
+                content=imports_preamble + chunks[0].content,
+                start_line=chunks[0].start_line,
+                end_line=chunks[0].end_line,
+                node_type=chunks[0].node_type,
+                name=chunks[0].name,
+            )
+        return chunks
 
     # Find syntax boundaries
     boundaries = _find_boundaries(content, language)
@@ -306,7 +386,22 @@ def chunk_code_syntax_aware(
                 name=current_nodes[0][1] if len(current_nodes) == 1 else None,
             ))
 
-    return chunks if chunks else _chunk_by_characters(content, chunk_size, overlap)
+    result_chunks = chunks if chunks else _chunk_by_characters(content, chunk_size, overlap)
+
+    # Add imports preamble to each chunk (helps LLM understand available symbols)
+    if imports_preamble and result_chunks:
+        result_chunks = [
+            CodeChunk(
+                content=imports_preamble + chunk.content,
+                start_line=chunk.start_line,
+                end_line=chunk.end_line,
+                node_type=chunk.node_type,
+                name=chunk.name,
+            )
+            for chunk in result_chunks
+        ]
+
+    return result_chunks
 
 
 def _chunk_by_characters(content: str, chunk_size: int, overlap: int) -> list[CodeChunk]:

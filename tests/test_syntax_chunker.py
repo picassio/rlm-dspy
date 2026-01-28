@@ -6,6 +6,7 @@ from rlm_dspy.core.syntax_chunker import (
     CodeChunk,
     chunk_code_syntax_aware,
     chunk_mixed_content,
+    extract_imports,
     TREE_SITTER_AVAILABLE,
     _detect_language,
 )
@@ -162,3 +163,66 @@ class TestCodeChunk:
         assert chunk.end_line == 1
         assert chunk.node_type == "function_definition"
         assert chunk.name == "test"
+
+
+class TestImportExtraction:
+    """Tests for import extraction and preamble injection."""
+
+    @pytest.mark.skipif(not TREE_SITTER_AVAILABLE, reason="tree-sitter not installed")
+    def test_extract_python_imports(self):
+        code = """
+import os
+from pathlib import Path
+from typing import List, Optional
+
+def main():
+    pass
+"""
+        imports = extract_imports(code, "python")
+        assert "import os" in imports
+        assert "from pathlib import Path" in imports
+        assert "from typing import List, Optional" in imports
+
+    @pytest.mark.skipif(not TREE_SITTER_AVAILABLE, reason="tree-sitter not installed")
+    def test_preamble_in_chunks(self):
+        code = """
+import os
+from sys import path
+
+def function_one():
+    return os.getcwd()
+
+def function_two():
+    return path
+"""
+        # Small chunk size to force multiple chunks
+        chunks = chunk_code_syntax_aware(code, chunk_size=50, include_imports=True)
+        
+        # Each chunk should have the imports preamble
+        for chunk in chunks:
+            assert "# File imports:" in chunk.content or "import os" in chunk.content
+
+    @pytest.mark.skipif(not TREE_SITTER_AVAILABLE, reason="tree-sitter not installed")
+    def test_no_preamble_when_disabled(self):
+        code = """
+import os
+
+def main():
+    pass
+"""
+        chunks = chunk_code_syntax_aware(code, chunk_size=1000, include_imports=False)
+        
+        # Should not have preamble header
+        for chunk in chunks:
+            assert "# File imports:" not in chunk.content
+
+    def test_no_imports_no_preamble(self):
+        code = """
+def main():
+    print("hello")
+"""
+        chunks = chunk_code_syntax_aware(code, chunk_size=1000, include_imports=True)
+        
+        # No imports = no preamble header
+        for chunk in chunks:
+            assert "# File imports:" not in chunk.content
