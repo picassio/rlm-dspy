@@ -590,11 +590,13 @@ def setup(
         )
         try:
             budget_val = float(budget_input)
-            if budget_val != config.get("max_budget"):
+            if budget_val <= 0:
+                console.print("[yellow]⚠ Budget must be positive, using default.[/yellow]")
+            elif budget_val != config.get("max_budget"):
                 config["max_budget"] = budget_val
                 changed = True
         except ValueError:
-            pass
+            console.print("[yellow]⚠ Invalid number, using default.[/yellow]")
 
     else:
         # Non-interactive: apply provided options
@@ -608,10 +610,18 @@ def setup(
                 raise typer.Exit(1)
 
         if model:
+            if "/" not in model:
+                console.print(
+                    f"[yellow]⚠ Model should include provider prefix "
+                    f"(e.g., openai/{model})[/yellow]"
+                )
             config["model"] = model
             changed = True
 
         if budget is not None:
+            if budget <= 0:
+                console.print("[red]Error: Budget must be positive[/red]")
+                raise typer.Exit(1)
             config["max_budget"] = budget
             changed = True
 
