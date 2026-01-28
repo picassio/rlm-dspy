@@ -262,7 +262,7 @@ def ask(
             if verbose or debug:
                 _print_stats(result)
         else:
-            console.print(f"[red]Error: {result.error}[/red]")
+            console.print(f"[red]Error: {result.error or 'Unknown error'}[/red]")
             raise typer.Exit(1)
     else:
         if result.success:
@@ -284,7 +284,7 @@ def ask(
                     elapsed=result.elapsed_time,
                 )
         else:
-            console.print(f"[red]Error: {result.error}[/red]")
+            console.print(f"[red]Error: {result.error or 'Unknown error'}[/red]")
             if result.partial_answer:
                 console.print(
                     Panel(
@@ -427,7 +427,7 @@ def diff(
     if result.success:
         console.print(Panel(Markdown(result.answer), title="Diff Analysis"))
     else:
-        console.print(f"[red]Error: {result.error}[/red]")
+        console.print(f"[red]Error: {result.error or 'Unknown error'}[/red]")
         raise typer.Exit(1)
 
 

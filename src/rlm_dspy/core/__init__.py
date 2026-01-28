@@ -1,5 +1,6 @@
 """Core RLM-DSPy modules."""
 
+from .ast_index import ASTIndex, Definition, index_file, index_files
 from .async_client import AsyncLLMClient, aggregate_answers_async, analyze_chunks_async
 from .batch import (
     BATCH_DIR,
@@ -125,6 +126,11 @@ from .validation import (
 )
 
 __all__ = [
+    # AST Index
+    "ASTIndex",
+    "Definition",
+    "index_file",
+    "index_files",
     # Core
     "RLM",
     "RLMConfig",
