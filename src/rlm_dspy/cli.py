@@ -856,5 +856,152 @@ def index(
         console.print(table)
 
 
+# Example prompts for different use cases
+EXAMPLE_PROMPTS = {
+    "understand": {
+        "title": "🔍 Code Understanding",
+        "description": "Understand what code does and how it works",
+        "prompts": [
+            ("Overview", "What does this codebase do? Summarize the main components."),
+            ("Specific", "Explain what the {class/function} does and how to use it"),
+            ("Architecture", "How is the code organized? What are the main modules?"),
+            ("Data flow", "Trace the flow: what happens when a user calls {function}()?"),
+        ],
+    },
+    "bugs": {
+        "title": "🐛 Bug Finding",
+        "description": "Find bugs, edge cases, and error handling issues",
+        "prompts": [
+            ("General", "Find potential bugs, edge cases, or error conditions"),
+            (
+                "Specific",
+                "Check for: 1) Division by zero 2) Null dereferences "
+                "3) Unhandled exceptions 4) Race conditions",
+            ),
+            ("Input", "Find places where user input isn't validated or sanitized"),
+            ("Resources", "Find resource leaks: unclosed files, connections, memory"),
+        ],
+    },
+    "dead-code": {
+        "title": "🗑️ Dead Code Detection",
+        "description": "Find unused modules, functions, and exports",
+        "prompts": [
+            (
+                "Modules",
+                "For each module, check if it's actually imported and used by the main "
+                "code. List any modules that are exported but never used.",
+            ),
+            ("Functions", "List functions that are defined but never called"),
+            ("Exports", "Check __init__.py - which exports are never imported?"),
+        ],
+    },
+    "security": {
+        "title": "🔒 Security Review",
+        "description": "Find security vulnerabilities",
+        "prompts": [
+            (
+                "General",
+                "Find security vulnerabilities: injection, hardcoded secrets, "
+                "unsafe deserialization, path traversal",
+            ),
+            ("Auth", "Review auth. Are there any bypass vulnerabilities?"),
+            ("Secrets", "Find hardcoded API keys, passwords, or secrets"),
+            ("Input", "Find where external input reaches dangerous functions"),
+        ],
+    },
+    "review": {
+        "title": "📝 Code Review",
+        "description": "Comprehensive code review",
+        "prompts": [
+            (
+                "Full",
+                "Review for: 1) Bugs 2) Performance 3) Security "
+                "4) Code smells 5) Missing error handling",
+            ),
+            ("Senior", "Review like a senior engineer. What would you flag?"),
+            ("Best practices", "Does this follow best practices? Suggest improvements."),
+        ],
+    },
+    "performance": {
+        "title": "⚡ Performance",
+        "description": "Find performance bottlenecks",
+        "prompts": [
+            ("Algorithms", "Find O(n²) algorithms, repeated computations, allocations"),
+            ("Database", "Find N+1 queries, missing indexes, inefficient DB access"),
+            ("Memory", "Find memory leaks, large allocations, objects kept alive"),
+        ],
+    },
+    "refactor": {
+        "title": "🔄 Refactoring",
+        "description": "Find code that needs refactoring",
+        "prompts": [
+            ("Duplicates", "Find duplicate code that could be shared functions"),
+            ("Smells", "Find code smells: long functions, deep nesting, god classes"),
+            ("Simplify", "What code could be simplified? Find overly complex parts."),
+        ],
+    },
+    "docs": {
+        "title": "📚 Documentation",
+        "description": "Find documentation gaps",
+        "prompts": [
+            ("Missing", "Which public functions are missing docstrings?"),
+            ("Outdated", "Find docs that don't match actual code behavior"),
+            ("Generate", "Generate documentation for the public API"),
+        ],
+    },
+}
+
+
+@app.command()
+def example(
+    case: Annotated[
+        Optional[str],
+        typer.Argument(help="Use case: understand, bugs, dead-code, security, review, performance, refactor, docs"),
+    ] = None,
+) -> None:
+    """
+    Show example prompts for different use cases.
+
+    Run without arguments to see all available cases.
+
+    Examples:
+        rlm-dspy example                # List all cases
+        rlm-dspy example bugs           # Show bug-finding prompts
+        rlm-dspy example dead-code      # Show dead code detection prompts
+        rlm-dspy example security       # Show security review prompts
+    """
+    if case is None:
+        # List all cases
+        console.print("\n[bold]Available Example Cases:[/bold]\n")
+        table = Table(show_header=True, header_style="bold cyan")
+        table.add_column("Case", style="green")
+        table.add_column("Description")
+
+        for key, data in EXAMPLE_PROMPTS.items():
+            table.add_row(key, data["description"])
+
+        console.print(table)
+        console.print("\n[dim]Usage: rlm-dspy example <case>[/dim]")
+        console.print("[dim]Example: rlm-dspy example bugs[/dim]\n")
+        return
+
+    if case not in EXAMPLE_PROMPTS:
+        console.print(f"[red]Unknown case: {case}[/red]")
+        console.print(f"[dim]Available: {', '.join(EXAMPLE_PROMPTS.keys())}[/dim]")
+        raise typer.Exit(1)
+
+    data = EXAMPLE_PROMPTS[case]
+    console.print(f"\n[bold]{data['title']}[/bold]")
+    console.print(f"[dim]{data['description']}[/dim]\n")
+
+    for name, prompt in data["prompts"]:
+        console.print(f"[cyan]{name}:[/cyan]")
+        console.print(Panel(
+            f"rlm-dspy ask \"{prompt}\" src/",
+            border_style="dim",
+        ))
+        console.print()
+
+
 if __name__ == "__main__":
     app()
