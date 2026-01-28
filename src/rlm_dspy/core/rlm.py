@@ -31,16 +31,27 @@ def _env(key: str, default: str) -> str:
     return os.environ.get(key, default)
 
 
-def _sanitize_secrets(text: str) -> str:
+def _sanitize_secrets(text: str, extra_secrets: list[str] | None = None) -> str:
     """Remove any leaked secrets from output text.
     
     Scans for common secret patterns and replaces them with masks.
     This prevents API keys from appearing in logs, trajectory, or answers.
+    
+    Args:
+        text: Text to sanitize
+        extra_secrets: Additional secret values to mask (e.g., config.api_key)
     """
     if not text:
         return text
     
     result = text
+    
+    # Check for additional secrets passed explicitly (e.g., from config)
+    if extra_secrets:
+        for secret in extra_secrets:
+            if secret and len(secret) > 8 and secret in result:
+                result = result.replace(secret, "[REDACTED]")
+    
     # Check for actual secret values from environment
     for key in COMMON_SECRETS:
         value = os.environ.get(key)
@@ -62,7 +73,7 @@ def _sanitize_secrets(text: str) -> str:
     return result
 
 
-def _sanitize_trajectory(trajectory: list) -> list:
+def _sanitize_trajectory(trajectory: list, extra_secrets: list[str] | None = None) -> list:
     """Sanitize all strings in a trajectory list."""
     if not trajectory:
         return trajectory
@@ -70,10 +81,10 @@ def _sanitize_trajectory(trajectory: list) -> list:
     sanitized = []
     for item in trajectory:
         if isinstance(item, str):
-            sanitized.append(_sanitize_secrets(item))
+            sanitized.append(_sanitize_secrets(item, extra_secrets))
         elif isinstance(item, dict):
             sanitized.append({
-                k: _sanitize_secrets(v) if isinstance(v, str) else v
+                k: _sanitize_secrets(v, extra_secrets) if isinstance(v, str) else v
                 for k, v in item.items()
             })
         else:
@@ -348,7 +359,11 @@ class RLM:
         self._start_time: float | None = None
 
     def _setup_dspy(self) -> None:
-        """Configure DSPy with the primary model (thread-safe)."""
+        """Configure DSPy with the primary model (thread-safe).
+        
+        Note: We do NOT call dspy.configure() here to avoid global state pollution.
+        Instead, we use dspy.settings.context(lm=self._lm) in query() for thread-safety.
+        """
         lm_kwargs: dict[str, Any] = {
             "model": self.config.model,
             "api_key": self.config.api_key,
@@ -358,8 +373,7 @@ class RLM:
 
         # Store LM instance for thread-local configuration in query()
         self._lm = dspy.LM(**lm_kwargs)
-        # Set as default for this instance (will use context manager in query)
-        dspy.configure(lm=self._lm)
+        # NOTE: No dspy.configure() call - we use context manager in query() instead
 
     def _create_sub_lm(self) -> dspy.LM | None:
         """Create sub-LM for llm_query calls if different from primary."""
@@ -541,15 +555,17 @@ class RLM:
             elapsed = time.time() - self._start_time
 
             # Sanitize output to prevent secret leakage
+            # Include config.api_key in case it was passed directly (not from env)
             raw_trajectory = getattr(prediction, "trajectory", [])
             raw_reasoning = getattr(prediction, "final_reasoning", "")
+            extra_secrets = [self.config.api_key] if self.config.api_key else None
             
             return RLMResult(
-                answer=_sanitize_secrets(prediction.answer),
+                answer=_sanitize_secrets(prediction.answer, extra_secrets),
                 success=True,
                 elapsed_time=elapsed,
-                trajectory=_sanitize_trajectory(raw_trajectory),
-                final_reasoning=_sanitize_secrets(raw_reasoning),
+                trajectory=_sanitize_trajectory(raw_trajectory, extra_secrets),
+                final_reasoning=_sanitize_secrets(raw_reasoning, extra_secrets),
                 iterations=len(raw_trajectory),
             )
 
@@ -587,15 +603,17 @@ class RLM:
             elapsed = time.time() - self._start_time
 
             # Sanitize output to prevent secret leakage
+            # Include config.api_key in case it was passed directly (not from env)
             raw_trajectory = getattr(prediction, "trajectory", [])
             raw_reasoning = getattr(prediction, "final_reasoning", "")
+            extra_secrets = [self.config.api_key] if self.config.api_key else None
             
             return RLMResult(
-                answer=_sanitize_secrets(prediction.answer),
+                answer=_sanitize_secrets(prediction.answer, extra_secrets),
                 success=True,
                 elapsed_time=elapsed,
-                trajectory=_sanitize_trajectory(raw_trajectory),
-                final_reasoning=_sanitize_secrets(raw_reasoning),
+                trajectory=_sanitize_trajectory(raw_trajectory, extra_secrets),
+                final_reasoning=_sanitize_secrets(raw_reasoning, extra_secrets),
                 iterations=len(raw_trajectory),
             )
 
