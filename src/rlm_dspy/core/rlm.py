@@ -86,7 +86,7 @@ def _load_user_env() -> None:
         from .user_config import load_env_file
         load_env_file()
     except ImportError:
-        pass  # user_config not available
+        _logger.debug("user_config module not available, skipping env file loading")
 
 
 def _resolve_api_key() -> str | None:
@@ -121,6 +121,7 @@ def _get_user_config_default(key: str, default: Any) -> Any:
         from .user_config import get_config_value
         return get_config_value(key, default)
     except ImportError:
+        _logger.debug("user_config module not available, using default for %s", key)
         return default
 
 
@@ -542,7 +543,7 @@ class RLM:
                     if code_chunks:
                         return [c.content for c in code_chunks]
             except ImportError:
-                pass  # Fall back to character-based chunking
+                _logger.debug("Syntax-aware chunking unavailable, using character-based")
 
         # Fallback: character-based chunking
         chunks = []
