@@ -697,6 +697,10 @@ class RLM:
         chunks = self._chunk_context(context, chunk_size)
         trace.append({"step": "hierarchical", "depth": depth, "num_chunks": len(chunks)})
 
+        # Handle empty chunks edge case
+        if not chunks:
+            return "No content to analyze."
+
         # Create sub-RLM for each major section
         # Use REMAINING budget/timeout, not original, to prevent overspending
         remaining_budget = max(0.01, self.config.max_budget - self._cost_spent)
