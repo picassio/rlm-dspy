@@ -264,8 +264,9 @@ class RLM:
     def __init__(self, config: RLMConfig | None = None):
         self.config = config or RLMConfig()
 
-        # Validate API key early to fail fast
-        if not self.config.api_key:
+        # Validate API key early to fail fast (skip for local providers like Ollama)
+        requires_api_key = not self.config.model.lower().startswith("ollama/")
+        if requires_api_key and not self.config.api_key:
             env_var = get_provider_env_var(self.config.model) or "PROVIDER_API_KEY"
             raise ValueError(
                 f"No API key configured for model '{self.config.model}'.\n"
