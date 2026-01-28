@@ -406,3 +406,194 @@ All tests pass, demonstrating that `rlm-dspy`:
 5. ✅ **Uses syntax-aware chunking** - respects code boundaries
 
 The tool is production-ready for codebase analysis tasks.
+
+---
+
+## Part 5: Additional Test Cases
+
+### Test 5.1: Multi-Language Support (JavaScript)
+
+**Query**: What classes, functions, and constants are defined in this JavaScript file?
+
+```javascript
+// test.js
+const API_URL = 'https://api.example.com';
+const MAX_RETRIES = 3;
+
+function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+class ApiClient {
+    constructor(apiKey) {
+        this.apiKey = apiKey;
+    }
+    async fetch(endpoint) {
+        const response = await fetch(`${this.baseUrl}${endpoint}`);
+        return response.json();
+    }
+}
+```
+
+**Result**: ✅ Correctly identified constants (API_URL, MAX_RETRIES), function (delay), and class (ApiClient) with methods
+
+---
+
+### Test 5.2: TypeScript with Interfaces
+
+**Query**: List all interfaces, types, functions, and classes in this TypeScript file
+
+```typescript
+interface User { id: number; name: string; }
+interface ApiResponse<T> { data: T; status: number; }
+type UserRole = 'admin' | 'user' | 'guest';
+
+function createUser(name: string): User { ... }
+class UserService { ... }
+```
+
+**Result**: ✅ Found all interfaces (User, ApiResponse), types (UserRole), functions (createUser), and classes (UserService)
+
+---
+
+### Test 5.3: Bug Finding
+
+**Query**: Find any potential bugs or issues in this code. Be specific about line numbers if possible.
+
+**Target**: `src/rlm_dspy/core/programs.py`
+
+```
+╭─────────────────────────────────── Answer ───────────────────────────────────╮
+│  • Line 79: next_chunk_size = max(self.MIN_CHUNK_SIZE, chunk_size // 2)      │
+│    inside RecursiveAnalyzer.forward may not effectively reduce work if the   │
+│    context is already smaller than chunk_size.                               │
+│  • Lines 134-154: ChunkedProcessor.forward contains a manual implementation  │
+│    of chunking that is already defined in _chunk in the previous class,      │
+│    leading to code duplication.                                              │
+│  • Line 274: evidence_sample = context[: min(len(context), chunk_size)] in   │
+│    ValidatedAnalyzer is a major bug; it validates the answer against only    │
+│    the first chunk of text, even if the answer came from later chunks.       │
+╰──────────────────────────────────────────────────────────────────────────────╯
+```
+
+**Result**: ✅ Found real potential issues with specific line numbers
+
+---
+
+### Test 5.4: Comparative Analysis
+
+**Query**: Compare the retry_with_backoff and retry_sync functions. What are the differences? When would you use each?
+
+**Target**: `src/rlm_dspy/core/retry.py`
+
+```
+╭─────────────────────────────────── Answer ───────────────────────────────────╮
+│  • retry_with_backoff: Asynchronous, supports Retry-After headers, has       │
+│    max_delay cap                                                             │
+│  • retry_sync: Synchronous, simpler backoff, decorator syntax                │
+│                                                                              │
+│ When to use each:                                                            │
+│  • Use retry_with_backoff for asyncio and HTTP requests with rate limits     │
+│  • Use retry_sync for legacy synchronous code                                │
+╰──────────────────────────────────────────────────────────────────────────────╯
+```
+
+**Result**: ✅ Accurate comparison with usage recommendations
+
+---
+
+### Test 5.5: Security Analysis
+
+**Query**: Are there any security concerns in this code? Check for: hardcoded secrets, SQL injection, path traversal, or unsafe operations.
+
+**Target**: `src/rlm_dspy/core/secrets.py`, `src/rlm_dspy/core/fileutils.py`
+
+```
+╭─────────────────────────────────── Answer ───────────────────────────────────╮
+│ Findings:                                                                    │
+│  • Path Traversal Risk: Functions accept paths without validation            │
+│  • DoS Risk: _kill_blocking_processes kills all git.exe processes            │
+│  • SQL Injection: None Found                                                 │
+│                                                                              │
+│ Recommendations:                                                             │
+│  1. Sanitize paths against base directory                                    │
+│  2. Strengthen mask_value to reveal fewer characters                         │
+│  3. Kill only specific PIDs, not all git.exe                                 │
+╰──────────────────────────────────────────────────────────────────────────────╯
+```
+
+**Result**: ✅ Found real security considerations with actionable recommendations
+
+---
+
+### Test 5.6: Empty File Handling
+
+**Query**: What functions are in this file?
+
+**Target**: Empty file
+
+```
+╭─────────────────────────────────── Answer ───────────────────────────────────╮
+│ The file /tmp/empty.py is empty and contains no functions.                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+```
+
+**Result**: ✅ Correctly handles edge case without hallucinating
+
+---
+
+### Test 5.7: Refactoring Suggestions
+
+**Query**: Suggest refactoring improvements for this code.
+
+**Target**: `src/rlm_dspy/core/programs.py`
+
+```
+╭─────────────────────────────────── Answer ───────────────────────────────────╮
+│ Suggestions:                                                                 │
+│  1. Extract common _chunk logic to BaseAnalyzer                              │
+│  2. Create factory method for aggregator instantiation                       │
+│  3. Refine evidence sampling in ValidatedAnalyzer                            │
+│  4. Use structured responses instead of hardcoded strings                    │
+│  5. Add explicit type hints                                                  │
+╰──────────────────────────────────────────────────────────────────────────────╯
+```
+
+**Result**: ✅ Practical refactoring suggestions
+
+---
+
+### Test 5.8: Git Diff Analysis
+
+**Query**: What was changed? Explain the fix.
+
+**Target**: Git diff of syntax_chunker.py
+
+```
+╭─────────────────────────────── Diff Analysis ────────────────────────────────╮
+│  • File modified: src/rlm_dspy/core/syntax_chunker.py                        │
+│  • New Logic added: A block was added to calculate first_boundary_start. If  │
+│    content exists before this point, it is added as "module_preamble".       │
+│  • Change in boundary loop: The condition was changed from                   │
+│    `if current_start == 0` to `if current_start == first_boundary_start`     │
+│  • The Fix: This ensures module-level code (imports, globals) is not lost    │
+│    and is properly included in the chunking process.                         │
+╰──────────────────────────────────────────────────────────────────────────────╯
+```
+
+**Result**: ✅ Accurately explained the diff and the purpose of the fix
+
+---
+
+## Complete Test Summary
+
+| Category | Tests | Status |
+|----------|-------|--------|
+| **Accuracy** | Module variables, Function signatures | ✅ All Pass |
+| **Anti-Hallucination** | Non-existent items, Empty files | ✅ All Pass |
+| **Relationships** | Call chains, Reverse deps, Module graph | ✅ All Pass |
+| **Multi-Language** | JavaScript, TypeScript | ✅ All Pass |
+| **Analysis** | Bug finding, Security, Refactoring | ✅ All Pass |
+| **Edge Cases** | Empty files, Git diffs | ✅ All Pass |
+
+**Total: 16 test cases, all passing**
