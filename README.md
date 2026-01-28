@@ -340,6 +340,155 @@ rlm-dspy index src/ --kind method --json      # JSON output
 
 The `index` command uses tree-sitter for **zero hallucination** on structural queries.
 
+## Suggested Prompts by Use Case
+
+### 🔍 Code Understanding
+
+```bash
+# High-level understanding
+rlm-dspy ask "What does this codebase do? Summarize the main components." src/
+
+# Specific function/class
+rlm-dspy ask "Explain what the RLM class does and how to use it" src/rlm.py
+
+# Architecture
+rlm-dspy ask "How is the code organized? What are the main modules and their responsibilities?" src/
+
+# Data flow
+rlm-dspy ask "Trace the flow: what happens when a user calls query()?" src/
+```
+
+### 🐛 Bug Finding
+
+```bash
+# General bug hunt
+rlm-dspy ask "Find potential bugs, edge cases, or error conditions that aren't handled" src/
+
+# Specific categories
+rlm-dspy ask "Check for: 1) Division by zero 2) Null pointer dereferences 3) Unhandled exceptions 4) Race conditions" src/
+
+# Input validation
+rlm-dspy ask "Find places where user input isn't validated or sanitized" src/
+
+# Resource leaks
+rlm-dspy ask "Find resource leaks: unclosed files, connections, or memory that isn't freed" src/
+```
+
+### 🗑️ Dead Code Detection
+
+```bash
+# Find unused modules (the "Better Review Prompt")
+rlm-dspy ask "For each module in this directory, check if it's actually imported and used by the main code. List any modules that are exported but never used in the main code flow." src/
+
+# Find unused functions
+rlm-dspy ask "List all functions that are defined but never called anywhere in the codebase" src/
+
+# Find unused exports
+rlm-dspy ask "Check __init__.py exports - which ones are never imported by external code?" src/
+```
+
+### 🔒 Security Review
+
+```bash
+# General security
+rlm-dspy ask "Find security vulnerabilities: injection, hardcoded secrets, unsafe deserialization, path traversal" src/
+
+# Authentication/Authorization
+rlm-dspy ask "Review authentication and authorization. Are there any bypass vulnerabilities?" src/
+
+# Secrets handling
+rlm-dspy ask "Find any hardcoded API keys, passwords, or secrets. Check if secrets are properly masked in logs." src/
+
+# Input sanitization
+rlm-dspy ask "Find places where external input reaches dangerous functions without sanitization" src/
+```
+
+### 📝 Code Review
+
+```bash
+# Comprehensive review
+rlm-dspy ask "Review this code for: 1) Bugs 2) Performance issues 3) Security problems 4) Code smells 5) Missing error handling" src/
+
+# PR review style
+rlm-dspy ask "Review this like a senior engineer. What would you flag in a code review?" src/
+
+# Best practices
+rlm-dspy ask "Does this code follow best practices? What improvements would you suggest?" src/
+```
+
+### ⚡ Performance
+
+```bash
+# Find bottlenecks
+rlm-dspy ask "Identify performance bottlenecks: O(n²) algorithms, repeated computations, unnecessary allocations" src/
+
+# Database/IO
+rlm-dspy ask "Find N+1 queries, missing indexes, or inefficient database access patterns" src/
+
+# Memory
+rlm-dspy ask "Find memory issues: large allocations, memory leaks, objects kept alive unnecessarily" src/
+```
+
+### 🏗️ Structural Queries (use `index` for 100% accuracy)
+
+```bash
+# List all classes
+rlm-dspy index src/ --kind class
+
+# Find specific function
+rlm-dspy index src/ --name "process" --kind function
+
+# All methods in a file
+rlm-dspy index src/main.py --kind method
+
+# Export as JSON for scripting
+rlm-dspy index src/ --kind class --json | jq '.[] | .name'
+
+# Find all error classes
+rlm-dspy index src/ --name "Error" --kind class
+```
+
+### 📊 Codebase Analysis
+
+```bash
+# Dependencies
+rlm-dspy ask "What external libraries does this code depend on? Are there any outdated or risky dependencies?" src/
+
+# Complexity
+rlm-dspy ask "Which functions are most complex and might need refactoring?" src/
+
+# Test coverage gaps
+rlm-dspy ask "What code paths are not covered by tests? What edge cases are missing?" src/ tests/
+
+# Documentation gaps
+rlm-dspy ask "Which public functions are missing docstrings or have inadequate documentation?" src/
+```
+
+### 🔄 Refactoring
+
+```bash
+# Find duplicates
+rlm-dspy ask "Find duplicate or very similar code that could be refactored into shared functions" src/
+
+# Code smells
+rlm-dspy ask "Find code smells: long functions, deep nesting, god classes, feature envy" src/
+
+# Simplification
+rlm-dspy ask "What code could be simplified? Find overly complex implementations." src/
+```
+
+### 💡 Pro Tips
+
+1. **Be specific** - "Find bugs" is less effective than "Find null pointer dereferences in error handling paths"
+
+2. **Combine with `index`** - Use `index` for structural queries, `ask` for semantic understanding
+
+3. **Use budget wisely** - Start with `--budget 0.10` for exploration, increase for thorough analysis
+
+4. **Multi-file context** - Include related files: `rlm-dspy ask "..." src/main.py src/utils.py tests/`
+
+5. **Iterate** - If the first answer is shallow, follow up: "Go deeper on point #2"
+
 ## Processing Strategies
 
 ### Auto (Default)
