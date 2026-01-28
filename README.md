@@ -65,11 +65,8 @@ Or with uv:
 uv pip install rlm-dspy
 ```
 
-Tree-sitter is included by default for syntax-aware chunking (Python, JavaScript, TypeScript).
-For additional languages:
-```bash
-pip install rlm-dspy[languages]  # Go, Rust, Java, C, C++
-```
+All supported languages for syntax-aware chunking are included by default:
+Python, JavaScript, TypeScript, Go, Rust, Java, C, C++, Ruby, C#.
 
 ## Quick Start
 
