@@ -11,24 +11,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
+from .treesitter import EXTENSION_MAP, get_parser_simple
+
 logger = logging.getLogger(__name__)
 
-# Language mappings
-LANGUAGE_MAP = {
-    ".py": "python",
-    ".js": "javascript",
-    ".ts": "typescript",
-    ".tsx": "typescript",
-    ".go": "go",
-    ".rs": "rust",
-    ".java": "java",
-    ".c": "c",
-    ".h": "c",
-    ".cpp": "cpp",
-    ".hpp": "cpp",
-    ".rb": "ruby",
-    ".cs": "c_sharp",
-}
+# Re-export for backward compatibility
+LANGUAGE_MAP = EXTENSION_MAP
 
 
 @dataclass
@@ -73,43 +61,7 @@ class ASTIndex:
         return None
 
 
-def _get_parser(language: str):
-    """Get tree-sitter parser for a language."""
-    try:
-        from tree_sitter import Language, Parser
 
-        if language == "python":
-            import tree_sitter_python as ts_lang
-        elif language == "javascript":
-            import tree_sitter_javascript as ts_lang
-        elif language == "typescript":
-            import tree_sitter_typescript as ts_mod
-            ts_lang = ts_mod.language_typescript()
-            lang = Language(ts_lang)
-            parser = Parser(lang)
-            return parser
-        elif language == "go":
-            import tree_sitter_go as ts_lang
-        elif language == "rust":
-            import tree_sitter_rust as ts_lang
-        elif language == "java":
-            import tree_sitter_java as ts_lang
-        elif language == "c":
-            import tree_sitter_c as ts_lang
-        elif language == "cpp":
-            import tree_sitter_cpp as ts_lang
-        elif language == "ruby":
-            import tree_sitter_ruby as ts_lang
-        elif language == "c_sharp":
-            import tree_sitter_c_sharp as ts_lang
-        else:
-            return None
-
-        lang = Language(ts_lang.language())
-        parser = Parser(lang)
-        return parser
-    except ImportError:
-        return None
 
 
 def _extract_definitions(node, language: str, results: list[Definition], file: str, current_class: str | None = None):
@@ -160,7 +112,7 @@ def index_file(path: Path | str) -> ASTIndex:
     if not language:
         return ASTIndex()
 
-    parser = _get_parser(language)
+    parser = get_parser_simple(language)
     if not parser:
         return ASTIndex()
 

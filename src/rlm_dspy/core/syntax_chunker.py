@@ -10,45 +10,12 @@ Key features:
 """
 
 import logging
-import threading
 from dataclasses import dataclass
 from pathlib import Path
 
+from .treesitter import get_parser, is_available as TREE_SITTER_AVAILABLE
+
 logger = logging.getLogger(__name__)
-
-# Tree-sitter is REQUIRED for syntax-aware chunking
-_PARSERS: dict[str, "Parser"] = {}
-_PARSERS_LOCK = threading.Lock()
-_PARSE_LOCKS: dict[str, threading.Lock] = {}  # Per-language locks for thread-safe parsing
-
-try:
-    from tree_sitter import Language, Parser
-    TREE_SITTER_AVAILABLE = True
-except ImportError:
-    TREE_SITTER_AVAILABLE = False
-    logger.error(
-        "tree-sitter is required but not installed. "
-        "Install with: pip install tree-sitter tree-sitter-python"
-    )
-    # Don't raise here - allow graceful degradation for edge cases
-    # But log prominently so users know something is wrong
-
-# Language module mappings
-LANGUAGE_MODULES = {
-    "python": "tree_sitter_python",
-    "typescript": "tree_sitter_typescript",
-    "javascript": "tree_sitter_javascript",
-    "go": "tree_sitter_go",
-    "rust": "tree_sitter_rust",
-    "java": "tree_sitter_java",
-    "c": "tree_sitter_c",
-    "cpp": "tree_sitter_cpp",
-    "ruby": "tree_sitter_ruby",
-    "php": "tree_sitter_php",
-    "csharp": "tree_sitter_c_sharp",
-    "kotlin": "tree_sitter_kotlin",
-    "lua": "tree_sitter_lua",
-}
 
 # Top-level node types that define boundaries (by language)
 BOUNDARY_NODES = {
@@ -95,54 +62,6 @@ class CodeChunk:
     end_line: int
     node_type: str | None = None  # e.g., "function_definition", "class_definition"
     name: str | None = None  # e.g., function/class name
-
-
-def _get_parser(language: str) -> tuple["Parser | None", "threading.Lock | None"]:
-    """Get or create a tree-sitter parser for the language (thread-safe).
-
-    Returns:
-        Tuple of (parser, parse_lock) - both None if language not supported.
-        The parse_lock MUST be held during parser.parse() calls.
-    """
-    if not TREE_SITTER_AVAILABLE:
-        return None, None
-
-    # Fast path: check without lock
-    if language in _PARSERS:
-        return _PARSERS[language], _PARSE_LOCKS[language]
-
-    module_name = LANGUAGE_MODULES.get(language)
-    if not module_name:
-        return None, None
-
-    # Slow path: acquire lock and create parser
-    with _PARSERS_LOCK:
-        # Double-check after acquiring lock
-        if language in _PARSERS:
-            return _PARSERS[language], _PARSE_LOCKS[language]
-
-        try:
-            import importlib
-            lang_module = importlib.import_module(module_name)
-
-            # Handle typescript special case (has separate ts/tsx)
-            if language == "typescript":
-                lang = Language(lang_module.language_typescript())
-            elif hasattr(lang_module, f"language_{language}"):
-                lang = Language(getattr(lang_module, f"language_{language}")())
-            elif hasattr(lang_module, "language"):
-                lang = Language(lang_module.language())
-            else:
-                return None, None
-
-            parser = Parser(lang)
-            parse_lock = threading.Lock()
-            _PARSERS[language] = parser
-            _PARSE_LOCKS[language] = parse_lock
-            return parser, parse_lock
-        except (ImportError, AttributeError, Exception) as e:
-            logger.debug(f"Failed to load tree-sitter for {language}: {e}")
-            return None, None
 
 
 def _detect_language(content: str, filename: str | None = None) -> str | None:
@@ -203,7 +122,7 @@ class ParseResult:
 
 def _parse_code(content: str, language: str) -> ParseResult:
     """Parse code once to extract both boundaries and imports (single tree traversal)."""
-    parser, parse_lock = _get_parser(language)
+    parser, parse_lock = get_parser(language)
     if not parser or not parse_lock:
         return ParseResult(boundaries=[], imports=[])
 
@@ -214,7 +133,8 @@ def _parse_code(content: str, language: str) -> ParseResult:
         tree = parser.parse(source_bytes)
 
     boundaries: list[tuple[int, int, str, str | None]] = []
-    imports: list[str] = []
+    imports_set: set[str] = set()  # Use set for O(1) deduplication
+    imports_order: list[str] = []  # Preserve order for reproducibility
 
     boundary_types = BOUNDARY_NODES.get(language, set())
     import_types = IMPORT_NODES.get(language, set())
@@ -227,8 +147,9 @@ def _parse_code(content: str, language: str) -> ParseResult:
         # Check for imports
         elif node.type in import_types:
             import_text = source_bytes[node.start_byte:node.end_byte].decode("utf-8", errors="replace").strip()
-            if import_text and import_text not in imports:
-                imports.append(import_text)
+            if import_text and import_text not in imports_set:
+                imports_set.add(import_text)
+                imports_order.append(import_text)
         # Recurse into children (but not into boundary nodes - they're self-contained)
         if node.type not in boundary_types:
             for child in node.children:
@@ -237,7 +158,7 @@ def _parse_code(content: str, language: str) -> ParseResult:
     visit(tree.root_node)
     return ParseResult(
         boundaries=sorted(boundaries, key=lambda x: x[0]),
-        imports=imports,
+        imports=imports_order,
     )
 
 
