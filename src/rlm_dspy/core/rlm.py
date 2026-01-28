@@ -71,7 +71,7 @@ class RLMConfig:
     """Configuration for RLM execution.
 
     All settings can be overridden via environment variables:
-    - RLM_MODEL: Model name (default: google/gemini-2.0-flash-exp)
+    - RLM_MODEL: Model name (default: google/gemini-3-flash-preview)
     - RLM_API_BASE: API endpoint (default: https://openrouter.ai/api/v1)
     - RLM_API_KEY or OPENROUTER_API_KEY: API key
     - RLM_MAX_BUDGET: Max cost in USD (default: 1.0)
@@ -83,10 +83,10 @@ class RLMConfig:
     """
 
     # Model settings - all from environment
-    model: str = field(default_factory=lambda: _normalize_model(_env("RLM_MODEL", "google/gemini-2.0-flash-exp")))
+    model: str = field(default_factory=lambda: _normalize_model(_env("RLM_MODEL", "google/gemini-3-flash-preview")))
     sub_model: str = field(
         default_factory=lambda: _normalize_model(
-            _env("RLM_SUB_MODEL", _env("RLM_MODEL", "google/gemini-2.0-flash-exp"))
+            _env("RLM_SUB_MODEL", _env("RLM_MODEL", "google/gemini-3-flash-preview"))
         )
     )
     api_base: str = field(default_factory=lambda: _env("RLM_API_BASE", "https://openrouter.ai/api/v1"))
@@ -118,6 +118,15 @@ class RLMConfig:
     # DSPy optimization
     use_compiled_prompts: bool = field(default_factory=lambda: _env_bool("RLM_USE_COMPILED_PROMPTS", True))
     prompt_cache_dir: Path | None = None
+
+    def __repr__(self) -> str:
+        """Hide API key in repr to prevent accidental logging."""
+        key_display = "***" if self.api_key else None
+        return (
+            f"RLMConfig(model={self.model!r}, api_base={self.api_base!r}, "
+            f"api_key={key_display!r}, max_budget={self.max_budget}, "
+            f"strategy={self.strategy!r}, ...)"
+        )
 
 
 @dataclass
@@ -468,58 +477,73 @@ class RLM:
         if model.startswith("openrouter/"):
             model = model[len("openrouter/") :]
 
-        # Run async analysis
-        loop = asyncio.new_event_loop()
-        try:
-            results = loop.run_until_complete(
-                analyze_chunks_async(
-                    query=query,
-                    chunks=chunks,
-                    model=model,
-                    max_concurrent=self.config.parallel_chunks,
-                    disable_thinking=self.config.disable_thinking,
-                    enable_cache=self.config.enable_cache,
+        # Run async analysis - handle both sync and async contexts
+        async def run_analysis() -> list[dict[str, Any]]:
+            return await analyze_chunks_async(
+                query=query,
+                chunks=chunks,
+                model=model,
+                max_concurrent=self.config.parallel_chunks,
+                disable_thinking=self.config.disable_thinking,
+                enable_cache=self.config.enable_cache,
+            )
+
+        async def run_aggregation(partial: list[str]) -> str:
+            return await aggregate_answers_async(
+                query,
+                partial,
+                model,
+                disable_thinking=self.config.disable_thinking,
+                enable_cache=self.config.enable_cache,
+            )
+
+        def run_in_new_loop(coro: Any) -> Any:
+            """Run coroutine in a new event loop (for sync context)."""
+            return asyncio.run(coro)
+
+        def run_coro(coro: Any) -> Any:
+            """Run coroutine, handling both sync and async contexts."""
+            try:
+                asyncio.get_running_loop()
+                # We're in an async context - run in thread to avoid blocking
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(run_in_new_loop, coro)
+                    return future.result()
+            except RuntimeError:
+                # No running loop - safe to use asyncio.run()
+                return asyncio.run(coro)
+
+        results = run_coro(run_analysis())
+
+        # Collect partial answers
+        partial_answers = []
+        for r in results:
+            if r["confidence"] != "none" and r["relevant_info"]:
+                partial_answers.append(r["relevant_info"])
+                trace.append(
+                    {
+                        "step": "analyze_chunk",
+                        "chunk_index": r["index"],
+                        "confidence": r["confidence"],
+                        "latency_ms": r.get("latency_ms", 0),
+                    }
                 )
-            )
 
-            # Collect partial answers
-            partial_answers = []
-            for r in results:
-                if r["confidence"] != "none" and r["relevant_info"]:
-                    partial_answers.append(r["relevant_info"])
-                    trace.append(
-                        {
-                            "step": "analyze_chunk",
-                            "chunk_index": r["index"],
-                            "confidence": r["confidence"],
-                            "latency_ms": r.get("latency_ms", 0),
-                        }
-                    )
+        if not partial_answers:
+            return "No relevant information found in the context."
 
-            if not partial_answers:
-                return "No relevant information found in the context."
+        # Aggregate
+        final_answer = run_coro(run_aggregation(partial_answers))
 
-            # Aggregate
-            final_answer = loop.run_until_complete(
-                aggregate_answers_async(
-                    query,
-                    partial_answers,
-                    model,
-                    disable_thinking=self.config.disable_thinking,
-                    enable_cache=self.config.enable_cache,
-                )
-            )
+        trace.append(
+            {
+                "step": "aggregate",
+                "num_partial_answers": len(partial_answers),
+            }
+        )
 
-            trace.append(
-                {
-                    "step": "aggregate",
-                    "num_partial_answers": len(partial_answers),
-                }
-            )
-
-            return final_answer
-        finally:
-            loop.close()
+        return final_answer
 
     def _process_map_reduce_threads(
         self,

@@ -193,7 +193,8 @@ def check_budget(budget: float, context_size: int, model: str = "gemini-2.0-flas
 def check_context_size(context: str, max_chunk_size: int) -> ValidationResult:
     """Check context size and chunking."""
     size = len(context)
-    chunks_needed = max(1, size // max_chunk_size + 1)
+    # Ceiling division: (size + max_chunk_size - 1) // max_chunk_size
+    chunks_needed = max(1, (size + max_chunk_size - 1) // max_chunk_size) if max_chunk_size > 0 else 1
 
     if size == 0:
         return ValidationResult(
