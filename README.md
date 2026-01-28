@@ -122,6 +122,37 @@ print(result.answer)
 print(f"Time: {result.elapsed_time:.1f}s, Cost: ${result.total_cost:.4f}")
 ```
 
+## Supported Providers
+
+RLM-DSPY supports **100+ LLM providers** via LiteLLM:
+
+```bash
+# OpenAI
+export OPENAI_API_KEY="sk-..."
+rlm-dspy ask "..." ./src --model openai/gpt-4o
+
+# Anthropic
+export ANTHROPIC_API_KEY="sk-ant-..."
+rlm-dspy ask "..." ./src --model anthropic/claude-sonnet-4-20250514
+
+# DeepSeek
+export DEEPSEEK_API_KEY="sk-..."
+rlm-dspy ask "..." ./src --model deepseek/deepseek-chat
+
+# Moonshot (Kimi)
+export MOONSHOT_API_KEY="sk-..."
+rlm-dspy ask "..." ./src --model moonshot/kimi-latest
+
+# MiniMax
+export MINIMAX_API_KEY="..."
+rlm-dspy ask "..." ./src --model minimax/MiniMax-M2.1
+
+# Ollama (local)
+rlm-dspy ask "..." ./src --model ollama/llama3.2
+```
+
+**Full provider list**: See [docs/PROVIDERS.md](docs/PROVIDERS.md) for OpenAI, Anthropic, Google, DeepSeek, Kimi, MiniMax, Qwen, GLM, AWS Bedrock, Azure, Ollama, and more.
+
 ## Core Features
 
 ### 1. Syntax-Aware Chunking
