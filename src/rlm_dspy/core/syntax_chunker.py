@@ -352,9 +352,23 @@ def chunk_code_syntax_aware(
         """Slice content using byte offsets, decode to string."""
         return content_bytes[start:end].decode("utf-8", errors="replace")
 
+    # Handle content before first boundary (module-level code, imports, etc.)
+    first_boundary_start = boundaries[0][0] if boundaries else len(content_bytes)
+    if first_boundary_start > 0:
+        preamble_content = slice_content(0, first_boundary_start)
+        if preamble_content.strip():
+            chunks.append(CodeChunk(
+                content=preamble_content,
+                start_line=1,
+                end_line=byte_to_line(first_boundary_start),
+                node_type="module_preamble",
+                name=None,
+            ))
+        current_start = first_boundary_start
+
     for start_byte, end_byte, node_type, name in boundaries:
-        # If this is the first boundary, set start
-        if current_start == 0 and not current_nodes:
+        # If this is the first boundary after preamble, align start
+        if current_start == first_boundary_start and not current_nodes:
             current_start = start_byte
 
         node_size = end_byte - start_byte
