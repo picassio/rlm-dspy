@@ -3,7 +3,7 @@
 
 This compares:
 1. Direct LLM call (send entire context)
-2. RLM-DSPy (chunked + parallel processing)
+2. RLM-DSPy (REPL-based exploration via dspy.RLM)
 
 Run: python benchmarks/compare_llm_vs_rlm.py
 """
@@ -83,7 +83,7 @@ async def bare_llm_query(query: str, context: str) -> dict:
 
 
 def rlm_query(query: str, context: str) -> dict:
-    """RLM-DSPy query with chunking and parallel processing."""
+    """RLM-DSPy query via REPL-based exploration."""
     import dspy
     # Disable all caching for fair benchmark
     dspy.configure(experimental=True)
@@ -190,7 +190,7 @@ async def run_benchmark():
             print(f"  ✗ Error: {e}")
         
         # RLM-DSPy
-        print("\n[2/2] RLM-DSPy (chunked + parallel)...")
+        print("\n[2/2] RLM-DSPy (dspy.RLM)...")
         try:
             rlm_result = rlm_query(query_with_id, context)
             print(f"  ✓ Time: {rlm_result['time']:.2f}s")

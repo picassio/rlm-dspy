@@ -459,7 +459,7 @@ async def main():
 │ Accuracy            │ {bare_stats['accuracy']:>5.0f}%             │ {rlm_stats['accuracy']:>5.0f}%             │ {'RLM-DSPy' if rlm_stats['accuracy'] > bare_stats['accuracy'] else 'Bare LLM' if bare_stats['accuracy'] > rlm_stats['accuracy'] else 'Tie':12}│
 │ Hallucination       │ {bare_stats['hallucination_rate']:>5.0f}%             │ {rlm_stats['hallucination_rate']:>5.0f}%             │ {'RLM-DSPy' if rlm_stats['hallucination_rate'] < bare_stats['hallucination_rate'] else 'Bare LLM' if bare_stats['hallucination_rate'] < rlm_stats['hallucination_rate'] else 'Tie':12}│
 │ Max Context         │ {bare_max:>5}KB           │ {rlm_max:>5}KB           │ {'RLM-DSPy' if rlm_max > bare_max else 'Bare LLM' if bare_max > rlm_max else 'Tie':12}│
-│ Error Handling      │ Crashes at limit   │ Graceful chunks    │ RLM-DSPy    │
+│ Error Handling      │ Crashes at limit   │ REPL exploration    │ RLM-DSPy    │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 RECOMMENDATION:

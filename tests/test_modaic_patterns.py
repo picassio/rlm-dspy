@@ -65,50 +65,6 @@ class TestRetry:
         assert call_count == 2
 
 
-class TestTypes:
-    """Test type definitions."""
-
-    def test_failed_chunk(self):
-        """Test FailedChunk dataclass."""
-        from rlm_dspy.core import FailedChunk
-
-        fc = FailedChunk(error="timeout", index=5, chunk_preview="def foo()...")
-        assert fc.error == "timeout"
-        assert fc.index == 5
-        assert fc.retryable is True
-        assert "index=5" in str(fc)
-
-    def test_chunk_result(self):
-        """Test ChunkResult dataclass."""
-        from rlm_dspy.core import ChunkResult
-
-        cr = ChunkResult(index=0, relevant_info="Found X", confidence="high")
-        assert cr.success is True
-        assert cr.has_info is True
-
-        cr_empty = ChunkResult(index=1, relevant_info="", confidence="none")
-        assert cr_empty.has_info is False
-
-    def test_batch_result(self):
-        """Test BatchResult with partial success."""
-        from rlm_dspy.core import BatchResult, ChunkResult, FailedChunk
-
-        result = BatchResult(
-            results=[
-                ChunkResult(index=0, relevant_info="A", confidence="high"),
-                ChunkResult(index=1, relevant_info="B", confidence="medium"),
-            ],
-            failed=[
-                FailedChunk(error="timeout", index=2),
-            ],
-        )
-
-        assert result.success_count == 2
-        assert result.failure_count == 1
-        assert result.success_rate == pytest.approx(2 / 3)
-        assert len(result.get_answers()) == 2
-
-
 class TestSecrets:
     """Test secret masking utilities."""
 
@@ -125,12 +81,18 @@ class TestSecrets:
         assert is_secret_key("model") is False
 
     def test_mask_value(self):
-        """Test value masking."""
+        """Test value masking - full mask by default for security."""
         from rlm_dspy.core import mask_value
 
-        assert mask_value("sk-1234567890abcdef") == "sk-1********"
+        # Default: full masking for security
+        assert mask_value("sk-1234567890abcdef") == "********"
         assert mask_value("short") == "********"
         assert mask_value(None) == "[None]"
+        assert mask_value("") == "[empty]"
+
+        # Optional prefix reveal for debugging
+        assert mask_value("sk-1234567890abcdef", reveal_prefix=True) == "sk-1********"
+        assert mask_value("short", reveal_prefix=True) == "********"  # Too short
 
     def test_clean_secrets(self):
         """Test recursive secret cleaning."""

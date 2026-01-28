@@ -91,10 +91,6 @@ from .validation import (
     validate_project_name,
 )
 
-# Legacy: Keep for `compile` command compatibility (DSPy prompt optimization)
-from .programs import ChunkedProcessor, MapReduceProcessor, RecursiveAnalyzer
-from .signatures import AggregateAnswers, AnalyzeChunk, DecomposeTask, ExtractAnswer
-
 __all__ = [
     # Tree-sitter utilities
     "EXTENSION_MAP",
@@ -171,12 +167,4 @@ __all__ = [
     "preflight_check",
     "validate_project_name",
     "validate_jsonl_file",
-    # Legacy (for compile command)
-    "AnalyzeChunk",
-    "AggregateAnswers",
-    "DecomposeTask",
-    "ExtractAnswer",
-    "RecursiveAnalyzer",
-    "ChunkedProcessor",
-    "MapReduceProcessor",
 ]

@@ -7,10 +7,10 @@ from rlm_dspy.core.ast_index import (
     LANGUAGE_MAP,
     ASTIndex,
     Definition,
-    _get_parser,
     index_file,
     index_files,
 )
+from rlm_dspy.core.treesitter import get_parser_simple
 
 
 class TestLanguageSupport:
@@ -29,12 +29,12 @@ class TestLanguageSupport:
 
     def test_python_parser_available(self):
         """Python parser should always be available."""
-        parser = _get_parser("python")
+        parser = get_parser_simple("python")
         assert parser is not None
 
     def test_unknown_language_returns_none(self):
         """Unknown language should return None."""
-        parser = _get_parser("unknown_language_xyz")
+        parser = get_parser_simple("unknown_language_xyz")
         assert parser is None
 
 
