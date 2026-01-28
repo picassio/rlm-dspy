@@ -2,18 +2,6 @@
 
 from .ast_index import ASTIndex, Definition, index_file, index_files
 from .async_client import AsyncLLMClient, aggregate_answers_async, analyze_chunks_async
-from .batch import (
-    BATCH_DIR,
-    BatchJobResult,
-    BatchPoller,
-    BatchRequest,
-    BatchStatus,
-    cleanup_batch_files,
-    create_jsonl,
-    parse_jsonl,
-    sort_results_by_custom_id,
-    stream_download,
-)
 from .config_utils import (
     ConfigResolver,
     atomic_read_json,
@@ -21,11 +9,6 @@ from .config_utils import (
     format_user_error,
     get_config_dir,
     inject_context,
-)
-from .content_hash import (
-    ContentHashedIndex,
-    DirtyTracker,
-    content_hash,
 )
 from .debug import (
     Verbosity,
@@ -55,28 +38,8 @@ from .fileutils import (
     smart_rmtree,
     sync_directory,
 )
-from .observability import (
-    OperationMetrics,
-    Span,
-    SpanType,
-    Tracker,
-    enable_tracking,
-    get_tracker,
-    track,
-)
 from .paste_store import PasteStore, store_large_content
 from .programs import ChunkedProcessor, MapReduceProcessor, RecursiveAnalyzer
-from .progress import BatchProgress, ProgressContext
-from .registry import (
-    Registry,
-    RegistryError,
-    builtin_processor,
-    builtin_strategy,
-    load_class,
-    models,
-    processors,
-    strategies,
-)
 from .retry import is_rate_limit_error, parse_retry_after, retry_sync, retry_with_backoff
 from .rlm import RLM, RLMConfig, RLMResult
 from .secrets import (
@@ -140,9 +103,6 @@ __all__ = [
     "ChunkResult",
     "BatchResult",
     "ProcessingStats",
-    # Progress
-    "BatchProgress",
-    "ProgressContext",
     # Retry
     "retry_with_backoff",
     "retry_sync",
@@ -154,34 +114,6 @@ __all__ = [
     "mask_value",
     "get_api_key",
     "MissingSecretError",
-    # Observability (from modaic patterns)
-    "Tracker",
-    "Span",
-    "SpanType",
-    "track",
-    "get_tracker",
-    "enable_tracking",
-    "OperationMetrics",
-    # Registry (from modaic patterns)
-    "Registry",
-    "RegistryError",
-    "strategies",
-    "processors",
-    "models",
-    "builtin_strategy",
-    "builtin_processor",
-    "load_class",
-    # Batch processing (from modaic patterns)
-    "BatchRequest",
-    "BatchJobResult",
-    "BatchStatus",
-    "BatchPoller",
-    "BATCH_DIR",
-    "create_jsonl",
-    "parse_jsonl",
-    "stream_download",
-    "sort_results_by_custom_id",
-    "cleanup_batch_files",
     # File utilities (from modaic patterns)
     "is_windows",
     "is_macos",
@@ -239,8 +171,4 @@ __all__ = [
     "format_user_error",
     "get_config_dir",
     "inject_context",
-    # Content-hashed indexing
-    "ContentHashedIndex",
-    "DirtyTracker",
-    "content_hash",
 ]
