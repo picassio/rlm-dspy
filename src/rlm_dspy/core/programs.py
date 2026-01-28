@@ -66,12 +66,16 @@ class RecursiveAnalyzer(dspy.Module):
         chunks = self._chunk(context, chunk_size)
         partial_answers = []
 
+        # Minimum chunk size to prevent infinite recursion (1KB)
+        MIN_CHUNK_SIZE = 1000
+
         for i, chunk in enumerate(chunks):
             # Recursively analyze each chunk
+            next_chunk_size = max(MIN_CHUNK_SIZE, chunk_size // 2)
             sub_result = self.forward(
                 query=query,
                 context=chunk,
-                chunk_size=chunk_size // 2,  # Halve chunk size at each level
+                chunk_size=next_chunk_size,
                 depth=depth + 1,
             )
             if sub_result.confidence != "none":

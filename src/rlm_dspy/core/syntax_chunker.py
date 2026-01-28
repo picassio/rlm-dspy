@@ -181,28 +181,53 @@ def _extract_name(node, source_bytes: bytes) -> str | None:
     return None
 
 
-def _find_boundaries(content: str, language: str) -> list[tuple[int, int, str, str | None]]:
-    """Find syntax boundaries (start_byte, end_byte, node_type, name)."""
+@dataclass
+class ParseResult:
+    """Result of parsing code for boundaries and imports."""
+    boundaries: list[tuple[int, int, str, str | None]]  # (start_byte, end_byte, node_type, name)
+    imports: list[str]
+
+
+def _parse_code(content: str, language: str) -> ParseResult:
+    """Parse code once to extract both boundaries and imports (single tree traversal)."""
     parser = _get_parser(language)
     if not parser:
-        return []
+        return ParseResult(boundaries=[], imports=[])
 
     source_bytes = content.encode("utf-8")
     tree = parser.parse(source_bytes)
 
-    boundaries = []
+    boundaries: list[tuple[int, int, str, str | None]] = []
+    imports: list[str] = []
+
     boundary_types = BOUNDARY_NODES.get(language, set())
+    import_types = IMPORT_NODES.get(language, set())
 
     def visit(node):
+        # Check for boundaries (functions, classes, etc.)
         if node.type in boundary_types:
             name = _extract_name(node, source_bytes)
             boundaries.append((node.start_byte, node.end_byte, node.type, name))
-        else:
+        # Check for imports
+        elif node.type in import_types:
+            import_text = source_bytes[node.start_byte:node.end_byte].decode("utf-8", errors="replace").strip()
+            if import_text and import_text not in imports:
+                imports.append(import_text)
+        # Recurse into children (but not into boundary nodes - they're self-contained)
+        if node.type not in boundary_types:
             for child in node.children:
                 visit(child)
 
     visit(tree.root_node)
-    return sorted(boundaries, key=lambda x: x[0])
+    return ParseResult(
+        boundaries=sorted(boundaries, key=lambda x: x[0]),
+        imports=imports,
+    )
+
+
+def _find_boundaries(content: str, language: str) -> list[tuple[int, int, str, str | None]]:
+    """Find syntax boundaries (start_byte, end_byte, node_type, name)."""
+    return _parse_code(content, language).boundaries
 
 
 def extract_imports(content: str, language: str | None = None) -> str:
@@ -223,30 +248,7 @@ def extract_imports(content: str, language: str | None = None) -> str:
     if not language:
         return ""
 
-    parser = _get_parser(language)
-    if not parser:
-        return ""
-
-    source_bytes = content.encode("utf-8")
-    tree = parser.parse(source_bytes)
-
-    import_types = IMPORT_NODES.get(language, set())
-    imports: list[str] = []
-
-    def visit(node):
-        if node.type in import_types:
-            # Extract the full import statement text
-            start = node.start_byte
-            end = node.end_byte
-            import_text = source_bytes[start:end].decode("utf-8", errors="replace").strip()
-            if import_text and import_text not in imports:
-                imports.append(import_text)
-        else:
-            for child in node.children:
-                visit(child)
-
-    visit(tree.root_node)
-    return "\n".join(imports)
+    return "\n".join(_parse_code(content, language).imports)
 
 
 def chunk_code_syntax_aware(
@@ -277,33 +279,35 @@ def chunk_code_syntax_aware(
     if language is None:
         language = _detect_language(content, filename)
 
-    # Extract imports for preamble (before checking tree-sitter availability)
-    imports_preamble = ""
-    if include_imports and language:
-        imports_preamble = extract_imports(content, language)
-        if imports_preamble:
-            imports_preamble = f"# File imports:\n{imports_preamble}\n\n# Code:\n"
-
     # If no language detected or no tree-sitter, fall back to character chunking
     if language is None or not TREE_SITTER_AVAILABLE:
-        chunks = _chunk_by_characters(content, chunk_size, overlap)
-        # Add preamble to first chunk only for character-based chunking
-        if imports_preamble and chunks:
-            chunks[0] = CodeChunk(
-                content=imports_preamble + chunks[0].content,
-                start_line=chunks[0].start_line,
-                end_line=chunks[0].end_line,
-                node_type=chunks[0].node_type,
-                name=chunks[0].name,
-            )
-        return chunks
+        return _chunk_by_characters(content, chunk_size, overlap)
 
-    # Find syntax boundaries
-    boundaries = _find_boundaries(content, language)
+    # Parse once to get both boundaries and imports (single tree traversal)
+    parse_result = _parse_code(content, language)
+    boundaries = parse_result.boundaries
+
+    # Build imports preamble
+    imports_preamble = ""
+    if include_imports and parse_result.imports:
+        imports_preamble = f"# File imports:\n{chr(10).join(parse_result.imports)}\n\n# Code:\n"
 
     if not boundaries:
         # No boundaries found, fall back to character chunking
-        return _chunk_by_characters(content, chunk_size, overlap)
+        char_chunks = _chunk_by_characters(content, chunk_size, overlap)
+        # Add preamble to all chunks
+        if imports_preamble and char_chunks:
+            char_chunks = [
+                CodeChunk(
+                    content=imports_preamble + c.content,
+                    start_line=c.start_line,
+                    end_line=c.end_line,
+                    node_type=c.node_type,
+                    name=c.name,
+                )
+                for c in char_chunks
+            ]
+        return char_chunks
 
     # Build chunks respecting boundaries
     chunks = []

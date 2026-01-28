@@ -91,13 +91,37 @@ class AsyncLLMClient:
             disable_thinking if disable_thinking is not None else _env_bool("RLM_DISABLE_THINKING", True)
         )
         self.enable_cache = enable_cache if enable_cache is not None else _env_bool("RLM_ENABLE_CACHE", True)
-        self._semaphore: asyncio.Semaphore | None = None
 
-    async def _ensure_semaphore(self) -> asyncio.Semaphore:
-        """Lazily create semaphore in the right event loop."""
-        if self._semaphore is None:
-            self._semaphore = asyncio.Semaphore(self.max_concurrent)
-        return self._semaphore
+        # Lazy-initialized async resources (created in event loop context)
+        self._semaphore: asyncio.Semaphore | None = None
+        self._client: httpx.AsyncClient | None = None
+        self._init_lock: asyncio.Lock | None = None
+
+    async def _ensure_initialized(self) -> tuple[asyncio.Semaphore, httpx.AsyncClient]:
+        """Lazily create semaphore and client in the right event loop (thread-safe)."""
+        if self._semaphore is not None and self._client is not None:
+            return self._semaphore, self._client
+
+        # Create lock if needed (this is safe - Lock() doesn't need event loop)
+        if self._init_lock is None:
+            self._init_lock = asyncio.Lock()
+
+        async with self._init_lock:
+            # Double-check after acquiring lock
+            if self._semaphore is None:
+                self._semaphore = asyncio.Semaphore(self.max_concurrent)
+            if self._client is None:
+                self._client = httpx.AsyncClient(
+                    timeout=self.timeout,
+                    limits=httpx.Limits(max_connections=self.max_concurrent * 2),
+                )
+            return self._semaphore, self._client
+
+    async def close(self) -> None:
+        """Close the persistent HTTP client."""
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
 
     async def complete(
         self,
@@ -118,7 +142,7 @@ class AsyncLLMClient:
         Returns:
             AsyncResponse with content or error
         """
-        semaphore = await self._ensure_semaphore()
+        semaphore, client = await self._ensure_initialized()
 
         messages = []
         if system:
@@ -163,23 +187,22 @@ class AsyncLLMClient:
 
             for attempt in range(3):  # Max 3 attempts
                 try:
-                    async with httpx.AsyncClient(timeout=self.timeout) as client:
-                        response = await client.post(
-                            f"{self.api_base}/chat/completions",
-                            json=payload,
-                            headers=headers,
-                        )
-                        response.raise_for_status()
-                        data = response.json()
+                    response = await client.post(
+                        f"{self.api_base}/chat/completions",
+                        json=payload,
+                        headers=headers,
+                    )
+                    response.raise_for_status()
+                    data = response.json()
 
-                        latency = (time.perf_counter() - start) * 1000
+                    latency = (time.perf_counter() - start) * 1000
 
-                        return AsyncResponse(
-                            content=data["choices"][0]["message"]["content"],
-                            model=data.get("model", self.model),
-                            usage=data.get("usage", {}),
-                            latency_ms=latency,
-                        )
+                    return AsyncResponse(
+                        content=data["choices"][0]["message"]["content"],
+                        model=data.get("model", self.model),
+                        usage=data.get("usage", {}),
+                        latency_ms=latency,
+                    )
                 except httpx.HTTPStatusError as e:
                     # Don't retry 4xx errors (client errors)
                     if 400 <= e.response.status_code < 500:
