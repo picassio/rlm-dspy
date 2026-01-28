@@ -16,8 +16,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Tree-sitter availability
-TREE_SITTER_AVAILABLE = False
+# Tree-sitter is REQUIRED for syntax-aware chunking
 _PARSERS: dict[str, "Parser"] = {}
 _PARSERS_LOCK = threading.Lock()
 
@@ -25,7 +24,13 @@ try:
     from tree_sitter import Language, Parser
     TREE_SITTER_AVAILABLE = True
 except ImportError:
-    pass
+    TREE_SITTER_AVAILABLE = False
+    logger.error(
+        "tree-sitter is required but not installed. "
+        "Install with: pip install tree-sitter tree-sitter-python"
+    )
+    # Don't raise here - allow graceful degradation for edge cases
+    # But log prominently so users know something is wrong
 
 # Language module mappings
 LANGUAGE_MODULES = {

@@ -58,14 +58,17 @@
 
 ```bash
 pip install rlm-dspy
-
-# With syntax-aware chunking (recommended)
-pip install rlm-dspy tree-sitter tree-sitter-python tree-sitter-javascript
 ```
 
 Or with uv:
 ```bash
 uv pip install rlm-dspy
+```
+
+Tree-sitter is included by default for syntax-aware chunking (Python, JavaScript, TypeScript).
+For additional languages:
+```bash
+pip install rlm-dspy[languages]  # Go, Rust, Java, C, C++
 ```
 
 ## Quick Start
