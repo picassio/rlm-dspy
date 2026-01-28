@@ -82,14 +82,23 @@ rlm-dspy ask "..." ./src --model dashscope/qwen-turbo
 
 ### ZhiPu (GLM)
 
-GLM uses OpenAI-compatible API, so use the `openai/` prefix with custom base URL:
+GLM uses OpenAI-compatible API with a custom base URL:
 
 ```bash
-export ZHIPU_API_KEY="..."
+export OPENAI_API_KEY="your-glm-api-key"
+
+# Standard GLM API
 rlm-dspy ask "..." ./src \
-    --model openai/glm-4 \
+    --model openai/glm-4-flash \
     --api-base https://open.bigmodel.cn/api/paas/v4
+
+# GLM Coding Plan (different endpoint!)
+rlm-dspy ask "..." ./src \
+    --model openai/glm-4.7 \
+    --api-base https://api.z.ai/api/coding/paas/v4
 ```
+
+**Note**: GLM-4.7 is a reasoning model - it may be slower but provides detailed analysis.
 
 ---
 
