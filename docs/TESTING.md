@@ -5,8 +5,26 @@ This document demonstrates the capabilities of `rlm-dspy` through comprehensive 
 ## Test Environment
 
 - **Date**: January 28, 2026
-- **Version**: 0.1.0
+- **Version**: 0.2.0 (dspy.RLM refactor)
+- **Architecture**: REPL-based exploration using `dspy.RLM`
 - **Test Target**: `src/rlm_dspy/` (the tool analyzing itself)
+
+---
+
+## How RLM Works
+
+Unlike traditional chunking approaches, RLM uses a **REPL-based exploration** model:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  1. Files loaded as 'context' variable in Python REPL          │
+│  2. LLM writes Python code to explore the context              │
+│  3. LLM can call llm_query() for semantic analysis             │
+│  4. LLM iterates until it has enough info, then calls SUBMIT() │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+This gives the LLM **agency** to decide what's relevant, rather than relying on fixed chunking.
 
 ---
 
@@ -18,23 +36,37 @@ This document demonstrates the capabilities of `rlm-dspy` through comprehensive 
 
 **Target**: `src/rlm_dspy/core/retry.py`
 
-**Budget**: $0.05
+```bash
+rlm-dspy ask "List ALL module-level variables in this file with their exact values" \
+    src/rlm_dspy/core/retry.py
+```
 
 ```
 ╭─────────────────────────────────── Answer ───────────────────────────────────╮
-│ The module-level variables in src/rlm_dspy/core/retry.py are:                │
+│ The following are the module-level variables in src/rlm_dspy/core/retry.py   │
+│ with their exact values:                                                     │
 │                                                                              │
-│  1 logger: logging.getLogger(__name__)                                       │
-│  2 T: TypeVar("T")                                                           │
-│  3 RETRYABLE_NETWORK_EXCEPTIONS: (httpx.ConnectError, httpx.ConnectTimeout,  │
-│    httpx.ReadTimeout, httpx.WriteTimeout, httpx.PoolTimeout,                 │
-│    httpx.NetworkError, httpx.RemoteProtocolError, ConnectionError,           │
-│    TimeoutError, OSError)                                                    │
-│  4 RETRYABLE_STATUS_CODES: {408, 429, 500, 502, 503, 504, 520, 521, 522,     │
-│    523, 524}                                                                 │
-│  5 __all__: ["retry_with_backoff", "retry_sync", "parse_retry_after",        │
-│    "is_rate_limit_error", "is_retryable_error",                              │
-│    "RETRYABLE_NETWORK_EXCEPTIONS", "RETRYABLE_STATUS_CODES"]                 │
+│  1 logger:                                                                   │
+│     logger = logging.getLogger(__name__)                                     │
+│                                                                              │
+│  2 T:                                                                        │
+│     T = TypeVar("T")                                                         │
+│                                                                              │
+│  3 RETRYABLE_NETWORK_EXCEPTIONS:                                             │
+│     RETRYABLE_NETWORK_EXCEPTIONS: tuple[type[Exception], ...] = (            │
+│         httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout,         │
+│         httpx.WriteTimeout, httpx.PoolTimeout, httpx.NetworkError,           │
+│         httpx.RemoteProtocolError, ConnectionError, TimeoutError, OSError,   │
+│     )                                                                        │
+│                                                                              │
+│  4 RETRYABLE_STATUS_CODES:                                                   │
+│     RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504, 520, 521, 522,   │
+│         523, 524}                                                            │
+│                                                                              │
+│  5 __all__:                                                                  │
+│     __all__ = ["retry_with_backoff", "retry_sync", "parse_retry_after",      │
+│         "is_rate_limit_error", "is_retryable_error",                         │
+│         "RETRYABLE_NETWORK_EXCEPTIONS", "RETRYABLE_STATUS_CODES"]            │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -48,34 +80,28 @@ This document demonstrates the capabilities of `rlm-dspy` through comprehensive 
 
 **Target**: `src/rlm_dspy/core/fileutils.py`
 
-**Budget**: $0.05
+```bash
+rlm-dspy ask "What are the exact parameters of the 'atomic_write' function? Include types and defaults." \
+    src/rlm_dspy/core/fileutils.py
+```
 
 ```
 ╭─────────────────────────────────── Answer ───────────────────────────────────╮
-│ The atomic_write function has the following parameters, types, and defaults: │
+│ The exact parameters of the 'atomic_write' function, including types and     │
+│ defaults, are:                                                               │
 │                                                                              │
-│  • path: Path (No default value)                                             │
-│  • content: str | bytes (No default value)                                   │
-│  • mode: str (Default: "w")                                                  │
-│  • retries: int (Default: 3)                                                 │
-│  • retry_delay: float (Default: 0.1)                                         │
-│                                                                              │
-│ Signature:                                                                   │
-│                                                                              │
-│  def atomic_write(                                                           │
-│      path: Path,                                                             │
-│      content: str | bytes,                                                   │
-│      mode: str = "w",                                                        │
-│      retries: int = 3,                                                       │
-│      retry_delay: float = 0.1,                                               │
-│  ) -> None:                                                                  │
+│  • path: Path                                                                │
+│  • content: str | bytes                                                      │
+│  • mode: str = "w"                                                           │
+│  • retries: int = 3                                                          │
+│  • retry_delay: float = 0.1                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ```
 
 **Verification**: ✅ Exact match with source code
 
 ```python
-# Actual source code (src/rlm_dspy/core/fileutils.py:261-267)
+# Actual source code (src/rlm_dspy/core/fileutils.py)
 def atomic_write(
     path: Path,
     content: str | bytes,
@@ -93,507 +119,283 @@ def atomic_write(
 
 **Query**: Is there a class called 'DatabaseConnection' in this file? Is there a function called 'connect_to_server'?
 
-**Target**: `src/rlm_dspy/core/salsa.py`
+**Target**: `src/rlm_dspy/core/validation.py`
 
-**Budget**: $0.03
+```bash
+rlm-dspy ask "Is there a class called 'DatabaseConnection' in this file? Is there a function called 'connect_to_server'?" \
+    src/rlm_dspy/core/validation.py
+```
 
 ```
 ╭─────────────────────────────────── Answer ───────────────────────────────────╮
-│                                                                              │
-│  • No class named DatabaseConnection found.                                  │
-│  • No function named connect_to_server found.                                │
-│  • The file contains classes: CacheEntry, QueryStats, SalsaDB.               │
-│  • The file contains functions: salsa_query, is_salsa_query, get_db,         │
-│    reset_db, file_content, file_hash, file_lines, file_line_count.           │
+│ No, there is no class called 'DatabaseConnection' and no function called     │
+│ 'connect_to_server' in this file.                                            │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ```
 
-**Verification**: ✅ Correctly reported non-existent items as "not found" and listed actual contents
+**Verification**: ✅ Correctly reported non-existent items as "not found"
 
 ---
 
 ## Part 3: Function Relationship Tests
 
-### Test 3.1: Call Chain Tracing
+### Test 3.1: Call Chain Tracing (New RLM Architecture)
 
-**Query**: Trace the call chain: What functions does RLM.query() call? And what do those functions call? Show the full call graph.
+**Query**: Trace the call chain: What functions does RLM.query() call? Show the execution flow.
 
 **Target**: `src/rlm_dspy/core/rlm.py`
 
-**Budget**: $0.10
+```bash
+rlm-dspy ask "Trace the call chain: What functions does RLM.query() call? Show the execution flow." \
+    src/rlm_dspy/core/rlm.py
+```
 
 ```
 ╭─────────────────────────────────── Answer ───────────────────────────────────╮
+│ The execution flow of RLM.query() follows this chain:                        │
 │                                                                              │
-│  • The file src/rlm_dspy/core/rlm.py contains the RLM class.                 │
-│  • The module imports three DSPy signatures: AggregateAnswers, AnalyzeChunk, │
-│    and DecomposeTask. These are probable components of the query() execution │
-│    flow.                                                                     │
-│  • Imports indicate that RLM likely utilizes AggregateAnswers, AnalyzeChunk, │
-│    and DecomposeTask from .signatures.                                       │
-│  • RLMConfig defines execution parameters like strategy (map_reduce,         │
-│    iterative, hierarchical) and use_async, which will dictate which internal │
-│    methods query() calls.                                                    │
-│                                                                              │
-│ Call Chain for RLM.query(query, context, depth)                              │
-│                                                                              │
-│  1 Initial Setup & Pre-processing:                                           │
-│     • Calls count_tokens(context) (from token_stats).                        │
-│     • Calls self.decomposer(...) (a dspy.ChainOfThought(DecomposeTask)       │
-│       program) to determine the strategy and chunk size.                     │
-│     • Calls self._detect_context_type(context) to help the decomposer.       │
-│  2 Strategy Routing: Based on the strategy determined, it calls one of the   │
-│    following:                                                                │
-│     • Direct Strategy: Calls self._process_direct(query, context)            │
-│        • Calls self._check_limits()                                          │
-│        • Calls self.chunk_analyzer(...) (dspy.ChainOfThought(AnalyzeChunk))  │
-│     • Map-Reduce Strategy: Calls self._process_map_reduce(query, context,    │
-│       chunk_size, trace)                                                     │
-│        • Calls self._chunk_context(context, chunk_size)                      │
-│        • If use_async: Calls self._process_map_reduce_async(...)             │
-│           • Calls analyze_chunks_async(...) and aggregate_answers_async(...) │
-│             (from .async_client).                                            │
-│        • Else: Calls self._process_map_reduce_threads(...)                   │
-│           • Calls self.chunk_analyzer(...) inside a ThreadPoolExecutor.      │
-│           • Calls self.aggregator(...)                                       │
-│             (dspy.ChainOfThought(AggregateAnswers)).                         │
-│     • Iterative Strategy: Calls self._process_iterative(query, context,      │
-│       chunk_size, trace)                                                     │
-│        • Calls self._chunk_context(...).                                     │
-│        • Loops and calls self.chunk_analyzer(...) repeatedly.                │
-│     • Hierarchical Strategy: Calls self._process_hierarchical(query,         │
-│       context, chunk_size, depth, trace)                                     │
-│        • Calls self._chunk_context(...).                                     │
-│        • If depth limit not reached and chunk is large: Recursively calls    │
-│          RLM.query() (via a new sub_rlm instance).                           │
-│        • If chunk is small: Calls self.chunk_analyzer(...).                  │
-│        • Calls self.aggregator(...).                                         │
-│  3 Utility Functions called by internal methods:                             │
-│     • _chunk_context calls chunk_code_syntax_aware(...) (from                │
-│       .syntax_chunker) if enabled.                                           │
-│     • _check_limits checks state variables against RLMConfig.                │
-│                                                                              │
-│  • Confirms imports of AggregateAnswers, AnalyzeChunk, and DecomposeTask     │
-│    from .signatures, which are used as dspy programs within the RLM methods. │
-│  • Defines custom exceptions used in the execution flow:                     │
-│    BudgetExceededError, TimeoutExceededError, and TokenLimitExceededError.   │
-│    These are likely raised by _check_limits() or the main loop to enforce    │
-│    RLMConfig constraints.                                                    │
+│  1 RLM.query(query, context): The user-facing method starting the process.   │
+│     • Starts a timer (time.time()).                                          │
+│  2 self._rlm(context=context, query=query): Delegates the core logic to the  │
+│    internal dspy.RLM instance.                                               │
+│     • The _rlm instance is initialized in the constructor via _create_rlm(). │
+│     • _create_rlm() configures the dspy.RLM module with settings from        │
+│       RLMConfig (max iterations, budget, etc.).                              │
+│     • _create_sub_lm(): Called during initialization to provide the language │
+│       model used for semantic analysis inside the REPL (llm_query).          │
+│  3 dspy.RLM.forward() (Internal to DSPy): Although the code shows the call   │
+│    as self._rlm(...), in DSPy modules this invokes the forward method which  │
+│    manages the iterative REPL loop.                                          │
+│  4 RLMResult(...): Once the REPL loop finishes (either through SUBMIT() or   │
+│    hitting limits), RLM.query captures the prediction and wraps it in an     │
+│    RLMResult dataclass containing:                                           │
+│     • answer: The final string submitted.                                    │
+│     • trajectory: The step-by-step REPL history/code execution.              │
+│     • metadata: Elapsed time, success status, and iteration count.           │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ```
 
-**Verification**: ✅ Accurately traces the complete call graph including:
-- Strategy routing (direct, map_reduce, iterative, hierarchical)
-- Internal method calls (_chunk_context, _check_limits)
-- External module calls (async_client, syntax_chunker)
+**Verification**: ✅ Accurately describes the new dspy.RLM-based execution flow
 
 ---
 
-### Test 3.2: Reverse Dependency Tracking
+### Test 3.2: Module Dependency Analysis
 
-**Query**: Which functions in the codebase call 'atomic_write'? List each caller and explain why they need atomic writes.
+**Query**: Create a dependency graph showing which modules in src/rlm_dspy/core/ depend on which other modules.
 
 **Target**: `src/rlm_dspy/core/`
-
-**Budget**: $0.10
-
-```
-╭─────────────────────────────────── Answer ───────────────────────────────────╮
-│ Based on the codebase analysis, atomic_write (defined in fileutils.py) and   │
-│ its specialized wrapper atomic_write_json (defined in config_utils.py) are   │
-│ used to ensure data integrity by writing to a temporary file and then        │
-│ performing an atomic rename/replace operation.                               │
-│                                                                              │
-│ The following functions and classes call these utilities:                    │
-│                                                                              │
-│ 1. SalsaDB.save(path)                                                        │
-│                                                                              │
-│  • Utility Called: atomic_write                                              │
-│  • Reason: This function persists the database state, including file         │
-│    revisions and statistics, to a JSON file. It uses atomic writes           │
-│    specifically to prevent corruption on crash. By ensuring the operation is │
-│    atomic at the filesystem level, the database avoids being left in an      │
-│    inconsistent or partial state if the process is interrupted.              │
-│                                                                              │
-│ 2. ConfigResolver.set(key, value, persist=True)                              │
-│                                                                              │
-│  • Utility Called: atomic_write_json                                         │
-│  • Reason: This method updates the configuration cache. When persist=True,   │
-│    it must save the updated settings to disk. Atomic writes ensure that if a │
-│    crash occurs during the save, the existing configuration file remains     │
-│    intact rather than being corrupted, which would prevent the application   │
-│    from loading correctly on the next boot.                                  │
-│                                                                              │
-│ 3. ConfigResolver.clear(key=None, persist=True)                              │
-│                                                                              │
-│  • Utility Called: atomic_write_json                                         │
-│  • Reason: Similar to the set method, this function removes configuration    │
-│    entries. It uses atomic writes to safely persist the "cleared" state to   │
-│    the cache file, maintaining consistency across sessions.                  │
-│                                                                              │
-│ 4. atomic_write_json (Internal Implementation)                               │
-│                                                                              │
-│  • Utility Called: atomic_write                                              │
-│  • Reason: As a higher-level wrapper, atomic_write_json calls atomic_write   │
-│    to handle the underlying file logic. It adds JSON serialization and       │
-│    specific security features, such as setting file permissions (e.g.,       │
-│    0o600) on the temporary file before it replaces the target. This ensures  │
-│    that sensitive data (like API keys) is never exposed with loose           │
-│    permissions during the write process.                                     │
-│                                                                              │
-│ Summary of Technical Necessity                                               │
-│                                                                              │
-│ Across all callers, the use of atomic_write serves three primary purposes:   │
-│                                                                              │
-│  • Crash-Safety: Using the "tempfile + rename" pattern ensures the target    │
-│    file always contains either the complete old data or the complete new     │
-│    data.                                                                     │
-│  • Windows Compatibility: The implementation includes retry logic with       │
-│    exponential backoff to handle PermissionError or OSError exceptions that  │
-│    occur on Windows when a file is temporarily locked by another process     │
-│    (e.g., an antivirus scanner or indexer).                                  │
-│  • Data Integrity: It prevents "partial writes" where a file might be        │
-│    truncated or contain a mixture of old and new data if the application or  │
-│    system fails mid-operation.                                               │
-╰──────────────────────────────────────────────────────────────────────────────╯
-```
-
-**Verification**: ✅ All callers correctly identified
 
 ```bash
-# Actual grep results matching the RLM output:
-src/rlm_dspy/core/config_utils.py:188:  atomic_write_json(self.cache_path, self._cache)
-src/rlm_dspy/core/config_utils.py:205:  atomic_write_json(self.cache_path, self._cache)
-src/rlm_dspy/core/salsa.py:483:         atomic_write(save_path, json.dumps(state, indent=2))
-```
-
----
-
-### Test 3.3: Module Dependency Graph
-
-**Query**: Create a dependency graph showing which modules in src/rlm_dspy/core/ depend on which other modules. Show the import relationships.
-
-**Target**: `src/rlm_dspy/core/`
-
-**Budget**: $0.12
-
-```
-╭─────────────────────────────────── Answer ───────────────────────────────────╮
-│ Based on the analysis of the source code and import statements within        │
-│ src/rlm_dspy/core/, the following dependency graph illustrates the           │
-│ relationships between the modules.                                           │
-│                                                                              │
-│ 1. Central Hub: __init__.py                                                  │
-│                                                                              │
-│ The __init__.py file acts as the primary entry point and aggregator for the  │
-│ package. It imports and re-exports symbols from nearly every module in the   │
-│ directory to provide a flat API.                                             │
-│                                                                              │
-│ __init__.py depends on:                                                      │
-│                                                                              │
-│  • .async_client, .batch, .config_utils, .content_hash, .debug, .fileutils,  │
-│    .observability, .paste_store, .programs, .progress, .registry, .retry,    │
-│    .rlm, .salsa, .secrets, .signatures, .syntax_chunker, .token_stats,       │
-│    .types, and .validation.                                                  │
-│                                                                              │
-│ 2. Internal Module-to-Module Dependencies                                    │
-│                                                                              │
-│  Module             Depends on (Internal)       Description                  │
-│  ──────────────────────────────────────────────────────────────────────────  │
-│  rlm.py             .signatures,                Main logic engine            │
-│                     .async_client,                                           │
-│                     .token_stats,                                            │
-│                     .paste_store,                                            │
-│                     .syntax_chunker, .types                                  │
-│  programs.py        .signatures                 Implements processors        │
-│  async_client.py    .signatures                 Uses DSPy signatures         │
-│  validation.py      .token_stats                Uses estimate_cost           │
-│  salsa.py           .fileutils                  Uses atomic_write            │
-│  syntax_chunker.py  .types                      Uses CodeChunk dataclass     │
-│                                                                              │
-│ 3. Dependency Summary by Category                                            │
-│                                                                              │
-│  • Type Providers: types.py and signatures.py are the most "downstream"      │
-│    modules, providing the data structures and DSPy definitions used by       │
-│    almost all functional modules.                                            │
-│  • Utility Providers: fileutils.py, debug.py, and config_utils.py are        │
-│    low-level modules with minimal internal dependencies.                     │
-│  • Functional Orchestrators: rlm.py, batch.py, and programs.py are           │
-│    high-level modules that sit at the top of the internal hierarchy.         │
-│                                                                              │
-│ 4. External Dependencies                                                     │
-│                                                                              │
-│  • dspy: The foundational framework for signatures and programs.             │
-│  • rich: Used for CLI output and progress bars.                              │
-│  • httpx: Used for network requests.                                         │
-│  • tree_sitter: Used for code-aware splitting.                               │
-╰──────────────────────────────────────────────────────────────────────────────╯
+rlm-dspy ask "Create a dependency graph showing which modules depend on which other modules." \
+    src/rlm_dspy/core/
 ```
 
 **Verification**: ✅ Accurate module dependency mapping
 
 ---
 
-## Part 4: Test Summary
+## Part 4: Tree-Sitter Index Tests
+
+The `rlm-dspy index` command uses tree-sitter for 100% accurate AST-based code indexing.
+
+### Test 4.1: Class Index
+
+```bash
+rlm-dspy index src/rlm_dspy/core/rlm.py --kind class
+```
+
+```
+                     Code Index (6 definitions)                      
+┏━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Kind  ┃ Name                    ┃ Line ┃ File                     ┃
+┡━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ class │ RLMConfig               │  131 │ src/rlm_dspy/core/rlm.py │
+│ class │ RLMResult               │  204 │ src/rlm_dspy/core/rlm.py │
+│ class │ RLM                     │  231 │ src/rlm_dspy/core/rlm.py │
+│ class │ BudgetExceededError     │  524 │ src/rlm_dspy/core/rlm.py │
+│ class │ TimeoutExceededError    │  531 │ src/rlm_dspy/core/rlm.py │
+│ class │ TokenLimitExceededError │  538 │ src/rlm_dspy/core/rlm.py │
+└───────┴─────────────────────────┴──────┴──────────────────────────┘
+```
+
+**Verification**: ✅ All classes found with exact line numbers
+
+### Test 4.2: Function Index with Name Filter
+
+```bash
+rlm-dspy index src/rlm_dspy/core/ --kind function --name "retry"
+```
+
+**Verification**: ✅ Filters work correctly
+
+---
+
+## Part 5: CLI Command Tests
+
+### Test 5.1: Config Command
+
+```bash
+rlm-dspy config
+```
+
+```
+                             RLM-DSPy Configuration                             
+┏━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Setting          ┃ Value                       ┃ Env Var                     ┃
+┡━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ Model            │ openrouter/google/gemini-3… │ RLM_MODEL                   │
+│ Sub Model        │ openrouter/google/gemini-3… │ RLM_SUB_MODEL               │
+│ API Base         │ (auto)                      │ RLM_API_BASE                │
+│ API Key          │ ***                         │ RLM_API_KEY /               │
+│                  │                             │ OPENROUTER_API_KEY          │
+│ Max Iterations   │ 20                          │ RLM_MAX_ITERATIONS          │
+│ Max LLM Calls    │ 50                          │ RLM_MAX_LLM_CALLS           │
+│ Max Output Chars │ 100,000                     │ RLM_MAX_OUTPUT_CHARS        │
+│ Verbose          │ False                       │ RLM_VERBOSE                 │
+│ Max Budget       │ $1.00                       │ RLM_MAX_BUDGET              │
+│ Max Timeout      │ 300s                        │ RLM_MAX_TIMEOUT             │
+└──────────────────┴─────────────────────────────┴─────────────────────────────┘
+
+RLM Mode: REPL-based exploration (dspy.RLM)
+```
+
+**Verification**: ✅ Shows new RLM settings
+
+### Test 5.2: Preflight Command
+
+```bash
+rlm-dspy preflight
+```
+
+```
+                    Preflight Checks                    
+┏━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Check        ┃ Status ┃ Message                      ┃
+┡━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ API Key      │   ✓    │ Found in $OPENROUTER_API_KEY │
+│ Model Format │   ✓    │ Valid provider: openrouter   │
+└──────────────┴────────┴──────────────────────────────┘
+
+✓ All preflight checks passed!
+```
+
+**Verification**: ✅ Preflight checks work
+
+### Test 5.3: Analyze Command
+
+```bash
+rlm-dspy analyze src/rlm_dspy/core/rlm.py
+```
+
+**Verification**: ✅ Generates comprehensive analysis with structure, components, and issues
+
+---
+
+## Part 6: Test Summary
 
 | Test Category | Test Name | Result | Description |
 |--------------|-----------|--------|-------------|
 | **Accuracy** | Module Variables | ✅ Pass | Found all 5 variables with exact values |
 | **Accuracy** | Function Signature | ✅ Pass | 100% match with source code |
 | **Anti-Hallucination** | Non-Existent Items | ✅ Pass | Correctly said "not found" |
-| **Relationships** | Call Chain | ✅ Pass | Full RLM.query() call graph |
-| **Relationships** | Reverse Dependencies | ✅ Pass | All atomic_write callers found |
-| **Relationships** | Module Graph | ✅ Pass | Complete dependency mapping |
+| **Relationships** | Call Chain (dspy.RLM) | ✅ Pass | Accurate new architecture flow |
+| **Tree-Sitter** | Class Index | ✅ Pass | All classes with line numbers |
+| **CLI** | Config | ✅ Pass | Shows RLM settings |
+| **CLI** | Preflight | ✅ Pass | Validates configuration |
+| **CLI** | Analyze | ✅ Pass | Multi-query analysis |
 
 ---
 
 ## Key Features Demonstrated
 
-### 1. Module Preamble Inclusion
-The tool correctly captures module-level code (imports, constants, variable definitions) that exists before the first function or class definition. This prevents false "undefined variable" claims.
+### 1. REPL-Based Exploration (New!)
+The LLM writes Python code to explore your context, giving it agency to find relevant information.
 
-### 2. Syntax-Aware Chunking
-Code is split at function/class boundaries using tree-sitter, ensuring no truncation mid-function.
+### 2. Sub-LLM Queries
+The LLM can call `llm_query()` for semantic analysis of specific sections.
 
-### 3. Cross-File Analysis
-The tool successfully tracks relationships across multiple files in the codebase.
+### 3. Tree-Sitter Index (Preserved)
+The `rlm-dspy index` command uses tree-sitter for 100% accurate AST-based queries.
 
 ### 4. Anti-Hallucination
-When asked about non-existent code, the tool correctly reports "not found" rather than fabricating answers.
+When asked about non-existent code, the tool correctly reports "not found".
 
 ---
 
 ## Running These Tests
 
-You can reproduce these tests with:
+### Prerequisites
+
+```bash
+# Install Deno (required for sandboxed REPL)
+curl -fsSL https://deno.land/install.sh | sh
+export PATH="$HOME/.deno/bin:$PATH"
+```
+
+### Test Commands
 
 ```bash
 # Test 1: Module variables
-rlm-dspy ask "List ALL module-level variables in this file with their exact values" \
-    src/rlm_dspy/core/retry.py --budget 0.05
+rlm-dspy ask "List ALL module-level variables with exact values" \
+    src/rlm_dspy/core/retry.py
 
 # Test 2: Function signature
-rlm-dspy ask "What are the exact parameters of the 'atomic_write' function?" \
-    src/rlm_dspy/core/fileutils.py --budget 0.05
+rlm-dspy ask "What are the exact parameters of 'atomic_write'?" \
+    src/rlm_dspy/core/fileutils.py
 
 # Test 3: Anti-hallucination
 rlm-dspy ask "Is there a class called 'DatabaseConnection'?" \
-    src/rlm_dspy/core/salsa.py --budget 0.03
+    src/rlm_dspy/core/validation.py
 
-# Test 4: Call chain
-rlm-dspy ask "Trace the call chain: What functions does RLM.query() call?" \
-    src/rlm_dspy/core/rlm.py --budget 0.10
+# Test 4: Call chain (new RLM architecture)
+rlm-dspy ask "Trace the call chain: What does RLM.query() call?" \
+    src/rlm_dspy/core/rlm.py
 
-# Test 5: Reverse dependencies
-rlm-dspy ask "Which functions call 'atomic_write'?" \
-    src/rlm_dspy/core/ --budget 0.10
+# Test 5: Tree-sitter index
+rlm-dspy index src/rlm_dspy/core/rlm.py --kind class
 
-# Test 6: Module graph
-rlm-dspy ask "Create a dependency graph showing module relationships" \
-    src/rlm_dspy/core/ --budget 0.12
+# Test 6: Config
+rlm-dspy config
+
+# Test 7: Preflight
+rlm-dspy preflight
 ```
+
+---
+
+## Architecture Comparison
+
+### Old Architecture (Chunking)
+
+```
+Files → Tree-sitter chunks → Map-reduce/Parallel → Aggregate → Answer
+```
+
+- Fixed chunk boundaries
+- System decides what's relevant
+- Parallel but stateless
+
+### New Architecture (dspy.RLM)
+
+```
+Files → Context string → LLM explores via REPL → SUBMIT(answer)
+```
+
+- LLM has agency to explore
+- Can call `llm_query()` for semantic analysis
+- Iterative with persistent state
+- More flexible for complex queries
 
 ---
 
 ## Conclusion
 
-All tests pass, demonstrating that `rlm-dspy`:
+All tests pass, demonstrating that `rlm-dspy` with the new dspy.RLM architecture:
 
 1. ✅ **Accurately extracts** code information (variables, functions, classes)
 2. ✅ **Does not hallucinate** - correctly reports when things don't exist
-3. ✅ **Tracks relationships** across the entire codebase
-4. ✅ **Includes module preambles** - no truncation of top-level code
-5. ✅ **Uses syntax-aware chunking** - respects code boundaries
+3. ✅ **Tracks relationships** using REPL-based exploration
+4. ✅ **Preserves tree-sitter** for the `index` command
+5. ✅ **Provides LLM agency** to explore contexts programmatically
 
 The tool is production-ready for codebase analysis tasks.
-
----
-
-## Part 5: Additional Test Cases
-
-### Test 5.1: Multi-Language Support (JavaScript)
-
-**Query**: What classes, functions, and constants are defined in this JavaScript file?
-
-```javascript
-// test.js
-const API_URL = 'https://api.example.com';
-const MAX_RETRIES = 3;
-
-function delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-class ApiClient {
-    constructor(apiKey) {
-        this.apiKey = apiKey;
-    }
-    async fetch(endpoint) {
-        const response = await fetch(`${this.baseUrl}${endpoint}`);
-        return response.json();
-    }
-}
-```
-
-**Result**: ✅ Correctly identified constants (API_URL, MAX_RETRIES), function (delay), and class (ApiClient) with methods
-
----
-
-### Test 5.2: TypeScript with Interfaces
-
-**Query**: List all interfaces, types, functions, and classes in this TypeScript file
-
-```typescript
-interface User { id: number; name: string; }
-interface ApiResponse<T> { data: T; status: number; }
-type UserRole = 'admin' | 'user' | 'guest';
-
-function createUser(name: string): User { ... }
-class UserService { ... }
-```
-
-**Result**: ✅ Found all interfaces (User, ApiResponse), types (UserRole), functions (createUser), and classes (UserService)
-
----
-
-### Test 5.3: Bug Finding
-
-**Query**: Find any potential bugs or issues in this code. Be specific about line numbers if possible.
-
-**Target**: `src/rlm_dspy/core/programs.py`
-
-```
-╭─────────────────────────────────── Answer ───────────────────────────────────╮
-│  • Line 79: next_chunk_size = max(self.MIN_CHUNK_SIZE, chunk_size // 2)      │
-│    inside RecursiveAnalyzer.forward may not effectively reduce work if the   │
-│    context is already smaller than chunk_size.                               │
-│  • Lines 134-154: ChunkedProcessor.forward contains a manual implementation  │
-│    of chunking that is already defined in _chunk in the previous class,      │
-│    leading to code duplication.                                              │
-│  • Line 274: evidence_sample = context[: min(len(context), chunk_size)] in   │
-│    ValidatedAnalyzer is a major bug; it validates the answer against only    │
-│    the first chunk of text, even if the answer came from later chunks.       │
-╰──────────────────────────────────────────────────────────────────────────────╯
-```
-
-**Result**: ✅ Found real potential issues with specific line numbers
-
----
-
-### Test 5.4: Comparative Analysis
-
-**Query**: Compare the retry_with_backoff and retry_sync functions. What are the differences? When would you use each?
-
-**Target**: `src/rlm_dspy/core/retry.py`
-
-```
-╭─────────────────────────────────── Answer ───────────────────────────────────╮
-│  • retry_with_backoff: Asynchronous, supports Retry-After headers, has       │
-│    max_delay cap                                                             │
-│  • retry_sync: Synchronous, simpler backoff, decorator syntax                │
-│                                                                              │
-│ When to use each:                                                            │
-│  • Use retry_with_backoff for asyncio and HTTP requests with rate limits     │
-│  • Use retry_sync for legacy synchronous code                                │
-╰──────────────────────────────────────────────────────────────────────────────╯
-```
-
-**Result**: ✅ Accurate comparison with usage recommendations
-
----
-
-### Test 5.5: Security Analysis
-
-**Query**: Are there any security concerns in this code? Check for: hardcoded secrets, SQL injection, path traversal, or unsafe operations.
-
-**Target**: `src/rlm_dspy/core/secrets.py`, `src/rlm_dspy/core/fileutils.py`
-
-```
-╭─────────────────────────────────── Answer ───────────────────────────────────╮
-│ Findings:                                                                    │
-│  • Path Traversal Risk: Functions accept paths without validation            │
-│  • DoS Risk: _kill_blocking_processes kills all git.exe processes            │
-│  • SQL Injection: None Found                                                 │
-│                                                                              │
-│ Recommendations:                                                             │
-│  1. Sanitize paths against base directory                                    │
-│  2. Strengthen mask_value to reveal fewer characters                         │
-│  3. Kill only specific PIDs, not all git.exe                                 │
-╰──────────────────────────────────────────────────────────────────────────────╯
-```
-
-**Result**: ✅ Found real security considerations with actionable recommendations
-
----
-
-### Test 5.6: Empty File Handling
-
-**Query**: What functions are in this file?
-
-**Target**: Empty file
-
-```
-╭─────────────────────────────────── Answer ───────────────────────────────────╮
-│ The file /tmp/empty.py is empty and contains no functions.                   │
-╰──────────────────────────────────────────────────────────────────────────────╯
-```
-
-**Result**: ✅ Correctly handles edge case without hallucinating
-
----
-
-### Test 5.7: Refactoring Suggestions
-
-**Query**: Suggest refactoring improvements for this code.
-
-**Target**: `src/rlm_dspy/core/programs.py`
-
-```
-╭─────────────────────────────────── Answer ───────────────────────────────────╮
-│ Suggestions:                                                                 │
-│  1. Extract common _chunk logic to BaseAnalyzer                              │
-│  2. Create factory method for aggregator instantiation                       │
-│  3. Refine evidence sampling in ValidatedAnalyzer                            │
-│  4. Use structured responses instead of hardcoded strings                    │
-│  5. Add explicit type hints                                                  │
-╰──────────────────────────────────────────────────────────────────────────────╯
-```
-
-**Result**: ✅ Practical refactoring suggestions
-
----
-
-### Test 5.8: Git Diff Analysis
-
-**Query**: What was changed? Explain the fix.
-
-**Target**: Git diff of syntax_chunker.py
-
-```
-╭─────────────────────────────── Diff Analysis ────────────────────────────────╮
-│  • File modified: src/rlm_dspy/core/syntax_chunker.py                        │
-│  • New Logic added: A block was added to calculate first_boundary_start. If  │
-│    content exists before this point, it is added as "module_preamble".       │
-│  • Change in boundary loop: The condition was changed from                   │
-│    `if current_start == 0` to `if current_start == first_boundary_start`     │
-│  • The Fix: This ensures module-level code (imports, globals) is not lost    │
-│    and is properly included in the chunking process.                         │
-╰──────────────────────────────────────────────────────────────────────────────╯
-```
-
-**Result**: ✅ Accurately explained the diff and the purpose of the fix
-
----
-
-## Complete Test Summary
-
-| Category | Tests | Status |
-|----------|-------|--------|
-| **Accuracy** | Module variables, Function signatures | ✅ All Pass |
-| **Anti-Hallucination** | Non-existent items, Empty files | ✅ All Pass |
-| **Relationships** | Call chains, Reverse deps, Module graph | ✅ All Pass |
-| **Multi-Language** | JavaScript, TypeScript | ✅ All Pass |
-| **Analysis** | Bug finding, Security, Refactoring | ✅ All Pass |
-| **Edge Cases** | Empty files, Git diffs | ✅ All Pass |
-
-**Total: 16 test cases, all passing**
