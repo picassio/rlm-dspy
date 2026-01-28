@@ -437,7 +437,9 @@ rlm-dspy ask "Find bugs" src/ -S bugs --format markdown -o report.md
 
 ### Hallucination Detection
 
-Validate outputs for potential hallucinations:
+Two levels of validation are available:
+
+#### Fast Regex-Based Validation (No LLM Calls)
 
 ```bash
 # CLI: Check for hallucinated line numbers, functions, files
@@ -445,30 +447,55 @@ rlm-dspy ask "Find bugs and their line numbers" src/ --validate
 ```
 
 ```python
-from rlm_dspy import RLM, validate_all, validate_line_numbers
+from rlm_dspy import RLM, validate_all
 
-rlm = RLM(config=config)
 result = rlm.query("Find bugs with line numbers", context)
 
-# Validate the output
+# Fast validation (regex-based, instant)
 validation = validate_all(result.answer, context)
 if not validation.is_valid:
     print(f"Warning: Possible hallucinations detected!")
     for issue in validation.issues:
         print(f"  - {issue}")
-    print(f"Confidence: {validation.confidence:.0%}")
-
-# Individual validators
-validate_line_numbers(result.answer, context)  # Check line references
-validate_references(result.answer, context)    # Check function/class/file names
-validate_code_blocks(result.answer, context)   # Check code snippets
 ```
 
-The validators detect:
-- **Line numbers** that exceed the actual file length
-- **Function/class names** not present in the source
-- **File paths** not mentioned in the context
-- **Code blocks** that don't match the source
+Detects:
+- **Line numbers** beyond file length
+- **Function/class names** not in source
+- **File paths** not in context
+- **Code blocks** not matching source
+
+#### LLM-as-Judge Validation (DSPy Integration)
+
+For deeper semantic validation using DSPy's built-in evaluation:
+
+```python
+from rlm_dspy import validate_groundedness, semantic_f1
+
+# Check if claims are supported by context
+groundedness = validate_groundedness(
+    output=result.answer,
+    context=context,
+    query="Find bugs in this code",
+)
+print(f"Groundedness: {groundedness.score:.0%}")
+print(f"Claims found: {groundedness.claims}")
+if not groundedness.is_grounded:
+    print(f"Warning: {groundedness.discussion}")
+
+# Compare against expected output
+f1 = semantic_f1(
+    output=result.answer,
+    expected="Expected response here",
+    query="Find bugs",
+)
+print(f"Semantic F1: {f1:.0%}")
+```
+
+DSPy provides:
+- **validate_groundedness()** - Check if claims are supported by context
+- **validate_completeness()** - Check coverage of expected content
+- **semantic_f1()** - Precision/recall of semantic content
 
 ### Custom Interpreter
 

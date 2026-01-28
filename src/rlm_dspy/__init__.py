@@ -14,10 +14,14 @@ from .signatures import (
 )
 from .guards import (
     ValidationResult,
+    GroundednessResult,
     validate_line_numbers,
     validate_references,
     validate_code_blocks,
     validate_all,
+    validate_groundedness,
+    validate_completeness,
+    semantic_f1,
 )
 
 __version__ = "0.1.0"
@@ -36,10 +40,15 @@ __all__ = [
     "SIGNATURES",
     "get_signature",
     "list_signatures",
-    # Hallucination Guards
+    # Hallucination Guards (fast, regex-based)
     "ValidationResult",
     "validate_line_numbers",
     "validate_references",
     "validate_code_blocks",
     "validate_all",
+    # Hallucination Guards (LLM-as-judge)
+    "GroundednessResult",
+    "validate_groundedness",
+    "validate_completeness",
+    "semantic_f1",
 ]

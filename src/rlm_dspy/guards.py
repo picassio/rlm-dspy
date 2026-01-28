@@ -3,17 +3,23 @@
 This module provides tools to detect and prevent common LLM hallucinations
 by validating outputs against the source context.
 
+Two types of validation are available:
+1. **Fast regex-based**: Immediate, no LLM calls (validate_line_numbers, etc.)
+2. **LLM-as-judge**: Uses DSPy's semantic evaluation (validate_groundedness)
+
 Example:
     ```python
     from rlm_dspy import RLM, RLMConfig
-    from rlm_dspy.guards import validate_references, validate_line_numbers
+    from rlm_dspy.guards import validate_all, validate_groundedness
 
     result = rlm.query("Find bugs", context)
     
-    # Check if mentioned functions exist in context
-    issues = validate_references(result.answer, context)
-    if issues:
-        print(f"Warning: Possible hallucinations: {issues}")
+    # Fast regex validation
+    issues = validate_all(result.answer, context)
+    
+    # LLM-as-judge validation (more accurate, slower)
+    groundedness = validate_groundedness(result.answer, context, query)
+    print(f"Groundedness score: {groundedness.score:.0%}")
     ```
 """
 
@@ -232,9 +238,12 @@ def validate_code_blocks(output: str, context: str) -> ValidationResult:
 
 
 def validate_all(output: str, context: str) -> ValidationResult:
-    """Run all hallucination checks.
+    """Run all fast (regex-based) hallucination checks.
     
     Combines line number, reference, and code block validation.
+    This is fast and doesn't require LLM calls.
+    
+    For deeper semantic validation, use validate_groundedness().
     
     Args:
         output: LLM output text
@@ -260,3 +269,153 @@ def validate_all(output: str, context: str) -> ValidationResult:
         issues=all_issues,
         confidence=avg_confidence,
     )
+
+
+# =============================================================================
+# LLM-as-Judge Validation (uses DSPy's built-in evaluation)
+# =============================================================================
+
+@dataclass
+class GroundednessResult:
+    """Result of LLM-based groundedness validation."""
+    
+    score: float
+    """Groundedness score (0-1), fraction of claims supported by context."""
+    
+    claims: str
+    """Enumeration of claims found in the output."""
+    
+    discussion: str
+    """Discussion of how well claims are supported."""
+    
+    is_grounded: bool
+    """Whether the output passes the groundedness threshold."""
+    
+    threshold: float = 0.66
+    """Threshold used for is_grounded determination."""
+
+
+def validate_groundedness(
+    output: str,
+    context: str,
+    query: str,
+    threshold: float = 0.66,
+) -> GroundednessResult:
+    """Validate output groundedness using DSPy's LLM-as-judge.
+    
+    This uses DSPy's AnswerGroundedness signature to check if claims
+    in the output are supported by the context. More accurate than
+    regex-based validation but requires an LLM call.
+    
+    Args:
+        output: LLM output to validate
+        context: Source context the output should be grounded in
+        query: Original question asked
+        threshold: Minimum groundedness score (0-1) to pass
+        
+    Returns:
+        GroundednessResult with score, claims, and discussion
+        
+    Example:
+        ```python
+        result = validate_groundedness(
+            output="The bug is in process_data() on line 42",
+            context="def add(a, b):\\n    return a + b",
+            query="Find bugs in this code",
+        )
+        if not result.is_grounded:
+            print(f"Output may be hallucinated: {result.discussion}")
+        ```
+    """
+    import dspy
+    from dspy.evaluate.auto_evaluation import AnswerGroundedness
+    from dspy.predict.chain_of_thought import ChainOfThought
+    
+    # Create the groundedness checker
+    checker = ChainOfThought(AnswerGroundedness)
+    
+    # Run the check
+    result = checker(
+        question=query,
+        retrieved_context=context,
+        system_response=output,
+    )
+    
+    return GroundednessResult(
+        score=float(result.groundedness),
+        claims=result.system_response_claims,
+        discussion=result.discussion,
+        is_grounded=float(result.groundedness) >= threshold,
+        threshold=threshold,
+    )
+
+
+def validate_completeness(
+    output: str,
+    expected: str,
+    query: str,
+    threshold: float = 0.66,
+) -> float:
+    """Check if output covers expected content using LLM-as-judge.
+    
+    Uses DSPy's AnswerCompleteness to measure what fraction of
+    expected key ideas are present in the output.
+    
+    Args:
+        output: LLM output to validate
+        expected: Expected/ground truth response
+        query: Original question
+        threshold: Minimum completeness to pass
+        
+    Returns:
+        Completeness score (0-1)
+    """
+    import dspy
+    from dspy.evaluate.auto_evaluation import AnswerCompleteness
+    from dspy.predict.chain_of_thought import ChainOfThought
+    
+    checker = ChainOfThought(AnswerCompleteness)
+    result = checker(
+        question=query,
+        ground_truth=expected,
+        system_response=output,
+    )
+    
+    return float(result.completeness)
+
+
+def semantic_f1(
+    output: str,
+    expected: str,
+    query: str,
+    decompositional: bool = False,
+) -> float:
+    """Calculate semantic F1 score between output and expected.
+    
+    Uses DSPy's SemanticF1 which measures both precision (output
+    claims supported by expected) and recall (expected ideas
+    covered by output).
+    
+    Args:
+        output: LLM output to evaluate
+        expected: Ground truth/expected response
+        query: Original question
+        decompositional: Use detailed key-idea decomposition
+        
+    Returns:
+        F1 score (0-1)
+    """
+    import dspy
+    
+    # Create example and prediction objects
+    class Example:
+        def __init__(self, question, response):
+            self.question = question
+            self.response = response
+    
+    class Prediction:
+        def __init__(self, response):
+            self.response = response
+    
+    evaluator = dspy.evaluate.SemanticF1(decompositional=decompositional)
+    return evaluator(Example(query, expected), Prediction(output))
