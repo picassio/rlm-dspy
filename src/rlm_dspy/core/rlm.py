@@ -351,6 +351,7 @@ class RLM:
         config: RLMConfig | None = None,
         tools: dict[str, Callable[..., str]] | None = None,
         signature: str | type = "context, query -> answer",
+        interpreter: Any | None = None,
     ):
         """
         Initialize RLM.
@@ -363,6 +364,13 @@ class RLM:
                       Can be a string like "context, query -> answer" or
                       a dspy.Signature class for structured output.
                       Default: "context, query -> answer"
+            interpreter: Custom code interpreter for REPL execution.
+                        Must implement the CodeInterpreter protocol:
+                        - tools property
+                        - start() method
+                        - execute(code, variables) method
+                        - shutdown() method
+                        If None, uses dspy's default PythonInterpreter (Deno/Pyodide).
                       
         Example with structured output:
             ```python
@@ -374,10 +382,18 @@ class RLM:
             print(result.bugs)          # list[str]
             print(result.has_critical)  # bool
             ```
+            
+        Example with custom interpreter:
+            ```python
+            from e2b_code_interpreter import CodeInterpreter
+            
+            rlm = RLM(config=config, interpreter=CodeInterpreter())
+            ```
         """
         self.config = config or RLMConfig()
         self._tools = tools or {}
         self._signature = signature
+        self._interpreter = interpreter
         
         # Track if we have a custom signature with structured output
         self._is_structured = not isinstance(signature, str)
@@ -433,15 +449,21 @@ class RLM:
 
     def _create_rlm(self) -> dspy.RLM:
         """Create the dspy.RLM instance."""
-        return dspy.RLM(
-            signature=self._signature,
-            max_iterations=self.config.max_iterations,
-            max_llm_calls=self.config.max_llm_calls,
-            max_output_chars=self.config.max_output_chars,
-            verbose=self.config.verbose,
-            tools=self._tools,
-            sub_lm=self._create_sub_lm(),
-        )
+        kwargs: dict[str, Any] = {
+            "signature": self._signature,
+            "max_iterations": self.config.max_iterations,
+            "max_llm_calls": self.config.max_llm_calls,
+            "max_output_chars": self.config.max_output_chars,
+            "verbose": self.config.verbose,
+            "tools": self._tools,
+            "sub_lm": self._create_sub_lm(),
+        }
+        
+        # Add custom interpreter if provided
+        if self._interpreter is not None:
+            kwargs["interpreter"] = self._interpreter
+        
+        return dspy.RLM(**kwargs)
 
     def load_context(
         self,

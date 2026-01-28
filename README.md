@@ -354,6 +354,89 @@ def search_docs(query: str) -> str:
 rlm.add_tool("search_docs", search_docs)
 ```
 
+## Advanced Features
+
+### Batch Processing
+
+Process multiple queries in parallel for faster analysis:
+
+```python
+# Same context, different queries (3x faster than sequential)
+results = rlm.batch([
+    {"query": "Summarize the architecture"},
+    {"query": "Find security issues"},
+    {"query": "Find performance bottlenecks"},
+], context=context, num_threads=3)
+
+# Different contexts
+results = rlm.batch([
+    {"context": file1, "query": "Find bugs"},
+    {"context": file2, "query": "Find bugs"},
+], num_threads=2)
+```
+
+The `analyze` command uses batch processing by default:
+```bash
+rlm-dspy analyze src/  # Runs 3 queries in parallel
+```
+
+### Structured Output (Custom Signatures)
+
+Get structured JSON output instead of free-form text:
+
+```python
+from rlm_dspy import RLM, BugFinder, SecurityAudit
+
+# Use predefined signature
+rlm = RLM(config=config, signature=BugFinder)
+result = rlm.query("Find all bugs", context)
+
+# Access structured fields
+print(result.bugs)              # list[str]
+print(result.has_critical)      # bool
+print(result.affected_functions) # list[str]
+print(result.fix_suggestions)   # list[str]
+
+# Or via dict
+print(result.outputs)  # {"bugs": [...], "has_critical": True, ...}
+```
+
+Available signatures:
+- `SecurityAudit` - vulnerabilities, severity, is_secure, recommendations
+- `CodeReview` - summary, issues, suggestions, quality_score (1-10)
+- `BugFinder` - bugs, has_critical, affected_functions, fix_suggestions
+- `ArchitectureAnalysis` - summary, components, dependencies, patterns
+- `PerformanceAnalysis` - issues, hotspots, optimizations, complexity_concerns
+- `DiffReview` - summary, change_type, is_breaking, risks, suggestions
+
+CLI usage:
+```bash
+# Structured security audit
+rlm-dspy ask "Audit this code" src/ --signature security --json
+
+# Structured bug report  
+rlm-dspy ask "Find bugs" src/ -S bugs -j
+```
+
+### Custom Interpreter
+
+Use a custom code execution environment:
+
+```python
+# Default: dspy's PythonInterpreter (Deno/Pyodide WASM)
+rlm = RLM(config=config)
+
+# Custom interpreter (e.g., E2B cloud sandbox)
+from e2b_code_interpreter import CodeInterpreter
+rlm = RLM(config=config, interpreter=CodeInterpreter())
+```
+
+The interpreter must implement the CodeInterpreter protocol:
+- `tools` property - available functions
+- `start()` - initialize environment  
+- `execute(code, variables)` - run code
+- `shutdown()` - cleanup
+
 ## Documentation
 
 - **[Provider Guide](docs/PROVIDERS.md)** - Supported LLM providers
