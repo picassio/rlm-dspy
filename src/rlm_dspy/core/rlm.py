@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import time
 from dataclasses import dataclass, field
@@ -12,6 +13,8 @@ from typing import Any, Literal
 import dspy
 
 from .signatures import AggregateAnswers, AnalyzeChunk, DecomposeTask
+
+_logger = logging.getLogger(__name__)
 
 
 def _env(key: str, default: str) -> str:
@@ -27,6 +30,7 @@ def _env_int(key: str, default: int) -> int:
     try:
         return int(val)
     except ValueError:
+        _logger.warning("Invalid int for %s=%r, using default %d", key, val, default)
         return default
 
 
@@ -38,6 +42,7 @@ def _env_float(key: str, default: float) -> float:
     try:
         return float(val)
     except ValueError:
+        _logger.warning("Invalid float for %s=%r, using default %f", key, val, default)
         return default
 
 
@@ -284,12 +289,22 @@ class RLM:
 
         # Read and combine
         context_parts = []
+        skipped_files = []
         for f in sorted(files):
             try:
                 content = f.read_text()
                 context_parts.append(f"### {f}\n```\n{content}\n```\n")
-            except (UnicodeDecodeError, PermissionError):
-                continue
+            except UnicodeDecodeError:
+                skipped_files.append((f, "binary/encoding"))
+            except PermissionError:
+                skipped_files.append((f, "permission denied"))
+
+        if skipped_files:
+            _logger.warning(
+                "Skipped %d files: %s",
+                len(skipped_files),
+                ", ".join(f"{f.name} ({reason})" for f, reason in skipped_files[:5]),
+            )
 
         return "\n".join(context_parts)
 
