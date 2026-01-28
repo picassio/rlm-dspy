@@ -216,11 +216,27 @@ class RLM:
 
     def _setup_dspy(self) -> None:
         """Configure DSPy with the specified model."""
-        lm = dspy.LM(
-            model=self.config.model,
-            api_base=self.config.api_base,
-            api_key=self.config.api_key,
+        # Build kwargs - only include api_base if explicitly set
+        # Native providers (minimax/, deepseek/, moonshot/, etc.) don't need api_base
+        lm_kwargs: dict[str, Any] = {
+            "model": self.config.model,
+            "api_key": self.config.api_key,
+        }
+
+        # Only set api_base for OpenRouter or explicitly configured endpoints
+        # Native LiteLLM providers handle their own base URLs
+        model_lower = self.config.model.lower()
+        native_providers = (
+            "minimax/", "deepseek/", "moonshot/", "dashscope/",
+            "anthropic/", "openai/", "gemini/", "groq/", "ollama/",
+            "together_ai/", "fireworks_ai/", "bedrock/", "vertex_ai/",
         )
+        is_native_provider = any(model_lower.startswith(p) for p in native_providers)
+
+        if self.config.api_base and not is_native_provider:
+            lm_kwargs["api_base"] = self.config.api_base
+
+        lm = dspy.LM(**lm_kwargs)
         dspy.configure(lm=lm)
 
     def _setup_programs(self) -> None:
