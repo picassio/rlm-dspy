@@ -124,11 +124,25 @@ rlm-dspy ask "Debug this" file.py -d
 # Dry run (validate config only)
 rlm-dspy ask "Test" file.py -n
 
+# Output formats
+rlm-dspy ask "Explain" file.py                    # Rich text (default)
+rlm-dspy ask "Explain" file.py --format json      # JSON output
+rlm-dspy ask "Explain" file.py --format markdown  # Markdown output
+rlm-dspy ask "Explain" file.py -j                 # JSON shorthand
+
+# Save to file
+rlm-dspy ask "Analyze" src/ -o report.md              # Text to file
+rlm-dspy ask "Analyze" src/ -f markdown -o report.md  # Markdown to file
+rlm-dspy ask "Analyze" src/ -j -o data.json           # JSON to file
+
 # Analyze from stdin
 cat large_file.txt | rlm-dspy ask "Summarize this" --stdin
 
 # Analyze a git diff
 git diff | rlm-dspy diff "Are there any breaking changes?"
+
+# Multi-analysis (runs 3 queries in parallel)
+rlm-dspy analyze src/
 
 # Check configuration
 rlm-dspy preflight
@@ -411,11 +425,14 @@ Available signatures:
 
 CLI usage:
 ```bash
-# Structured security audit
-rlm-dspy ask "Audit this code" src/ --signature security --json
+# Structured security audit (JSON)
+rlm-dspy ask "Audit this code" src/ --signature security --format json
 
-# Structured bug report  
+# Structured bug report (JSON shorthand)
 rlm-dspy ask "Find bugs" src/ -S bugs -j
+
+# Structured output as Markdown
+rlm-dspy ask "Find bugs" src/ -S bugs --format markdown -o report.md
 ```
 
 ### Custom Interpreter
