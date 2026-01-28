@@ -749,17 +749,19 @@ class RLM:
         chunks = self._chunk_context(context, chunk_size)
         trace.append({"step": "chunk", "num_chunks": len(chunks)})
 
-        buffer = ""
+        findings: list[str] = []
         for i, chunk in enumerate(chunks):
             self._check_limits()
+            # Build previous findings string for context
+            previous = "\n".join(findings) if findings else ""
             result = self.chunk_analyzer(
-                query=f"{query}\n\nPrevious findings: {buffer}" if buffer else query,
+                query=f"{query}\n\nPrevious findings: {previous}" if previous else query,
                 chunk=chunk,
                 chunk_index=i,
                 total_chunks=len(chunks),
             )
             if result.confidence != "none":
-                buffer = f"{buffer}\n{result.relevant_info}" if buffer else result.relevant_info
+                findings.append(result.relevant_info)
                 trace.append(
                     {
                         "step": "iterate",
@@ -768,7 +770,7 @@ class RLM:
                     }
                 )
 
-        return buffer or "No relevant information found."
+        return "\n".join(findings) if findings else "No relevant information found."
 
     def _process_hierarchical(
         self,
