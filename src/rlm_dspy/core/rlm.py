@@ -587,27 +587,13 @@ class RLM:
         if self._is_structured:
             # Get all output fields from the signature class
             sig = self._signature
-            # dspy.Signature classes have output_fields() method or we can inspect
             output_field_names = []
-            if hasattr(sig, "output_fields"):
-                # Method that returns field names
-                try:
-                    fields = sig.output_fields()
-                    if isinstance(fields, dict):
-                        output_field_names = list(fields.keys())
-                    else:
-                        output_field_names = list(fields)
-                except Exception:
-                    pass
             
-            if not output_field_names:
-                # Fallback: inspect the class for OutputField annotations
-                import dspy
-                for name in dir(sig):
-                    if not name.startswith("_"):
-                        attr = getattr(sig, name, None)
-                        if isinstance(attr, dspy.OutputField):
-                            output_field_names.append(name)
+            # dspy.Signature classes have output_fields as a dict property
+            if hasattr(sig, "output_fields"):
+                fields = sig.output_fields
+                if isinstance(fields, dict):
+                    output_field_names = list(fields.keys())
             
             # Extract values from prediction
             for field_name in output_field_names:
