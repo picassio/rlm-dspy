@@ -295,6 +295,24 @@ class GroundednessResult:
     """Threshold used for is_grounded determination."""
 
 
+def _get_configured_lm(model: str | None = None):
+    """Get a configured DSPy LM using centralized RLMConfig.
+    
+    Uses the same model/API key resolution as the main RLM class:
+    1. Explicit model parameter
+    2. Environment variables (RLM_MODEL, RLM_API_KEY)
+    3. User config (~/.rlm/config.yaml)
+    4. Provider-specific API keys
+    """
+    import dspy
+    from .core.rlm import RLMConfig
+    
+    # Create config - it handles all resolution automatically
+    config = RLMConfig(model=model) if model else RLMConfig()
+    
+    return dspy.LM(config.model, api_key=config.api_key)
+
+
 def validate_groundedness(
     output: str,
     context: str,
@@ -308,12 +326,15 @@ def validate_groundedness(
     in the output are supported by the context. More accurate than
     regex-based validation but requires an LLM call.
     
+    Uses the same model/API key configuration as the main RLM class
+    (env vars, ~/.rlm/config.yaml, provider-specific keys).
+    
     Args:
         output: LLM output to validate
         context: Source context the output should be grounded in
         query: Original question asked
         threshold: Minimum groundedness score (0-1) to pass
-        model: Model to use for validation (default: from env or gpt-4o-mini)
+        model: Model to use (default: from RLMConfig)
         
     Returns:
         GroundednessResult with score, claims, and discussion
@@ -329,31 +350,11 @@ def validate_groundedness(
             print(f"Output may be hallucinated: {result.discussion}")
         ```
     """
-    import os
     import dspy
     from dspy.evaluate.auto_evaluation import AnswerGroundedness
     from dspy.predict.chain_of_thought import ChainOfThought
     
-    # Configure LM - use same resolution as RLM class
-    if model is None:
-        model = os.environ.get("RLM_MODEL")
-        if not model:
-            try:
-                from .core.user_config import get_config_value
-                model = get_config_value("model")
-            except Exception:
-                pass
-        model = model or "openai/gpt-4o-mini"
-    
-    # Get API key for the model
-    from .core.rlm import get_provider_env_var
-    api_key = None
-    if env_var := get_provider_env_var(model):
-        api_key = os.environ.get(env_var)
-    if not api_key:
-        api_key = os.environ.get("RLM_API_KEY") or os.environ.get("OPENROUTER_API_KEY")
-    
-    lm = dspy.LM(model, api_key=api_key)
+    lm = _get_configured_lm(model)
     
     # Run with configured LM
     with dspy.settings.context(lm=lm):
@@ -385,40 +386,23 @@ def validate_completeness(
     Uses DSPy's AnswerCompleteness to measure what fraction of
     expected key ideas are present in the output.
     
+    Uses the same model/API key configuration as the main RLM class.
+    
     Args:
         output: LLM output to validate
         expected: Expected/ground truth response
         query: Original question
         threshold: Minimum completeness to pass
-        model: Model to use for validation (default: from env or gpt-4o-mini)
+        model: Model to use (default: from RLMConfig)
         
     Returns:
         Completeness score (0-1)
     """
-    import os
     import dspy
     from dspy.evaluate.auto_evaluation import AnswerCompleteness
     from dspy.predict.chain_of_thought import ChainOfThought
     
-    # Configure LM - use same resolution as RLM class
-    if model is None:
-        model = os.environ.get("RLM_MODEL")
-        if not model:
-            try:
-                from .core.user_config import get_config_value
-                model = get_config_value("model")
-            except Exception:
-                pass
-        model = model or "openai/gpt-4o-mini"
-    
-    from .core.rlm import get_provider_env_var
-    api_key = None
-    if env_var := get_provider_env_var(model):
-        api_key = os.environ.get(env_var)
-    if not api_key:
-        api_key = os.environ.get("RLM_API_KEY") or os.environ.get("OPENROUTER_API_KEY")
-    
-    lm = dspy.LM(model, api_key=api_key)
+    lm = _get_configured_lm(model)
     
     with dspy.settings.context(lm=lm):
         checker = ChainOfThought(AnswerCompleteness)
@@ -444,38 +428,21 @@ def semantic_f1(
     claims supported by expected) and recall (expected ideas
     covered by output).
     
+    Uses the same model/API key configuration as the main RLM class.
+    
     Args:
         output: LLM output to evaluate
         expected: Ground truth/expected response
         query: Original question
         decompositional: Use detailed key-idea decomposition
-        model: Model to use for evaluation (default: from env or gpt-4o-mini)
+        model: Model to use (default: from RLMConfig)
         
     Returns:
         F1 score (0-1)
     """
-    import os
     import dspy
     
-    # Configure LM - use same resolution as RLM class
-    if model is None:
-        model = os.environ.get("RLM_MODEL")
-        if not model:
-            try:
-                from .core.user_config import get_config_value
-                model = get_config_value("model")
-            except Exception:
-                pass
-        model = model or "openai/gpt-4o-mini"
-    
-    from .core.rlm import get_provider_env_var
-    api_key = None
-    if env_var := get_provider_env_var(model):
-        api_key = os.environ.get(env_var)
-    if not api_key:
-        api_key = os.environ.get("RLM_API_KEY") or os.environ.get("OPENROUTER_API_KEY")
-    
-    lm = dspy.LM(model, api_key=api_key)
+    lm = _get_configured_lm(model)
     
     # Create example and prediction objects
     class Example:
