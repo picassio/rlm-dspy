@@ -70,7 +70,19 @@ Python, JavaScript, TypeScript, Go, Rust, Java, C, C++, Ruby, C#.
 
 ## Quick Start
 
-### CLI Usage
+### 1. Setup (One-Time)
+
+```bash
+# Interactive setup wizard
+rlm-dspy setup
+
+# Or configure directly
+rlm-dspy setup --env-file ~/.env --model openai/gpt-4o --budget 1.0
+```
+
+This creates `~/.rlm/config.yaml` with your preferences and links to your API keys.
+
+### 2. CLI Usage
 
 ```bash
 # Ask a question about code
@@ -96,21 +108,25 @@ git diff | rlm-dspy diff "Are there any breaking changes?"
 
 # Check configuration
 rlm-dspy preflight
+
+# Show current config
+rlm-dspy config
 ```
 
-### Python API
+### 3. Python API
 
 ```python
 from rlm_dspy import RLM, RLMConfig
 
-# Configure
+# Uses settings from ~/.rlm/config.yaml automatically
+rlm = RLM()
+
+# Or configure explicitly
 config = RLMConfig(
-    model="openrouter/google/gemini-3-flash-preview",
+    model="openai/gpt-4o",
     max_budget=1.0,  # USD
     syntax_aware_chunking=True,  # Use tree-sitter
 )
-
-# Create RLM instance
 rlm = RLM(config=config)
 
 # Load context from files
@@ -342,34 +358,78 @@ Best for: Very large contexts requiring multiple levels
 
 ## Configuration
 
-### Environment Variables
+### Setup Command (Recommended)
 
-See [.env.example](.env.example) for a complete template.
+The easiest way to configure RLM-DSPy:
+
+```bash
+# Interactive wizard
+rlm-dspy setup
+
+# Or with options
+rlm-dspy setup --env-file ~/.env --model deepseek/deepseek-chat --budget 0.50
+```
+
+This creates `~/.rlm/config.yaml`:
+
+```yaml
+model: deepseek/deepseek-chat
+max_budget: 0.5
+env_file: /path/to/.env
+```
+
+### Configuration Priority
+
+Settings are resolved in this order (highest to lowest):
+
+| Priority | Source | Example |
+|----------|--------|---------|
+| 1 | CLI arguments | `--model openai/gpt-4o` |
+| 2 | Environment variables | `RLM_MODEL=openai/gpt-4o` |
+| 3 | User config | `~/.rlm/config.yaml` |
+| 4 | Built-in defaults | `openai/gpt-4o-mini` |
+
+### Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `RLM_API_KEY` | - | API key (or `OPENROUTER_API_KEY`) |
-| `RLM_MODEL` | `google/gemini-3-flash-preview` | Model to use |
-| `RLM_SUB_MODEL` | (same as RLM_MODEL) | Model for sub-queries |
-| `RLM_API_BASE` | `https://openrouter.ai/api/v1` | API endpoint |
+| `RLM_API_KEY` | - | API key (or use provider-specific) |
+| `RLM_MODEL` | `openai/gpt-4o-mini` | Model to use |
+| `RLM_API_BASE` | - | Custom API endpoint (optional) |
 | `RLM_MAX_BUDGET` | `1.0` | Maximum cost in USD |
 | `RLM_MAX_TIMEOUT` | `300` | Maximum time in seconds |
 | `RLM_CHUNK_SIZE` | `100000` | Chunk size (chars) |
 | `RLM_SYNTAX_AWARE` | `true` | Tree-sitter chunking |
 | `RLM_PARALLEL_CHUNKS` | `20` | Concurrent chunks |
-| `RLM_PASTE_THRESHOLD` | `2000` | Paste store threshold |
 
-### Quick Start `.env`
+### Provider-Specific API Keys
+
+RLM-DSPy auto-detects API keys based on model prefix:
+
+| Model Prefix | Environment Variable |
+|--------------|---------------------|
+| `openai/` | `OPENAI_API_KEY` |
+| `anthropic/` | `ANTHROPIC_API_KEY` |
+| `deepseek/` | `DEEPSEEK_API_KEY` |
+| `moonshot/` | `MOONSHOT_API_KEY` |
+| `minimax/` | `MINIMAX_API_KEY` |
+| `gemini/` | `GEMINI_API_KEY` |
+| `groq/` | `GROQ_API_KEY` |
+| `openrouter/` | `OPENROUTER_API_KEY` |
+
+### Quick Start
 
 ```bash
-# Minimal
-RLM_API_KEY=sk-or-v1-your-key-here
-RLM_MODEL=google/gemini-3-flash-preview
+# Option 1: Use setup wizard (links to existing .env)
+rlm-dspy setup --env-file ~/.env
 
-# Cost-optimized
-RLM_MAX_BUDGET=0.50
-RLM_SYNTAX_AWARE=true
-RLM_PARALLEL_CHUNKS=20
+# Option 2: Set environment variable directly
+export OPENAI_API_KEY="sk-..."
+rlm-dspy ask "What does this do?" ./src
+
+# Option 3: Provider-specific key
+export DEEPSEEK_API_KEY="sk-..."
+rlm-dspy ask "..." ./src --model deepseek/deepseek-chat
 ```
 
 ### Programmatic Configuration
@@ -513,6 +573,11 @@ EOF
 # Compile
 rlm-dspy compile training.json --output ~/.rlm-dspy/compiled/
 ```
+
+## Documentation
+
+- **[Provider Guide](docs/PROVIDERS.md)** - Full list of 100+ supported LLM providers
+- **[Testing Results](docs/TESTING.md)** - Accuracy tests, anti-hallucination checks, and benchmarks
 
 ## License
 
