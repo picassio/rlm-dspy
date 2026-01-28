@@ -1,7 +1,12 @@
 """Core RLM-DSPy modules."""
 
+# AST indexing (tree-sitter) - used by `rlm-dspy index` command
 from .ast_index import ASTIndex, Definition, index_file, index_files
-from .async_client import AsyncLLMClient, aggregate_answers_async, analyze_chunks_async
+
+# Core RLM (uses dspy.RLM for REPL-based exploration)
+from .rlm import RLM, RLMConfig, RLMResult
+
+# Config utilities
 from .config_utils import (
     ConfigResolver,
     atomic_read_json,
@@ -10,14 +15,14 @@ from .config_utils import (
     get_config_dir,
     inject_context,
 )
+
+# Debug utilities
 from .debug import (
     Verbosity,
     configure_debug,
-    debug_chunk,
     debug_log,
     debug_request,
     debug_response,
-    debug_summary,
     get_verbosity,
     is_debug,
     is_verbose,
@@ -26,6 +31,8 @@ from .debug import (
     trace,
     truncate_for_log,
 )
+
+# File utilities
 from .fileutils import (
     atomic_write,
     ensure_dir,
@@ -38,10 +45,11 @@ from .fileutils import (
     smart_rmtree,
     sync_directory,
 )
-from .paste_store import PasteStore, store_large_content
-from .programs import ChunkedProcessor, MapReduceProcessor, RecursiveAnalyzer
+
+# Retry utilities
 from .retry import is_rate_limit_error, parse_retry_after, retry_sync, retry_with_backoff
-from .rlm import RLM, RLMConfig, RLMResult
+
+# Secrets management
 from .secrets import (
     MissingSecretError,
     check_for_exposed_secrets,
@@ -51,13 +59,8 @@ from .secrets import (
     is_secret_key,
     mask_value,
 )
-from .signatures import AggregateAnswers, AnalyzeChunk, DecomposeTask, ExtractAnswer
-from .syntax_chunker import (
-    TREE_SITTER_AVAILABLE,
-    CodeChunk,
-    chunk_code_syntax_aware,
-    chunk_mixed_content,
-)
+
+# Token stats
 from .token_stats import (
     SessionStats,
     TokenStats,
@@ -66,7 +69,8 @@ from .token_stats import (
     get_session,
     record_operation,
 )
-from .types import BatchResult, ChunkResult, FailedChunk, ProcessingStats
+
+# Validation
 from .validation import (
     PreflightResult,
     ValidationResult,
@@ -75,57 +79,28 @@ from .validation import (
     validate_project_name,
 )
 
+# Legacy: Keep for `compile` command compatibility (DSPy prompt optimization)
+from .programs import ChunkedProcessor, MapReduceProcessor, RecursiveAnalyzer
+from .signatures import AggregateAnswers, AnalyzeChunk, DecomposeTask, ExtractAnswer
+
 __all__ = [
-    # AST Index
+    # AST Index (tree-sitter)
     "ASTIndex",
     "Definition",
     "index_file",
     "index_files",
-    # Core
+    # Core RLM
     "RLM",
     "RLMConfig",
     "RLMResult",
-    # Signatures
-    "AnalyzeChunk",
-    "AggregateAnswers",
-    "DecomposeTask",
-    "ExtractAnswer",
-    # Programs
-    "RecursiveAnalyzer",
-    "ChunkedProcessor",
-    "MapReduceProcessor",
-    # Async
-    "AsyncLLMClient",
-    "analyze_chunks_async",
-    "aggregate_answers_async",
-    # Types (from modaic patterns)
-    "FailedChunk",
-    "ChunkResult",
-    "BatchResult",
-    "ProcessingStats",
-    # Retry
-    "retry_with_backoff",
-    "retry_sync",
-    # Secrets (from modaic patterns)
-    "clean_secrets",
-    "inject_secrets",
-    "check_for_exposed_secrets",
-    "is_secret_key",
-    "mask_value",
-    "get_api_key",
-    "MissingSecretError",
-    # File utilities (from modaic patterns)
-    "is_windows",
-    "is_macos",
-    "is_linux",
-    "get_cache_dir",
-    "smart_link",
-    "smart_rmtree",
-    "sync_directory",
-    "path_to_module",
-    "ensure_dir",
-    "atomic_write",
-    # Debug utilities (from modaic patterns)
+    # Config utilities
+    "atomic_read_json",
+    "atomic_write_json",
+    "ConfigResolver",
+    "format_user_error",
+    "get_config_dir",
+    "inject_context",
+    # Debug utilities
     "Verbosity",
     "get_verbosity",
     "is_verbose",
@@ -138,25 +113,30 @@ __all__ = [
     "debug_log",
     "debug_request",
     "debug_response",
-    "debug_chunk",
-    "debug_summary",
-    # Validation utilities (from modaic patterns)
-    "ValidationResult",
-    "PreflightResult",
-    "preflight_check",
-    "validate_project_name",
-    "validate_jsonl_file",
-    # Rate limit utilities
+    # File utilities
+    "is_windows",
+    "is_macos",
+    "is_linux",
+    "get_cache_dir",
+    "smart_link",
+    "smart_rmtree",
+    "sync_directory",
+    "path_to_module",
+    "ensure_dir",
+    "atomic_write",
+    # Retry utilities
+    "retry_with_backoff",
+    "retry_sync",
     "parse_retry_after",
     "is_rate_limit_error",
-    # Syntax-aware chunking
-    "CodeChunk",
-    "chunk_code_syntax_aware",
-    "chunk_mixed_content",
-    "TREE_SITTER_AVAILABLE",
-    # Paste store (large content handling)
-    "PasteStore",
-    "store_large_content",
+    # Secrets management
+    "clean_secrets",
+    "inject_secrets",
+    "check_for_exposed_secrets",
+    "is_secret_key",
+    "mask_value",
+    "get_api_key",
+    "MissingSecretError",
     # Token stats
     "TokenStats",
     "SessionStats",
@@ -164,11 +144,18 @@ __all__ = [
     "estimate_cost",
     "get_session",
     "record_operation",
-    # Config utilities
-    "atomic_read_json",
-    "atomic_write_json",
-    "ConfigResolver",
-    "format_user_error",
-    "get_config_dir",
-    "inject_context",
+    # Validation
+    "ValidationResult",
+    "PreflightResult",
+    "preflight_check",
+    "validate_project_name",
+    "validate_jsonl_file",
+    # Legacy (for compile command)
+    "AnalyzeChunk",
+    "AggregateAnswers",
+    "DecomposeTask",
+    "ExtractAnswer",
+    "RecursiveAnalyzer",
+    "ChunkedProcessor",
+    "MapReduceProcessor",
 ]

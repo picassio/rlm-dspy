@@ -162,10 +162,10 @@ def ask(
         console.print(
             Panel(
                 f"[bold]Model:[/bold] {config.model}\n"
-                f"[bold]API:[/bold] {config.api_base}\n"
-                f"[bold]Chunk Size:[/bold] {config.default_chunk_size:,}\n"
-                f"[bold]Strategy:[/bold] {config.strategy}",
-                title="[bold blue]Debug Mode[/bold blue]",
+                f"[bold]Sub Model:[/bold] {config.sub_model}\n"
+                f"[bold]Max Iterations:[/bold] {config.max_iterations}\n"
+                f"[bold]Max LLM Calls:[/bold] {config.max_llm_calls}",
+                title="[bold blue]Debug Mode (RLM)[/bold blue]",
                 border_style="blue",
             )
         )
@@ -211,7 +211,6 @@ def ask(
             api_base=config.api_base,
             budget=config.max_budget,
             context=context,
-            chunk_size=config.default_chunk_size,
             check_network=True,
         )
         preflight.print_report()
@@ -765,7 +764,6 @@ def preflight(
         api_base=config.api_base,
         budget=config.max_budget,
         context=context,
-        chunk_size=config.default_chunk_size,
         check_network=check_network,
     )
 

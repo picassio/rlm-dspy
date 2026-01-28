@@ -188,14 +188,6 @@ class RLMConfig:
         )
     )
 
-    # Legacy settings (for backward compatibility with CLI)
-    default_chunk_size: int = field(
-        default_factory=lambda: _env_int("RLM_CHUNK_SIZE", 100_000)
-    )
-    syntax_aware_chunking: bool = field(
-        default_factory=lambda: _env_bool("RLM_SYNTAX_AWARE", True)
-    )
-
     def __repr__(self) -> str:
         key_display = "***" if self.api_key else None
         return (
