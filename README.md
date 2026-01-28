@@ -437,51 +437,29 @@ rlm-dspy ask "Find bugs" src/ -S bugs --format markdown -o report.md
 
 ### Hallucination Detection
 
-Two levels of validation are available:
-
-#### Fast Regex-Based Validation (No LLM Calls)
+Validate outputs using LLM-as-judge (DSPy's semantic evaluation):
 
 ```bash
-# CLI: Check for hallucinated line numbers, functions, files
-rlm-dspy ask "Find bugs and their line numbers" src/ --validate
+# CLI: Validate output is grounded in context
+rlm-dspy ask "Find bugs with line numbers" src/ --validate
 ```
 
 ```python
-from rlm_dspy import RLM, validate_all
+from rlm_dspy import RLM, validate_groundedness, semantic_f1
 
-result = rlm.query("Find bugs with line numbers", context)
-
-# Fast validation (regex-based, instant)
-validation = validate_all(result.answer, context)
-if not validation.is_valid:
-    print(f"Warning: Possible hallucinations detected!")
-    for issue in validation.issues:
-        print(f"  - {issue}")
-```
-
-Detects:
-- **Line numbers** beyond file length
-- **Function/class names** not in source
-- **File paths** not in context
-- **Code blocks** not matching source
-
-#### LLM-as-Judge Validation (DSPy Integration)
-
-For deeper semantic validation using DSPy's built-in evaluation:
-
-```python
-from rlm_dspy import validate_groundedness, semantic_f1
+result = rlm.query("Find bugs", context)
 
 # Check if claims are supported by context
-groundedness = validate_groundedness(
+validation = validate_groundedness(
     output=result.answer,
     context=context,
     query="Find bugs in this code",
 )
-print(f"Groundedness: {groundedness.score:.0%}")
-print(f"Claims found: {groundedness.claims}")
-if not groundedness.is_grounded:
-    print(f"Warning: {groundedness.discussion}")
+print(f"Groundedness: {validation.score:.0%}")
+if not validation.is_grounded:
+    print(f"Warning: Potential hallucination!")
+    print(f"Claims: {validation.claims}")
+    print(f"Discussion: {validation.discussion}")
 
 # Compare against expected output
 f1 = semantic_f1(
@@ -492,7 +470,7 @@ f1 = semantic_f1(
 print(f"Semantic F1: {f1:.0%}")
 ```
 
-DSPy provides:
+Available validators:
 - **validate_groundedness()** - Check if claims are supported by context
 - **validate_completeness()** - Check coverage of expected content
 - **semantic_f1()** - Precision/recall of semantic content

@@ -501,18 +501,17 @@ def ask(
                 raise typer.Exit(1)
             progress.update(task, description="Done!")
 
-    # Validate output for hallucinations if requested
+    # Validate output for hallucinations if requested (uses LLM-as-judge)
     if validate and result.success:
-        from .guards import validate_all
+        from .guards import validate_groundedness
         
-        validation = validate_all(result.answer, context)
-        if not validation.is_valid:
-            console.print("\n[yellow]⚠ Potential hallucinations detected:[/yellow]")
-            for issue in validation.issues:
-                console.print(f"  [dim]• {issue}[/dim]")
-            console.print(f"  [dim]Confidence: {validation.confidence:.0%}[/dim]")
-        elif verbose:
-            console.print(f"\n[green]✓ Output validated (confidence: {validation.confidence:.0%})[/green]")
+        console.print("\n[dim]Validating output with LLM-as-judge...[/dim]")
+        validation = validate_groundedness(result.answer, context, query)
+        if not validation.is_grounded:
+            console.print(f"\n[yellow]⚠ Potential hallucinations detected ({validation.score:.0%} grounded)[/yellow]")
+            console.print(f"[dim]{validation.discussion[:500]}[/dim]")
+        else:
+            console.print(f"\n[green]✓ Output validated ({validation.score:.0%} grounded)[/green]")
     
     # Resolve output format (--json is shorthand for --format json)
     resolved_format = output_format or ("json" if output_json else "text")
