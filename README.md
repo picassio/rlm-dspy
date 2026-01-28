@@ -267,18 +267,23 @@ rlm-dspy ask "..." ./src --model ollama/llama3.2
 ### Config File (`~/.rlm/config.yaml`)
 
 ```yaml
-# Model to use (provider/model-name format)
-model: openai/gpt-4o-mini
+# Model settings
+model: openrouter/google/gemini-3-flash-preview
+sub_model: openrouter/google/gemini-3-flash-preview  # Use same model to reduce hallucination
 
-# Maximum cost in USD per query
-max_budget: 1.0
+# Execution limits (higher = fewer hallucinations from forced completion)
+max_iterations: 30      # Max REPL iterations (default: 20)
+max_llm_calls: 100      # Max sub-LLM calls (default: 50)
 
-# Maximum time in seconds per query  
-max_timeout: 300
+# Budget/safety limits
+max_budget: 2.0         # Max cost in USD (default: 1.0)
+max_timeout: 600        # Max time in seconds (default: 300)
 
-# Path to .env file with API keys (auto-loaded on startup)
+# Path to .env file with API keys
 env_file: ~/.env
 ```
+
+**Tip**: To reduce hallucinations, use the same high-quality model for both `model` and `sub_model`, and increase `max_iterations`.
 
 ### Environment Variables
 

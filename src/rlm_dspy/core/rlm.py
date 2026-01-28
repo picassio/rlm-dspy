@@ -223,21 +223,31 @@ class RLMConfig:
     sub_model: str = field(
         default_factory=lambda: _env(
             "RLM_SUB_MODEL", 
-            _env("RLM_MODEL", _get_user_config_default("model", "openai/gpt-4o-mini"))
+            _get_user_config_default(
+                "sub_model",
+                _env("RLM_MODEL", _get_user_config_default("model", "openai/gpt-4o-mini"))
+            )
         )
     )
     api_base: str | None = field(default_factory=lambda: os.environ.get("RLM_API_BASE"))
     api_key: str | None = field(default_factory=_resolve_api_key)
 
     # RLM execution settings (maps to dspy.RLM parameters)
+    # Priority: env var > config.yaml > default
     max_iterations: int = field(
-        default_factory=lambda: _env_get("RLM_MAX_ITERATIONS", 20)
+        default_factory=lambda: _env_get(
+            "RLM_MAX_ITERATIONS", _get_user_config_default("max_iterations", 20)
+        )
     )
     max_llm_calls: int = field(
-        default_factory=lambda: _env_get("RLM_MAX_LLM_CALLS", 50)
+        default_factory=lambda: _env_get(
+            "RLM_MAX_LLM_CALLS", _get_user_config_default("max_llm_calls", 50)
+        )
     )
     max_output_chars: int = field(
-        default_factory=lambda: _env_get("RLM_MAX_OUTPUT_CHARS", 100_000)
+        default_factory=lambda: _env_get(
+            "RLM_MAX_OUTPUT_CHARS", _get_user_config_default("max_output_chars", 100_000)
+        )
     )
     verbose: bool = field(
         default_factory=lambda: _env_get("RLM_VERBOSE", False)
