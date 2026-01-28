@@ -775,5 +775,86 @@ def preflight(
         raise typer.Exit(1)
 
 
+@app.command()
+def index(
+    paths: Annotated[
+        list[Path],
+        typer.Argument(help="Files or directories to index"),
+    ],
+    kind: Annotated[
+        Optional[str],
+        typer.Option("--kind", "-k", help="Filter by kind: class, function, method"),
+    ] = None,
+    name: Annotated[
+        Optional[str],
+        typer.Option("--name", "-n", help="Filter by name (substring match)"),
+    ] = None,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", "-j", help="Output as JSON"),
+    ] = False,
+) -> None:
+    """
+    Index code structure using tree-sitter (100% accurate).
+
+    Unlike LLM queries, this uses AST parsing for exact results.
+    No hallucination - perfect for finding exact line numbers.
+
+    Examples:
+        rlm-dspy index src/                     # All definitions
+        rlm-dspy index src/ --kind class        # Only classes
+        rlm-dspy index src/ --name "Config"     # Search by name
+        rlm-dspy index src/ -k method -n init   # Methods containing "init"
+    """
+    from .core.ast_index import index_file
+
+    # Collect all files
+    all_files: list[Path] = []
+    for p in paths:
+        if p.is_file():
+            all_files.append(p)
+        elif p.is_dir():
+            for ext in [".py", ".js", ".ts", ".go", ".rs", ".java", ".c", ".cpp", ".rb"]:
+                all_files.extend(p.rglob(f"*{ext}"))
+
+    # Index all files
+    from .core.ast_index import Definition
+    all_defs: list[Definition] = []
+    for f in sorted(all_files):
+        idx = index_file(f)
+        all_defs.extend(idx.definitions)
+
+    # Filter
+    results = all_defs
+    if kind:
+        results = [d for d in results if d.kind == kind]
+    if name:
+        results = [d for d in results if name.lower() in d.name.lower()]
+
+    if not results:
+        console.print("[yellow]No definitions found[/yellow]")
+        raise typer.Exit(0)
+
+    if json_output:
+        import json
+        data = [
+            {"name": d.name, "kind": d.kind, "line": d.line, "file": d.file, "parent": d.parent}
+            for d in results
+        ]
+        console.print(json.dumps(data, indent=2))
+    else:
+        table = Table(title=f"Code Index ({len(results)} definitions)")
+        table.add_column("Kind", style="cyan")
+        table.add_column("Name", style="green")
+        table.add_column("Line", style="yellow", justify="right")
+        table.add_column("File", style="dim")
+
+        for d in results:
+            display_name = f"{d.parent}.{d.name}" if d.parent else d.name
+            table.add_row(d.kind, display_name, str(d.line), d.file)
+
+        console.print(table)
+
+
 if __name__ == "__main__":
     app()
