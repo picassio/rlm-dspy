@@ -306,3 +306,42 @@ class TestGlobalDB:
         reset_db()
         db2 = get_db()
         assert db1 is not db2
+
+
+class TestLRUEviction:
+    """Tests for LRU cache eviction."""
+
+    def test_lru_eviction(self):
+        """Cache evicts oldest entries when full."""
+        db = SalsaDB(max_cache_size=3)
+        call_count = 0
+
+        @salsa_query
+        def my_query(db, x):
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        # Fill cache
+        db.query(my_query, 1)  # call 1
+        db.query(my_query, 2)  # call 2
+        db.query(my_query, 3)  # call 3
+        assert call_count == 3
+
+        # Cache hits (no new calls)
+        db.query(my_query, 1)
+        db.query(my_query, 2)
+        assert call_count == 3
+
+        # Add new entry, should evict oldest (1 was touched, so 3 is oldest)
+        db.query(my_query, 4)  # call 4, evicts 3
+        assert call_count == 4
+
+        # Query 1 and 2 should still be cached
+        db.query(my_query, 1)
+        db.query(my_query, 2)
+        assert call_count == 4
+
+        # Query 3 was evicted, needs recompute
+        db.query(my_query, 3)  # call 5
+        assert call_count == 5

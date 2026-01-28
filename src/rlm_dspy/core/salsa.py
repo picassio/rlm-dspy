@@ -37,6 +37,7 @@ import json
 import logging
 import threading
 import time
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, TypeVar
@@ -126,20 +127,26 @@ class SalsaDB:
     Thread-safe for concurrent access.
     """
 
-    def __init__(self, persist_path: Path | str | None = None):
+    def __init__(
+        self,
+        persist_path: Path | str | None = None,
+        max_cache_size: int = 1000,
+    ):
         """Initialize SalsaDB.
 
         Args:
             persist_path: Optional path to persist cache to disk
+            max_cache_size: Maximum number of cached queries (LRU eviction)
         """
         self._lock = threading.RLock()
+        self._max_cache_size = max_cache_size
 
         # File storage
         self._file_contents: dict[str, str] = {}
         self._file_revisions: dict[str, int] = {}
 
-        # Query cache: query_key -> CacheEntry
-        self._query_cache: dict[QueryKey, CacheEntry] = {}
+        # Query cache: query_key -> CacheEntry (OrderedDict for LRU)
+        self._query_cache: OrderedDict[QueryKey, CacheEntry] = OrderedDict()
 
         # Reverse dependencies: query_key -> set of dependent query_keys
         self._reverse_deps: dict[QueryKey, set[QueryKey]] = {}
@@ -265,6 +272,8 @@ class SalsaDB:
                 if valid:
                     self._stats.cache_hits += 1
                     logger.debug(f"Cache hit: {query_name}({args})")
+                    # LRU touch - move to end
+                    self._query_cache.move_to_end(query_key)
                     return entry.result
 
             # Cache miss - need to compute
@@ -294,6 +303,11 @@ class SalsaDB:
                     self._reverse_deps[query_key].add(parent_key)
 
                 self._query_cache[query_key] = entry
+
+                # LRU eviction if cache is too large
+                while len(self._query_cache) > self._max_cache_size:
+                    oldest_key = next(iter(self._query_cache))
+                    self._evict_query(oldest_key)
 
                 return result
 
@@ -339,6 +353,20 @@ class SalsaDB:
 
         logger.debug(f"Invalidated: {query_key[0]}({query_key[1]})")
         return count
+
+    def _evict_query(self, query_key: QueryKey) -> None:
+        """Evict a query from cache (LRU eviction, no cascade)."""
+        if query_key not in self._query_cache:
+            return
+
+        # Just remove from cache, don't cascade (this is eviction, not invalidation)
+        del self._query_cache[query_key]
+
+        # Clean up reverse deps pointing to this query
+        if query_key in self._reverse_deps:
+            del self._reverse_deps[query_key]
+
+        logger.debug(f"Evicted (LRU): {query_key[0]}")
 
     def _invalidate_file_dependents(self, path: str) -> int:
         """Invalidate all queries depending on a file."""
