@@ -12,7 +12,7 @@
 | Large context handling | ✅ Recursive decomposition | ❌ Single pass | ✅ Recursive + typed |
 | Prompt optimization | ❌ Hand-crafted | ✅ Auto-compiled | ✅ Compiled recursive |
 | Syntax-aware chunking | ❌ Character-based | ❌ N/A | ✅ Tree-sitter |
-| Incremental caching | ❌ None | ❌ None | ✅ Salsa-style |
+| Response caching | ❌ None | ❌ None | ✅ DSPy disk cache |
 | Budget/timeout controls | ✅ Built-in | ❌ Manual | ✅ Built-in |
 | Parallel processing | ✅ Batched queries | ⚠️ Limited | ✅ Async + batched |
 
@@ -47,8 +47,8 @@
 │                                     │                                       │
 │                                     ▼                                       │
 │                            ┌─────────────────┐               ┌────────────┐ │
-│                            │ Salsa Cache     │──────────────▶│   Answer   │ │
-│                            │ (auto-invalidate│               │ + Metadata │ │
+│                            │ DSPy Cache      │──────────────▶│   Answer   │ │
+│                            │ (disk-persisted)│               │ + Metadata │ │
 │                            └─────────────────┘               └────────────┘ │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -205,34 +205,21 @@ for chunk in chunks:
 
 **Supported Languages:** Python, TypeScript, JavaScript, Go, Rust, Java, C/C++, Ruby, PHP, C#, Kotlin, Lua
 
-### 2. Salsa-Style Incremental Caching
+### 2. Smart Response Caching
 
-Automatic memoization with dependency tracking (inspired by rust-analyzer):
+DSPy's built-in disk cache provides automatic memoization:
 
 ```python
-from rlm_dspy.core import SalsaDB, salsa_query
+# Same query + same code = instant cached response
+rlm-dspy ask "What does foo do?" src/foo.py  # First call: ~5s (API call)
+rlm-dspy ask "What does foo do?" src/foo.py  # Second call: ~1s (cached!)
 
-db = SalsaDB()
-
-@salsa_query
-def analyze_file(db: SalsaDB, path: str) -> dict:
-    content = db.get_file(path)
-    return {"lines": len(content.split("\n"))}
-
-# First call - computes and caches
-db.set_file("auth.py", "def login(): pass")
-result = db.query(analyze_file, "auth.py")  # Computes
-
-# Second call - instant (cached)
-result = db.query(analyze_file, "auth.py")  # Cache hit!
-
-# File changes - cache auto-invalidates
-db.set_file("auth.py", "def login(): pass\ndef logout(): pass")
-result = db.query(analyze_file, "auth.py")  # Recomputes automatically
-
-print(db.stats.to_dict())
-# {'cache_hits': 1, 'cache_misses': 2, 'invalidations': 1, ...}
+# Code changes = fresh response (cache key includes content)
+echo "def foo(): return 42" > src/foo.py
+rlm-dspy ask "What does foo do?" src/foo.py  # Fresh call (content changed)
 ```
+
+Cache is content-aware: `cache_key = hash(model + prompt + code_content)`
 
 ### 3. Large Content Handling (Paste Store)
 
@@ -545,13 +532,6 @@ from rlm_dspy.core import (
     SessionStats,
     count_tokens,
     estimate_cost,
-    
-    # Salsa caching
-    SalsaDB,
-    salsa_query,
-    is_salsa_query,
-    get_db,
-    reset_db,
     
     # Content deduplication
     ContentHashedIndex,

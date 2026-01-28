@@ -79,19 +79,6 @@ from .registry import (
 )
 from .retry import is_rate_limit_error, parse_retry_after, retry_sync, retry_with_backoff
 from .rlm import RLM, RLMConfig, RLMResult
-from .salsa import (
-    CacheEntry,
-    QueryStats,
-    SalsaDB,
-    file_content,
-    file_hash,
-    file_line_count,
-    file_lines,
-    get_db,
-    is_salsa_query,
-    reset_db,
-    salsa_query,
-)
 from .secrets import (
     MissingSecretError,
     check_for_exposed_secrets,
@@ -245,18 +232,6 @@ __all__ = [
     "estimate_cost",
     "get_session",
     "record_operation",
-    # Salsa-style incremental computation
-    "SalsaDB",
-    "salsa_query",
-    "is_salsa_query",
-    "CacheEntry",
-    "QueryStats",
-    "get_db",
-    "reset_db",
-    "file_content",
-    "file_hash",
-    "file_lines",
-    "file_line_count",
     # Config utilities
     "atomic_read_json",
     "atomic_write_json",
