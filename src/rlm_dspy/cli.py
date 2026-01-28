@@ -880,6 +880,11 @@ EXAMPLE_PROMPTS = {
             ),
             ("Input", "Find places where user input isn't validated or sanitized"),
             ("Resources", "Find resource leaks: unclosed files, connections, memory"),
+            (
+                "Trace",
+                "In function {X}, trace where variable {Y} comes from, "
+                "what produces it, and verify if {Y}['key'] can raise KeyError",
+            ),
         ],
     },
     "dead-code": {
