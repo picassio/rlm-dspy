@@ -91,6 +91,171 @@ def _get_config(
     return config
 
 
+# =============================================================================
+# Ask Command Helpers (reduce function length and nesting)
+# =============================================================================
+
+def _load_context(
+    rlm: RLM,
+    paths: list[Path] | None,
+    stdin: bool,
+    verbose: bool,
+) -> str:
+    """Load context from stdin or file paths.
+    
+    Args:
+        rlm: RLM instance for loading files
+        paths: List of file/directory paths
+        stdin: Whether to read from stdin
+        verbose: Show progress
+        
+    Returns:
+        Loaded context string
+        
+    Raises:
+        typer.Exit: On error
+    """
+    if stdin:
+        context = sys.stdin.read()
+        if not context.strip():
+            console.print("[red]Error: No input received from stdin[/red]")
+            raise typer.Exit(1)
+        return context
+    
+    if paths:
+        # Check for missing paths
+        missing = [p for p in paths if not p.exists()]
+        for p in missing:
+            console.print(f"[yellow]Warning: Path not found: {p}[/yellow]")
+        
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+            transient=True,
+        ) as progress:
+            progress.add_task("Loading files...", total=None)
+            context = rlm.load_context([str(p) for p in paths])
+        
+        if not context.strip():
+            console.print("[red]Error: No content loaded from provided paths[/red]")
+            raise typer.Exit(1)
+        return context
+    
+    console.print("[red]Error: Provide paths or use --stdin[/red]")
+    raise typer.Exit(1)
+
+
+def _run_dry_run(config: RLMConfig, context: str) -> None:
+    """Run preflight checks for dry-run mode.
+    
+    Args:
+        config: RLM configuration
+        context: Loaded context
+        
+    Raises:
+        typer.Exit: Always exits after checks
+    """
+    from .core.validation import preflight_check
+    
+    preflight = preflight_check(
+        api_key_required=True,
+        model=config.model,
+        api_base=config.api_base,
+        budget=config.max_budget,
+        context=context,
+        check_network=True,
+    )
+    preflight.print_report()
+    
+    if preflight.passed:
+        console.print("\n[green]✓ Ready to run! Remove --dry-run to execute.[/green]")
+        raise typer.Exit(0)
+    else:
+        raise typer.Exit(1)
+
+
+def _output_result(
+    result: RLMResult,
+    output_json: bool,
+    output_file: Path | None,
+    verbose: bool,
+    debug: bool,
+) -> None:
+    """Handle result output in various formats.
+    
+    Args:
+        result: Query result
+        output_json: Output as JSON
+        output_file: File to write to
+        verbose: Show stats
+        debug: Show trajectory
+        
+    Raises:
+        typer.Exit: On error
+    """
+    if output_json:
+        json_output = json.dumps(
+            {
+                "answer": result.answer,
+                "success": result.success,
+                "tokens": result.total_tokens,
+                "cost": result.total_cost,
+                "time": result.elapsed_time,
+                "error": result.error,
+            },
+            indent=2,
+        )
+        if output_file:
+            _safe_write_output(output_file, json_output)
+            console.print(f"[green]Output written to {output_file}[/green]")
+        else:
+            print(json_output)
+        return
+    
+    if output_file:
+        if result.success:
+            _safe_write_output(output_file, result.answer)
+            console.print(f"[green]Output written to {output_file}[/green]")
+            if verbose or debug:
+                _print_stats(result)
+        else:
+            console.print(f"[red]Error: {result.error or 'Unknown error'}[/red]")
+            raise typer.Exit(1)
+        return
+    
+    # Console output
+    if result.success:
+        console.print(
+            Panel(
+                Markdown(result.answer),
+                title="Answer",
+                border_style="green",
+            )
+        )
+        if verbose or debug:
+            _print_stats(result)
+        if debug and result.trajectory:
+            _print_trajectory(result.trajectory)
+    else:
+        console.print(f"[red]Error: {result.error or 'Unknown error'}[/red]")
+        if debug and result.trajectory:
+            _print_trajectory(result.trajectory[-3:], "Partial trajectory before failure")
+        raise typer.Exit(1)
+
+
+def _print_trajectory(trajectory: list, title: str = "Trajectory") -> None:
+    """Print query trajectory for debugging."""
+    console.print(f"\n[bold]{title}:[/bold]")
+    for i, step in enumerate(trajectory, 1):
+        console.print(f"[dim]Step {i}:[/dim]")
+        if isinstance(step, dict):
+            if "code" in step:
+                console.print(f"  [cyan]Code:[/cyan] {step['code'][:200]}...")
+            if "output" in step:
+                console.print(f"  [green]Output:[/green] {step['output'][:200]}...")
+
+
 @app.command()
 def ask(
     query: Annotated[str, typer.Argument(help="The question to answer")],
@@ -185,10 +350,7 @@ def ask(
     config = _get_config(model, sub_model, budget, timeout, max_iterations, verbose or debug)
     rlm = RLM(config=config)
 
-    # Dry run mode - validate and exit
-    if dry_run:
-        console.print("[bold]Dry Run Mode - Validating configuration...[/bold]\n")
-
+    # Show debug info
     if is_debug():
         console.print(
             Panel(
@@ -201,58 +363,19 @@ def ask(
             )
         )
 
-    # Load context
-    if stdin:
-        context = sys.stdin.read()
-        if not context.strip():
-            console.print("[red]Error: No input received from stdin[/red]")
-            raise typer.Exit(1)
-    elif paths:
-        # Check if paths exist first
-        missing = [p for p in paths if not p.exists()]
-        if missing:
-            for p in missing:
-                console.print(f"[yellow]Warning: Path not found: {p}[/yellow]")
-
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-            transient=True,
-        ) as progress:
-            progress.add_task("Loading files...", total=None)
-            context = rlm.load_context([str(p) for p in paths])
-
-        if not context.strip():
-            console.print("[red]Error: No content loaded from provided paths[/red]")
-            raise typer.Exit(1)
-    else:
-        console.print("[red]Error: Provide paths or use --stdin[/red]")
-        raise typer.Exit(1)
-
+    # Load context from stdin or paths
+    context = _load_context(rlm, paths, stdin, verbose or debug)
+    
     if verbose or debug:
         src = f"{len(paths or [])} path(s)" if paths else "stdin"
         console.print(f"\n[dim]Context: {len(context):,} chars from {src}[/dim]")
 
-    # Dry run - run preflight checks and exit
+    # Dry run - validate and exit
     if dry_run:
-        preflight = preflight_check(
-            api_key_required=True,
-            model=config.model,
-            api_base=config.api_base,
-            budget=config.max_budget,
-            context=context,
-            check_network=True,
-        )
-        preflight.print_report()
+        console.print("[bold]Dry Run Mode - Validating configuration...[/bold]\n")
+        _run_dry_run(config, context)
 
-        if preflight.passed:
-            console.print("\n[green]✓ Ready to run! Remove --dry-run to execute.[/green]")
-            raise typer.Exit(0)
-        else:
-            raise typer.Exit(1)
-
-    # Execute query
+    # Execute query with progress
     with timer("Total query time", log=verbose or debug):
         with Progress(
             SpinnerColumn(),
@@ -264,63 +387,8 @@ def ask(
             result = rlm.query(query, context)
             progress.update(task, description="Done!")
 
-    # Output
-    if output_json:
-        json_output = json.dumps(
-            {
-                "answer": result.answer,
-                "success": result.success,
-                "tokens": result.total_tokens,
-                "cost": result.total_cost,
-                "time": result.elapsed_time,
-                "error": result.error,
-            },
-            indent=2,
-        )
-        if output_file:
-            _safe_write_output(output_file, json_output)
-            console.print(f"[green]Output written to {output_file}[/green]")
-        else:
-            print(json_output)
-    elif output_file:
-        # Write plain text/markdown to file
-        if result.success:
-            _safe_write_output(output_file, result.answer)
-            console.print(f"[green]Output written to {output_file}[/green]")
-            if verbose or debug:
-                _print_stats(result)
-        else:
-            console.print(f"[red]Error: {result.error or 'Unknown error'}[/red]")
-            raise typer.Exit(1)
-    else:
-        if result.success:
-            console.print(
-                Panel(
-                    Markdown(result.answer),
-                    title="Answer",
-                    border_style="green",
-                )
-            )
-            if verbose or debug:
-                _print_stats(result)
-            if debug and result.trajectory:
-                console.print("\n[bold]Trajectory:[/bold]")
-                for i, step in enumerate(result.trajectory, 1):
-                    console.print(f"[dim]Step {i}:[/dim]")
-                    if isinstance(step, dict):
-                        if "code" in step:
-                            console.print(f"  [cyan]Code:[/cyan] {step['code'][:200]}...")
-                        if "output" in step:
-                            console.print(f"  [green]Output:[/green] {step['output'][:200]}...")
-        else:
-            console.print(f"[red]Error: {result.error or 'Unknown error'}[/red]")
-            # Show trajectory if available for debugging
-            if debug and result.trajectory:
-                console.print("\n[yellow]Partial trajectory before failure:[/yellow]")
-                for i, step in enumerate(result.trajectory[-3:], 1):  # Last 3 steps
-                    if isinstance(step, dict) and "output" in step:
-                        console.print(f"  Step: {step.get('output', '')[:200]}...")
-            raise typer.Exit(1)
+    # Output result
+    _output_result(result, output_json, output_file, verbose, debug)
 
 
 @app.command()
