@@ -286,9 +286,11 @@ def atomic_write(
     # Write to temp file in same directory (for atomic rename)
     fd, temp_path = tempfile.mkstemp(dir=path.parent, prefix=".tmp_")
     temp = Path(temp_path)
+    fd_closed = False
 
     try:
         with os.fdopen(fd, mode) as f:
+            fd_closed = True  # fdopen takes ownership of fd
             f.write(content)
 
         # Retry loop for rename (helps with Windows file locking)
@@ -324,6 +326,12 @@ def atomic_write(
             raise last_error
 
     except Exception:
+        # Clean up fd if fdopen failed
+        if not fd_closed:
+            try:
+                os.close(fd)
+            except Exception:
+                pass
         # Clean up temp file on any failure
         try:
             temp.unlink(missing_ok=True)

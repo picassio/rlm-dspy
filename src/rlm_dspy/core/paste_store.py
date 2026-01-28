@@ -203,15 +203,15 @@ class PasteStore:
             self._counter += 1
             paste_id = f"paste_{self._counter}"
             self._store[paste_id] = text
-        self._total_bytes += text_bytes
-        self._metadata[paste_id] = {
-            "chars": len(text),
-            "lines": text.count("\n") + 1,
-            "label": label,
-            "created_at": time.time(),
-            "bytes": text_bytes,
-        }
-        return paste_id
+            self._total_bytes += text_bytes
+            self._metadata[paste_id] = {
+                "chars": len(text),
+                "lines": text.count("\n") + 1,
+                "label": label,
+                "created_at": time.time(),
+                "bytes": text_bytes,
+            }
+            return paste_id
 
     def get(self, paste_id: str) -> str | None:
         """Retrieve stored content by ID. Marks as recently used (thread-safe)."""

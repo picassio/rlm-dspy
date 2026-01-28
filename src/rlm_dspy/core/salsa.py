@@ -362,9 +362,13 @@ class SalsaDB:
         # Just remove from cache, don't cascade (this is eviction, not invalidation)
         del self._query_cache[query_key]
 
-        # Clean up reverse deps pointing to this query
+        # Clean up reverse deps where this query is a dependency
         if query_key in self._reverse_deps:
             del self._reverse_deps[query_key]
+
+        # Also remove this query from other entries' dependent sets (prevent memory leak)
+        for deps_set in self._reverse_deps.values():
+            deps_set.discard(query_key)
 
         logger.debug(f"Evicted (LRU): {query_key[0]}")
 
