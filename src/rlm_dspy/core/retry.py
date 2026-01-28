@@ -94,7 +94,6 @@ def is_retryable_error(error: Exception) -> bool:
         return True
 
     # Check for HTTP status codes with word boundaries (avoid matching IDs like "user 503")
-    import re
     # Match patterns like "503", "HTTP 503", "status 503", "error 503", "(503)"
     # Include all codes from RETRYABLE_STATUS_CODES
     retryable_codes = "|".join(str(c) for c in RETRYABLE_STATUS_CODES)
