@@ -5,11 +5,14 @@ Provides persistent configuration via ~/.rlm/config.yaml
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 # Default config directory
 CONFIG_DIR = Path.home() / ".rlm"
@@ -47,7 +50,10 @@ def load_config() -> dict[str, Any]:
         config = DEFAULT_CONFIG.copy()
         config.update(user_config)
         return config
-    except Exception:
+    except FileNotFoundError:
+        return DEFAULT_CONFIG.copy()
+    except Exception as e:
+        logger.warning("Failed to load config from %s: %s", CONFIG_FILE, e)
         return DEFAULT_CONFIG.copy()
 
 
@@ -101,8 +107,10 @@ def load_env_file(env_path: str | Path | None = None) -> dict[str, str]:
                     if key and value:
                         os.environ.setdefault(key, value)
                         loaded[key] = value
-    except Exception:
-        pass
+    except FileNotFoundError:
+        logger.debug("Env file not found: %s", env_path)
+    except Exception as e:
+        logger.warning("Failed to load env file %s: %s", env_path, e)
 
     return loaded
 

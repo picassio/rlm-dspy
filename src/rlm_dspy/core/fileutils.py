@@ -238,8 +238,8 @@ def _kill_blocking_processes(path: Path) -> None:
             capture_output=True,
             timeout=10,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Failed to kill blocking processes: %s", e)
 
 
 def sync_directory(
@@ -289,8 +289,8 @@ def sync_directory(
         try:
             if target_resolved == dangerous.resolve():
                 raise ValueError(f"Cannot sync to protected directory: {target}")
-        except (OSError, RuntimeError):
-            pass  # Path doesn't exist or can't be resolved
+        except (OSError, RuntimeError) as e:
+            logger.debug("Could not resolve protected path %s: %s", dangerous, e)
     
     target.mkdir(parents=True, exist_ok=True)
 
@@ -428,11 +428,11 @@ def atomic_write(
         if not fd_closed:
             try:
                 os.close(fd)
-            except Exception:
-                pass
+            except Exception as cleanup_err:
+                logger.debug("Failed to close fd during cleanup: %s", cleanup_err)
         # Clean up temp file on any failure
         try:
             temp.unlink(missing_ok=True)
-        except Exception:
-            pass  # Best effort cleanup
+        except Exception as cleanup_err:
+            logger.debug("Failed to remove temp file during cleanup: %s", cleanup_err)
         raise

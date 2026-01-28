@@ -5,6 +5,7 @@ Learned from modaic: validate before expensive operations.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from dataclasses import dataclass, field
@@ -12,6 +13,7 @@ from dataclasses import dataclass, field
 from rich.console import Console
 from rich.table import Table
 
+logger = logging.getLogger(__name__)
 console = Console(stderr=True)
 
 
@@ -144,8 +146,8 @@ def check_api_endpoint(api_base: str) -> ValidationResult:
                     passed=True,
                     message=f"Reachable: {api_base}",
                 )
-    except httpx.ConnectError:
-        pass
+    except httpx.ConnectError as e:
+        logger.debug("API endpoint connection failed: %s", e)
     except Exception as e:
         return ValidationResult(
             name="API Endpoint",

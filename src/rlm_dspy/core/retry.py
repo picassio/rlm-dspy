@@ -139,8 +139,8 @@ def parse_retry_after(response: httpx.Response | None) -> float | None:
         dt = parsedate_to_datetime(retry_after)
         delay = dt.timestamp() - time.time()
         return max(0, delay)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Failed to parse retry-after as HTTP date '%s': %s", retry_after, e)
 
     # Try to extract number from error message (some APIs include it)
     match = re.search(r"(\d+)\s*(?:seconds?|s)", retry_after, re.IGNORECASE)

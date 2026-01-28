@@ -68,8 +68,8 @@ def atomic_write_json(path: Path | str, data: dict[str, Any], secure: bool = Fal
         # Clean up temp file on failure
         try:
             os.unlink(tmp_path)
-        except OSError:
-            pass
+        except OSError as cleanup_err:
+            logger.debug("Failed to remove temp file during cleanup: %s", cleanup_err)
         raise
 
 

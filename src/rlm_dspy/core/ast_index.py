@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from .treesitter import EXTENSION_MAP, get_parser_simple
 
@@ -64,7 +64,7 @@ class ASTIndex:
 
 
 
-def _extract_definitions(node, language: str, results: list[Definition], file: str, current_class: str | None = None):
+def _extract_definitions(node: Any, language: str, results: list[Definition], file: str, current_class: str | None = None) -> None:
     """Recursively extract definitions from AST."""
 
     # Class definitions

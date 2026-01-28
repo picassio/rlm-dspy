@@ -24,7 +24,7 @@ class RecursiveAnalyzer(dspy.Module):
     # Minimum chunk size to prevent infinite recursion (1KB)
     MIN_CHUNK_SIZE = 1000
 
-    def __init__(self, max_depth: int = 3):
+    def __init__(self, max_depth: int = 3) -> None:
         super().__init__()
         self.max_depth = max_depth
         self.analyzer = dspy.ChainOfThought(AnalyzeChunk)
@@ -87,6 +87,24 @@ class RecursiveAnalyzer(dspy.Module):
                 depth=depth,
             )
 
+        # Rolling aggregation to prevent context overflow
+        # Aggregate in batches of MAX_BATCH to stay within token limits
+        MAX_BATCH = 5
+        while len(partial_answers) > MAX_BATCH:
+            # Aggregate in batches, then aggregate the aggregations
+            batched_answers = []
+            for i in range(0, len(partial_answers), MAX_BATCH):
+                batch = partial_answers[i:i + MAX_BATCH]
+                if len(batch) == 1:
+                    batched_answers.append(batch[0])
+                else:
+                    batch_result = self.aggregator(
+                        query=query,
+                        partial_answers=batch,
+                    )
+                    batched_answers.append(batch_result.final_answer)
+            partial_answers = batched_answers
+
         aggregated = self.aggregator(
             query=query,
             partial_answers=partial_answers,
@@ -100,18 +118,30 @@ class RecursiveAnalyzer(dspy.Module):
         )
 
     def _chunk(self, text: str, size: int, overlap: int = 500) -> list[str]:
-        """Split text into overlapping chunks."""
-        # Validate inputs to prevent infinite loops
+        """Split text into overlapping chunks.
+        
+        Args:
+            text: Text to split
+            size: Target chunk size in characters
+            overlap: Overlap between consecutive chunks
+            
+        Returns:
+            List of text chunks
+        """
+        # Validate inputs to prevent infinite loops / OOM
         if size <= 0:
             size = 100_000  # Default chunk size
-        overlap = min(overlap, size - 1)  # Ensure overlap < size
+        # Ensure overlap is at most half the chunk size to guarantee meaningful progress
+        overlap = min(overlap, size // 2)
+        # Minimum step size to prevent excessive chunk creation
+        min_step = max(size // 4, 1000)  # At least 25% progress or 1000 chars
 
         chunks = []
         start = 0
         while start < len(text):
             end = min(start + size, len(text))
             chunks.append(text[start:end])
-            step = max(1, size - overlap)  # Ensure we make progress
+            step = max(min_step, size - overlap)  # Ensure meaningful progress
             start += step
             if end >= len(text):
                 break
@@ -126,7 +156,7 @@ class ChunkedProcessor(dspy.Module):
     Good for medium-sized contexts where one level of chunking suffices.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.analyzer = dspy.ChainOfThought(AnalyzeChunk)
         self.aggregator = dspy.ChainOfThought(AggregateAnswers)
@@ -222,7 +252,7 @@ class MapReduceProcessor(dspy.Module):
         self,
         map_signature: type[dspy.Signature] = AnalyzeChunk,
         reduce_signature: type[dspy.Signature] = AggregateAnswers,
-    ):
+    ) -> None:
         super().__init__()
         self.mapper = dspy.ChainOfThought(map_signature)
         self.reducer = dspy.ChainOfThought(reduce_signature)
@@ -289,7 +319,7 @@ class ValidatedAnalyzer(dspy.Module):
     2. Validate answer is supported by evidence
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.analyzer = ChunkedProcessor()
         self.validator = dspy.ChainOfThought(ValidateAnswer)
@@ -319,13 +349,24 @@ class ValidatedAnalyzer(dspy.Module):
         )
 
         # Phase 2: Validate
-        # Use the full context for validation, not just first chunk
-        # Bug fix: Previously only used first chunk_size chars, missing evidence
-        # from later in the document that may have contributed to the answer
+        # Use a representative sample of context for validation
+        # Limit to avoid context window overflow on large codebases
+        max_evidence_chars = min(chunk_size * 2, 200_000)
+        if len(context) > max_evidence_chars:
+            # Take beginning + end to capture both setup and conclusions
+            half = max_evidence_chars // 2
+            evidence = (
+                context[:half] 
+                + f"\n\n... [{len(context) - max_evidence_chars:,} chars omitted] ...\n\n" 
+                + context[-half:]
+            )
+        else:
+            evidence = context
+        
         validation = self.validator(
             query=query,
             proposed_answer=analysis.answer,
-            evidence=context,  # Use full context, not truncated sample
+            evidence=evidence,
         )
 
         # Return validated or corrected answer
