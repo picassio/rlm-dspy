@@ -195,17 +195,18 @@ def _output_result(
         typer.Exit: On error
     """
     if output_json:
-        json_output = json.dumps(
-            {
-                "answer": result.answer,
-                "success": result.success,
-                "tokens": result.total_tokens,
-                "cost": result.total_cost,
-                "time": result.elapsed_time,
-                "error": result.error,
-            },
-            indent=2,
-        )
+        output_data = {
+            "answer": result.answer,
+            "success": result.success,
+            "tokens": result.total_tokens,
+            "cost": result.total_cost,
+            "time": result.elapsed_time,
+            "error": result.error,
+        }
+        # Include structured outputs if present (custom signatures)
+        if result.outputs:
+            output_data["outputs"] = result.outputs
+        json_output = json.dumps(output_data, indent=2)
         if output_file:
             _safe_write_output(output_file, json_output)
             console.print(f"[green]Output written to {output_file}[/green]")
@@ -226,13 +227,33 @@ def _output_result(
     
     # Console output
     if result.success:
-        console.print(
-            Panel(
-                Markdown(result.answer),
-                title="Answer",
-                border_style="green",
+        if result.outputs:
+            # Structured output from custom signature
+            from rich.table import Table
+            
+            table = Table(title="Structured Output", show_header=True, header_style="bold cyan")
+            table.add_column("Field", style="cyan")
+            table.add_column("Value")
+            
+            for key, value in result.outputs.items():
+                if isinstance(value, list):
+                    value_str = "\n".join(f"• {v}" for v in value) if value else "(empty)"
+                elif isinstance(value, bool):
+                    value_str = "[green]Yes[/green]" if value else "[red]No[/red]"
+                else:
+                    value_str = str(value)
+                table.add_row(key, value_str)
+            
+            console.print(table)
+        else:
+            # Standard string answer
+            console.print(
+                Panel(
+                    Markdown(result.answer),
+                    title="Answer",
+                    border_style="green",
+                )
             )
-        )
         if verbose or debug:
             _print_stats(result)
         if debug and result.trajectory:
@@ -286,6 +307,10 @@ def ask(
     max_iterations: Annotated[
         Optional[int],
         typer.Option("--max-iterations", "-i", help="Max REPL iterations"),
+    ] = None,
+    signature: Annotated[
+        Optional[str],
+        typer.Option("--signature", "-S", help="Output signature: security, bugs, review, architecture, performance, diff"),
     ] = None,
     output_json: Annotated[
         bool,
@@ -348,7 +373,19 @@ def ask(
         setup_logging()
 
     config = _get_config(model, sub_model, budget, timeout, max_iterations, verbose or debug)
-    rlm = RLM(config=config)
+    
+    # Resolve signature
+    sig = "context, query -> answer"  # default
+    if signature:
+        from .signatures import get_signature, list_signatures
+        sig_class = get_signature(signature)
+        if sig_class is None:
+            console.print(f"[red]Unknown signature: {signature}[/red]")
+            console.print(f"[dim]Available: {', '.join(list_signatures())}[/dim]")
+            raise typer.Exit(1)
+        sig = sig_class
+    
+    rlm = RLM(config=config, signature=sig)
 
     # Show debug info
     if is_debug():
@@ -409,6 +446,10 @@ def analyze(
         str,
         typer.Option("--format", "-f", help="Output format: markdown|json"),
     ] = "markdown",
+    sequential: Annotated[
+        bool,
+        typer.Option("--sequential", "-s", help="Run queries sequentially (slower)"),
+    ] = False,
 ) -> None:
     """
     Generate a comprehensive analysis of files.
@@ -418,6 +459,9 @@ def analyze(
     - Key components and their purposes
     - Dependencies and relationships
     - Potential issues or improvements
+
+    By default, runs 3 analysis queries in parallel for ~3x faster results.
+    Use --sequential for debugging or if you encounter issues.
     """
     config = _get_config(model)
     rlm = RLM(config=config)
@@ -430,27 +474,46 @@ def analyze(
         progress.add_task("Loading files...", total=None)
         context = rlm.load_context([str(p) for p in paths])
 
-        progress.add_task("Analyzing structure...", total=None)
-        structure = rlm.query(
-            "List all files and their purposes in a structured format",
-            context,
-        )
+        if sequential:
+            # Sequential mode (old behavior)
+            progress.add_task("Analyzing structure...", total=None)
+            structure = rlm.query(
+                "List all files and their purposes in a structured format",
+                context,
+            )
 
-        progress.add_task("Identifying components...", total=None)
-        components = rlm.query(
-            "Identify the main components, classes, and functions. Explain their roles.",
-            context,
-        )
+            progress.add_task("Identifying components...", total=None)
+            components = rlm.query(
+                "Identify the main components, classes, and functions. Explain their roles.",
+                context,
+            )
 
-        progress.add_task("Finding issues...", total=None)
-        issues = rlm.query(
-            "Find potential bugs, code smells, or areas for improvement.",
-            context,
-        )
+            progress.add_task("Finding issues...", total=None)
+            issues = rlm.query(
+                "Find potential bugs, code smells, or areas for improvement.",
+                context,
+            )
+            
+            results_list = [structure, components, issues]
+        else:
+            # Parallel mode (default, ~3x faster)
+            progress.add_task("Analyzing in parallel (structure, components, issues)...", total=None)
+            results_list = rlm.batch([
+                {"query": "List all files and their purposes in a structured format"},
+                {"query": "Identify the main components, classes, and functions. Explain their roles."},
+                {"query": "Find potential bugs, code smells, or areas for improvement."},
+            ], context=context, num_threads=3, return_failed=True)
+
+    # Unpack results
+    if len(results_list) != 3:
+        console.print(f"[red]Error: Expected 3 results, got {len(results_list)}[/red]")
+        raise typer.Exit(1)
+
+    structure, components, issues = results_list
 
     # Check for failures
-    results = [("structure", structure), ("components", components), ("issues", issues)]
-    for name, result in results:
+    named_results = [("structure", structure), ("components", components), ("issues", issues)]
+    for name, result in named_results:
         if not result.success:
             console.print(f"[red]Error analyzing {name}: {result.error}[/red]")
             raise typer.Exit(1)

@@ -265,7 +265,13 @@ class RLMConfig:
 
 @dataclass
 class RLMResult:
-    """Result from RLM execution."""
+    """Result from RLM execution.
+    
+    For standard signatures (context, query -> answer), access result.answer.
+    For custom signatures with structured output, access fields via:
+    - result.outputs dict: result.outputs["bugs"], result.outputs["score"]
+    - attribute access: result.bugs, result.score (raises AttributeError if missing)
+    """
 
     answer: str
     success: bool
@@ -285,6 +291,26 @@ class RLMResult:
 
     # Token stats (for compatibility)
     token_stats: Any = None
+    
+    # Structured output fields (for custom signatures)
+    outputs: dict[str, Any] = field(default_factory=dict)
+    
+    def __getattr__(self, name: str) -> Any:
+        """Allow accessing output fields as attributes.
+        
+        Example:
+            result.bugs  # same as result.outputs["bugs"]
+        """
+        # This is only called for attributes not found normally
+        if name.startswith("_"):
+            raise AttributeError(f"'{type(self).__name__}' has no attribute '{name}'")
+        outputs = object.__getattribute__(self, "outputs")
+        if name in outputs:
+            return outputs[name]
+        raise AttributeError(
+            f"'{type(self).__name__}' has no attribute '{name}'. "
+            f"Available outputs: {list(outputs.keys())}"
+        )
 
 
 # =============================================================================
@@ -324,7 +350,7 @@ class RLM:
         self,
         config: RLMConfig | None = None,
         tools: dict[str, Callable[..., str]] | None = None,
-        signature: str = "context, query -> answer",
+        signature: str | type = "context, query -> answer",
     ):
         """
         Initialize RLM.
@@ -334,11 +360,27 @@ class RLM:
             tools: Additional tool functions available in the REPL.
                    Built-in tools (llm_query, llm_query_batched) are always available.
             signature: DSPy signature defining inputs and outputs.
+                      Can be a string like "context, query -> answer" or
+                      a dspy.Signature class for structured output.
                       Default: "context, query -> answer"
+                      
+        Example with structured output:
+            ```python
+            from rlm_dspy.signatures import BugFinder
+            
+            rlm = RLM(config=config, signature=BugFinder)
+            result = rlm.query("Find all bugs", context)
+            
+            print(result.bugs)          # list[str]
+            print(result.has_critical)  # bool
+            ```
         """
         self.config = config or RLMConfig()
         self._tools = tools or {}
         self._signature = signature
+        
+        # Track if we have a custom signature with structured output
+        self._is_structured = not isinstance(signature, str)
 
         # Validate API key early
         requires_api_key = not self.config.model.lower().startswith("ollama/")
@@ -510,6 +552,79 @@ class RLM:
 
         return "\n".join(context_parts)
 
+    def _build_result(self, prediction: Any, elapsed: float) -> RLMResult:
+        """Build RLMResult from dspy prediction, handling structured outputs."""
+        raw_trajectory = getattr(prediction, "trajectory", [])
+        raw_reasoning = getattr(prediction, "final_reasoning", "")
+        extra_secrets = [self.config.api_key] if self.config.api_key else None
+        
+        # Extract structured outputs if using custom signature
+        outputs: dict[str, Any] = {}
+        answer = ""
+        
+        if self._is_structured:
+            # Get all output fields from the signature class
+            sig = self._signature
+            # dspy.Signature classes have output_fields() method or we can inspect
+            output_field_names = []
+            if hasattr(sig, "output_fields"):
+                # Method that returns field names
+                try:
+                    fields = sig.output_fields()
+                    if isinstance(fields, dict):
+                        output_field_names = list(fields.keys())
+                    else:
+                        output_field_names = list(fields)
+                except Exception:
+                    pass
+            
+            if not output_field_names:
+                # Fallback: inspect the class for OutputField annotations
+                import dspy
+                for name in dir(sig):
+                    if not name.startswith("_"):
+                        attr = getattr(sig, name, None)
+                        if isinstance(attr, dspy.OutputField):
+                            output_field_names.append(name)
+            
+            # Extract values from prediction
+            for field_name in output_field_names:
+                value = getattr(prediction, field_name, None)
+                if value is not None:
+                    # Sanitize string values
+                    if isinstance(value, str):
+                        value = _sanitize_secrets(value, extra_secrets)
+                    elif isinstance(value, list):
+                        value = [
+                            _sanitize_secrets(v, extra_secrets) if isinstance(v, str) else v
+                            for v in value
+                        ]
+                    outputs[field_name] = value
+            
+            # Use first output field as "answer" for compatibility
+            if outputs:
+                first_key = next(iter(outputs))
+                first_val = outputs[first_key]
+                if isinstance(first_val, str):
+                    answer = first_val
+                elif isinstance(first_val, list):
+                    answer = "\n".join(str(v) for v in first_val)
+                else:
+                    answer = str(first_val)
+        else:
+            # Standard signature: just get answer
+            answer = _sanitize_secrets(getattr(prediction, "answer", ""), extra_secrets)
+        
+        return RLMResult(
+            answer=answer,
+            success=True,
+            elapsed_time=elapsed,
+            trajectory=_sanitize_trajectory(raw_trajectory, extra_secrets),
+            final_reasoning=_sanitize_secrets(raw_reasoning, extra_secrets),
+            iterations=len(raw_trajectory),
+            outputs=outputs,
+        )
+
     def query(
         self,
         query: str,
@@ -526,7 +641,8 @@ class RLM:
             context: The context to explore (typically from load_context)
 
         Returns:
-            RLMResult with answer, trajectory, and metadata
+            RLMResult with answer, trajectory, and metadata.
+            For custom signatures, structured outputs available via result.outputs dict.
         """
         import concurrent.futures
 
@@ -554,20 +670,8 @@ class RLM:
 
             elapsed = time.time() - self._start_time
 
-            # Sanitize output to prevent secret leakage
-            # Include config.api_key in case it was passed directly (not from env)
-            raw_trajectory = getattr(prediction, "trajectory", [])
-            raw_reasoning = getattr(prediction, "final_reasoning", "")
-            extra_secrets = [self.config.api_key] if self.config.api_key else None
-            
-            return RLMResult(
-                answer=_sanitize_secrets(prediction.answer, extra_secrets),
-                success=True,
-                elapsed_time=elapsed,
-                trajectory=_sanitize_trajectory(raw_trajectory, extra_secrets),
-                final_reasoning=_sanitize_secrets(raw_reasoning, extra_secrets),
-                iterations=len(raw_trajectory),
-            )
+            # Build result from prediction
+            return self._build_result(prediction, elapsed)
 
         except TimeoutExceededError:
             elapsed = time.time() - self._start_time if self._start_time else 0
@@ -598,24 +702,13 @@ class RLM:
         self._start_time = time.time()
 
         try:
-            prediction = await self._rlm.acall(context=context, query=query)
+            with dspy.settings.context(lm=self._lm):
+                prediction = await self._rlm.aforward(context=context, query=query)
 
             elapsed = time.time() - self._start_time
 
-            # Sanitize output to prevent secret leakage
-            # Include config.api_key in case it was passed directly (not from env)
-            raw_trajectory = getattr(prediction, "trajectory", [])
-            raw_reasoning = getattr(prediction, "final_reasoning", "")
-            extra_secrets = [self.config.api_key] if self.config.api_key else None
-            
-            return RLMResult(
-                answer=_sanitize_secrets(prediction.answer, extra_secrets),
-                success=True,
-                elapsed_time=elapsed,
-                trajectory=_sanitize_trajectory(raw_trajectory, extra_secrets),
-                final_reasoning=_sanitize_secrets(raw_reasoning, extra_secrets),
-                iterations=len(raw_trajectory),
-            )
+            # Build result from prediction (handles structured outputs)
+            return self._build_result(prediction, elapsed)
 
         except Exception as e:
             elapsed = time.time() - self._start_time if self._start_time else 0
@@ -649,6 +742,152 @@ class RLM:
         self._tools[name] = func
         # Recreate RLM with updated tools
         self._rlm = self._create_rlm()
+
+    def batch(
+        self,
+        queries: list[dict[str, str]],
+        context: str | None = None,
+        num_threads: int = 4,
+        max_errors: int | None = None,
+        return_failed: bool = False,
+    ) -> list[RLMResult]:
+        """
+        Process multiple queries in parallel.
+
+        This is much faster than sequential query() calls when you have
+        multiple independent questions about the same or different contexts.
+
+        Args:
+            queries: List of query dicts. Each dict should have:
+                - "query": The question to ask (required)
+                - "context": Optional context (uses shared context if not provided)
+            context: Shared context for all queries (used if not in query dict)
+            num_threads: Number of parallel threads (default: 4)
+            max_errors: Maximum failures before stopping (default: None = no limit)
+            return_failed: If True, include failed results (default: False)
+
+        Returns:
+            List of RLMResult in same order as input queries.
+            Failed queries have success=False and error message.
+
+        Example:
+            ```python
+            rlm = RLM(config=config)
+            context = rlm.load_context(["src/"])
+
+            # Same context, different queries (parallel)
+            results = rlm.batch([
+                {"query": "Summarize the architecture"},
+                {"query": "Find security issues"},
+                {"query": "Find performance bottlenecks"},
+            ], context=context, num_threads=3)
+
+            # Different contexts
+            results = rlm.batch([
+                {"context": file1, "query": "Find bugs"},
+                {"context": file2, "query": "Find bugs"},
+            ], num_threads=2)
+            ```
+        """
+        if not queries:
+            return []
+
+        # Build dspy.Example list
+        examples = []
+        for i, q in enumerate(queries):
+            query_text = q.get("query")
+            if not query_text:
+                raise ValueError(f"Query {i} missing 'query' field")
+
+            ctx = q.get("context", context)
+            if ctx is None:
+                raise ValueError(f"Query {i} has no context (provide in query or as shared context)")
+
+            examples.append(dspy.Example(
+                context=ctx,
+                query=query_text,
+            ).with_inputs("context", "query"))
+
+        # Execute batch with thread-local configuration
+        start_time = time.time()
+        with dspy.settings.context(lm=self._lm):
+            raw_results, failed_examples, exceptions = self._rlm.batch(
+                examples,
+                num_threads=num_threads,
+                max_errors=max_errors,
+                return_failed_examples=True,
+            )
+
+        elapsed = time.time() - start_time
+
+        # Convert to RLMResult list
+        # Note: batch() returns results in order, with None for failed ones
+        results: list[RLMResult] = []
+        
+        # Create a map of failed example indices
+        failed_indices = set()
+        failed_map: dict[int, Exception] = {}
+        if failed_examples:
+            for ex, exc in zip(failed_examples, exceptions):
+                # Find the index of this failed example
+                for i, orig in enumerate(examples):
+                    if orig.context == ex.context and orig.query == ex.query:
+                        failed_indices.add(i)
+                        failed_map[i] = exc
+                        break
+
+        # Build results maintaining order
+        result_idx = 0
+        for i in range(len(examples)):
+            if i in failed_indices:
+                # Failed query
+                error_msg = str(failed_map.get(i, "Unknown error"))
+                results.append(RLMResult(
+                    answer="",
+                    success=False,
+                    error=error_msg,
+                    elapsed_time=elapsed / len(examples),  # Approximate
+                ))
+            else:
+                # Successful query
+                if result_idx < len(raw_results):
+                    pred = raw_results[result_idx]
+                    result_idx += 1
+                    
+                    # Sanitize output
+                    extra_secrets = [self.config.api_key] if self.config.api_key else None
+                    raw_trajectory = getattr(pred, "trajectory", [])
+                    raw_reasoning = getattr(pred, "final_reasoning", "")
+                    
+                    results.append(RLMResult(
+                        answer=_sanitize_secrets(pred.answer, extra_secrets),
+                        success=True,
+                        elapsed_time=elapsed / len(examples),  # Approximate
+                        trajectory=_sanitize_trajectory(raw_trajectory, extra_secrets),
+                        final_reasoning=_sanitize_secrets(raw_reasoning, extra_secrets),
+                        iterations=len(raw_trajectory),
+                    ))
+                else:
+                    # Shouldn't happen, but handle gracefully
+                    results.append(RLMResult(
+                        answer="",
+                        success=False,
+                        error="Result missing from batch",
+                        elapsed_time=elapsed / len(examples),
+                    ))
+
+        # Filter out failed if not requested
+        if not return_failed:
+            results = [r for r in results if r.success]
+
+        _logger.info(
+            "Batch completed: %d/%d successful in %.1fs",
+            sum(1 for r in results if r.success),
+            len(queries),
+            elapsed,
+        )
+
+        return results
 
     def close(self) -> None:
         """Clean up resources."""
