@@ -415,40 +415,49 @@ class RLM:
 
         spec = pathspec.PathSpec.from_lines("gitwildmatch", patterns) if patterns else None
 
-        # Collect all files using os.scandir() for better performance
-        # This avoids O(2N) stat calls that pathlib.iterdir() + is_file() would cause
+        # Common directories to always skip (performance optimization)
+        SKIP_DIRS = {'.git', '__pycache__', 'node_modules', '.venv', 'venv', '.tox', 'dist', 'build'}
+        
+        def _should_skip_entry(entry, entry_path: Path, root_path: Path, spec) -> bool:
+            """Check if an entry should be skipped based on gitignore and common patterns."""
+            # Skip common ignored directories
+            if entry.is_dir(follow_symlinks=False) and entry.name in SKIP_DIRS:
+                return True
+            # Check gitignore patterns
+            if spec:
+                try:
+                    rel_path = entry_path.relative_to(root_path)
+                except ValueError:
+                    rel_path = entry_path
+                if spec.match_file(str(rel_path)):
+                    return True
+            return False
+
         def collect_files_fast(
             current_path: Path, 
-            root_path: Path,  # Track original root for proper gitignore matching
+            root_path: Path,
             spec: pathspec.PathSpec | None
         ) -> list[Path]:
             """Recursively collect files, pruning ignored directories early."""
-            result = []
+            result: list[Path] = []
+            
             try:
-                with os.scandir(current_path) as entries:
-                    for entry in entries:
-                        entry_path = Path(entry.path)
-                        # Calculate relative path from ROOT, not current directory
-                        # This ensures gitignore patterns match correctly
-                        try:
-                            rel_path = entry_path.relative_to(root_path)
-                        except ValueError:
-                            rel_path = entry_path  # Fallback if not relative
-                        
-                        # Check if ignored before recursing (prune early)
-                        if spec and spec.match_file(str(rel_path)):
-                            continue
-                            
-                        if entry.is_file(follow_symlinks=False):
-                            result.append(entry_path)
-                        elif entry.is_dir(follow_symlinks=False):
-                            # Skip common ignored directories for performance
-                            if entry.name in {'.git', '__pycache__', 'node_modules', '.venv', 'venv'}:
-                                continue
-                            # Recurse into subdirectory, keeping same root
-                            result.extend(collect_files_fast(entry_path, root_path, spec))
+                entries = list(os.scandir(current_path))
             except PermissionError:
                 _logger.debug("Permission denied: %s", current_path)
+                return result
+            
+            for entry in entries:
+                entry_path = Path(entry.path)
+                
+                if _should_skip_entry(entry, entry_path, root_path, spec):
+                    continue
+                
+                if entry.is_file(follow_symlinks=False):
+                    result.append(entry_path)
+                elif entry.is_dir(follow_symlinks=False):
+                    result.extend(collect_files_fast(entry_path, root_path, spec))
+            
             return result
 
         files: list[Path] = []
