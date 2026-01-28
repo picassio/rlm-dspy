@@ -327,21 +327,31 @@ resolver = ConfigResolver(
 model = resolver.get("MODEL", default="gpt-4")
 ```
 
-## Limitations
+## Limitations & Solutions
 
-RLM-DSPy is designed for **semantic understanding**, not exact text matching:
+RLM-DSPy provides **two modes** for different needs:
 
-| Use Case | RLM-DSPy | Better Tool |
-|----------|----------|-------------|
-| "What does function X do?" | ✅ Excellent | - |
-| "Find all bugs in this code" | ✅ Excellent | - |
-| "How are these modules connected?" | ✅ Excellent | - |
-| "Find exact string 'foo_bar'" | ⚠️ May fuzzy match | `grep` |
-| "Count occurrences of X" | ⚠️ May miscount | `grep -c` |
+| Use Case | Command | Accuracy |
+|----------|---------|----------|
+| "What does function X do?" | `rlm-dspy ask` | ✅ Excellent (semantic) |
+| "Find all bugs in this code" | `rlm-dspy ask` | ✅ Excellent (semantic) |
+| "Find all classes with line numbers" | `rlm-dspy index --kind class` | ✅ 100% (AST) |
+| "Where is function foo defined?" | `rlm-dspy index --name foo` | ✅ 100% (AST) |
+| "Find exact string 'foo_bar'" | `grep` | ✅ 100% (text) |
 
-**Why?** LLMs are trained for semantic similarity, not exact pattern matching. For precise searches, use `grep`, `ripgrep`, or `ast-grep`.
+### Semantic Search (`ask`) vs Structural Search (`index`)
 
-**Line numbers** are accurate (we include them in the context), but string matching may include similar-but-not-exact matches.
+```bash
+# Semantic understanding (LLM-powered)
+rlm-dspy ask "What does the RLM class do?" src/
+
+# Structural lookup (tree-sitter AST, 100% accurate)
+rlm-dspy index src/ --kind class              # All classes
+rlm-dspy index src/ --name "Error"            # Find by name
+rlm-dspy index src/ --kind method --json      # JSON output
+```
+
+The `index` command uses tree-sitter for **zero hallucination** on structural queries.
 
 ## Processing Strategies
 
