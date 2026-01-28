@@ -47,6 +47,12 @@ def _safe_write_output(output_file: Path, content: str) -> None:
     except PathTraversalError as e:
         console.print(f"[red]Security Error: {e}[/red]")
         raise typer.Exit(1)
+    except PermissionError:
+        console.print(f"[red]Permission denied: Cannot write to {output_file}[/red]")
+        raise typer.Exit(1)
+    except OSError as e:
+        console.print(f"[red]Failed to write file: {e}[/red]")
+        raise typer.Exit(1)
 
 
 def _get_config(
@@ -289,6 +295,12 @@ def _format_as_markdown(result: RLMResult) -> str:
     
     if result.outputs:
         # Structured output from custom signature
+        # Include summary answer if present and different from outputs
+        if result.answer and result.answer.strip():
+            lines.append("## Summary\n")
+            lines.append(result.answer)
+            lines.append("")
+        
         for key, value in result.outputs.items():
             # Convert key from snake_case to Title Case
             title = key.replace("_", " ").title()
@@ -472,7 +484,17 @@ def ask(
             transient=not (verbose or debug),
         ) as progress:
             task = progress.add_task("Analyzing...", total=None)
-            result = rlm.query(query, context)
+            try:
+                result = rlm.query(query, context)
+            except KeyboardInterrupt:
+                console.print("\n[yellow]Query interrupted by user[/yellow]")
+                raise typer.Exit(130)  # Standard exit code for SIGINT
+            except Exception as e:
+                console.print(f"\n[red]Query failed: {e}[/red]")
+                if debug:
+                    import traceback
+                    console.print(f"[dim]{traceback.format_exc()}[/dim]")
+                raise typer.Exit(1)
             progress.update(task, description="Done!")
 
     # Resolve output format (--json is shorthand for --format json)
@@ -530,25 +552,32 @@ def analyze(
 
         if sequential:
             # Sequential mode (old behavior)
-            progress.add_task("Analyzing structure...", total=None)
-            structure = rlm.query(
-                "List all files and their purposes in a structured format",
-                context,
-            )
+            try:
+                progress.add_task("Analyzing structure...", total=None)
+                structure = rlm.query(
+                    "List all files and their purposes in a structured format",
+                    context,
+                )
 
-            progress.add_task("Identifying components...", total=None)
-            components = rlm.query(
-                "Identify the main components, classes, and functions. Explain their roles.",
-                context,
-            )
+                progress.add_task("Identifying components...", total=None)
+                components = rlm.query(
+                    "Identify the main components, classes, and functions. Explain their roles.",
+                    context,
+                )
 
-            progress.add_task("Finding issues...", total=None)
-            issues = rlm.query(
-                "Find potential bugs, code smells, or areas for improvement.",
-                context,
-            )
-            
-            results_list = [structure, components, issues]
+                progress.add_task("Finding issues...", total=None)
+                issues = rlm.query(
+                    "Find potential bugs, code smells, or areas for improvement.",
+                    context,
+                )
+                
+                results_list = [structure, components, issues]
+            except KeyboardInterrupt:
+                console.print("\n[yellow]Analysis interrupted by user[/yellow]")
+                raise typer.Exit(130)
+            except Exception as e:
+                console.print(f"\n[red]Analysis failed: {e}[/red]")
+                raise typer.Exit(1)
         else:
             # Parallel mode (default, ~3x faster)
             progress.add_task("Analyzing in parallel (structure, components, issues)...", total=None)
@@ -623,7 +652,17 @@ def diff(
     rlm = RLM(config=config)
 
     if diff_file:
-        context = diff_file.read_text()
+        try:
+            context = diff_file.read_text()
+        except FileNotFoundError:
+            console.print(f"[red]Error: File not found: {diff_file}[/red]")
+            raise typer.Exit(1)
+        except PermissionError:
+            console.print(f"[red]Error: Permission denied: {diff_file}[/red]")
+            raise typer.Exit(1)
+        except Exception as e:
+            console.print(f"[red]Error reading file: {e}[/red]")
+            raise typer.Exit(1)
     else:
         context = sys.stdin.read()
 
