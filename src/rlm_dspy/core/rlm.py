@@ -52,23 +52,41 @@ def _env_bool(key: str, default: bool) -> bool:
     return val in ("true", "1", "yes", "on")
 
 
-def _normalize_model(model: str) -> str:
-    """Normalize model name for DSPy compatibility.
+def _resolve_api_key() -> str | None:
+    """Resolve API key from environment, checking provider-specific keys.
 
-    DSPy requires provider prefix (e.g., openrouter/) for LiteLLM routing.
-    Auto-adds 'openrouter/' prefix when using OpenRouter API.
+    Priority:
+    1. RLM_API_KEY (explicit override)
+    2. Provider-specific keys based on RLM_MODEL
+    3. OPENROUTER_API_KEY (legacy fallback)
     """
-    api_base = _env("RLM_API_BASE", "https://openrouter.ai/api/v1")
+    # Explicit override
+    if key := os.environ.get("RLM_API_KEY"):
+        return key
 
-    # Already has a provider prefix
-    if "/" in model and model.split("/")[0] in ("openrouter", "openai", "anthropic", "together"):
-        return model
+    # Check provider-specific keys based on model
+    model = os.environ.get("RLM_MODEL", "").lower()
+    provider_keys = {
+        "minimax/": "MINIMAX_API_KEY",
+        "deepseek/": "DEEPSEEK_API_KEY",
+        "moonshot/": "MOONSHOT_API_KEY",
+        "dashscope/": "DASHSCOPE_API_KEY",
+        "anthropic/": "ANTHROPIC_API_KEY",
+        "openai/": "OPENAI_API_KEY",
+        "gemini/": "GEMINI_API_KEY",
+        "groq/": "GROQ_API_KEY",
+        "together_ai/": "TOGETHER_API_KEY",
+        "fireworks_ai/": "FIREWORKS_API_KEY",
+        "openrouter/": "OPENROUTER_API_KEY",
+    }
 
-    # Using OpenRouter API - add prefix
-    if "openrouter" in api_base.lower():
-        return f"openrouter/{model}"
+    for prefix, env_var in provider_keys.items():
+        if model.startswith(prefix):
+            if key := os.environ.get(env_var):
+                return key
 
-    return model
+    # Legacy fallback
+    return os.environ.get("OPENROUTER_API_KEY")
 
 
 @dataclass
@@ -77,8 +95,8 @@ class RLMConfig:
 
     All settings can be overridden via environment variables:
     - RLM_MODEL: Model name (default: google/gemini-3-flash-preview)
-    - RLM_API_BASE: API endpoint (default: https://openrouter.ai/api/v1)
-    - RLM_API_KEY or OPENROUTER_API_KEY: API key
+    - RLM_API_BASE: Custom API endpoint (optional, for self-hosted or proxies)
+    - RLM_API_KEY: API key (or use provider-specific: OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.)
     - RLM_MAX_BUDGET: Max cost in USD (default: 1.0)
     - RLM_MAX_TIMEOUT: Max time in seconds (default: 300)
     - RLM_CHUNK_SIZE: Chunk size in chars (default: 100000)
@@ -88,16 +106,15 @@ class RLMConfig:
     """
 
     # Model settings - all from environment
-    model: str = field(default_factory=lambda: _normalize_model(_env("RLM_MODEL", "google/gemini-3-flash-preview")))
+    # Model format: provider/model-name (e.g., openai/gpt-4o, deepseek/deepseek-chat)
+    model: str = field(default_factory=lambda: _env("RLM_MODEL", "openai/gpt-4o-mini"))
     sub_model: str = field(
-        default_factory=lambda: _normalize_model(
-            _env("RLM_SUB_MODEL", _env("RLM_MODEL", "google/gemini-3-flash-preview"))
-        )
+        default_factory=lambda: _env("RLM_SUB_MODEL", _env("RLM_MODEL", "openai/gpt-4o-mini"))
     )
-    api_base: str = field(default_factory=lambda: _env("RLM_API_BASE", "https://openrouter.ai/api/v1"))
-    api_key: str | None = field(
-        default_factory=lambda: os.environ.get("RLM_API_KEY") or os.environ.get("OPENROUTER_API_KEY")
-    )
+    # api_base is optional - only needed for custom endpoints (self-hosted, proxies)
+    # Native providers (openai/, anthropic/, deepseek/, etc.) don't need this
+    api_base: str | None = field(default_factory=lambda: os.environ.get("RLM_API_BASE"))
+    api_key: str | None = field(default_factory=_resolve_api_key)
 
     # Execution limits
     max_budget: float = field(default_factory=lambda: _env_float("RLM_MAX_BUDGET", 1.0))
@@ -188,8 +205,10 @@ class RLM:
 
         # Validate API key early to fail fast
         if not self.config.api_key:
+            model_prefix = self.config.model.split("/")[0] if "/" in self.config.model else ""
             raise ValueError(
-                "No API key configured. Set RLM_API_KEY or OPENROUTER_API_KEY environment variable."
+                f"No API key configured for model '{self.config.model}'.\n"
+                f"Set one of: RLM_API_KEY, {model_prefix.upper()}_API_KEY, or pass api_key to RLMConfig."
             )
 
         self._setup_dspy()
@@ -216,24 +235,15 @@ class RLM:
 
     def _setup_dspy(self) -> None:
         """Configure DSPy with the specified model."""
-        # Build kwargs - only include api_base if explicitly set
-        # Native providers (minimax/, deepseek/, moonshot/, etc.) don't need api_base
+        # Build kwargs for DSPy LM
         lm_kwargs: dict[str, Any] = {
             "model": self.config.model,
             "api_key": self.config.api_key,
         }
 
-        # Only set api_base for OpenRouter or explicitly configured endpoints
-        # Native LiteLLM providers handle their own base URLs
-        model_lower = self.config.model.lower()
-        native_providers = (
-            "minimax/", "deepseek/", "moonshot/", "dashscope/",
-            "anthropic/", "openai/", "gemini/", "groq/", "ollama/",
-            "together_ai/", "fireworks_ai/", "bedrock/", "vertex_ai/",
-        )
-        is_native_provider = any(model_lower.startswith(p) for p in native_providers)
-
-        if self.config.api_base and not is_native_provider:
+        # Only set api_base if explicitly configured
+        # LiteLLM handles routing for native providers automatically
+        if self.config.api_base:
             lm_kwargs["api_base"] = self.config.api_base
 
         lm = dspy.LM(**lm_kwargs)

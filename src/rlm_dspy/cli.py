@@ -37,8 +37,8 @@ def _get_config(
     """Build config from CLI args and environment.
 
     Environment variables (all optional):
-    - RLM_MODEL: Model name (default: openrouter/google/gemini-3-flash-preview)
-    - RLM_API_BASE: API endpoint (default: https://openrouter.ai/api/v1)
+    - RLM_MODEL: Model name (default: openai/gpt-4o-mini)
+    - RLM_API_BASE: Custom API endpoint (optional, for self-hosted)
     - RLM_API_KEY or OPENROUTER_API_KEY: API key
     - RLM_MAX_BUDGET: Max cost in USD
     - RLM_MAX_TIMEOUT: Max time in seconds
