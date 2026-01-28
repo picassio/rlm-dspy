@@ -12,6 +12,13 @@ from .signatures import (
     get_signature,
     list_signatures,
 )
+from .guards import (
+    ValidationResult,
+    validate_line_numbers,
+    validate_references,
+    validate_code_blocks,
+    validate_all,
+)
 
 __version__ = "0.1.0"
 __all__ = [
@@ -29,4 +36,10 @@ __all__ = [
     "SIGNATURES",
     "get_signature",
     "list_signatures",
+    # Hallucination Guards
+    "ValidationResult",
+    "validate_line_numbers",
+    "validate_references",
+    "validate_code_blocks",
+    "validate_all",
 ]

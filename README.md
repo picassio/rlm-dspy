@@ -435,6 +435,41 @@ rlm-dspy ask "Find bugs" src/ -S bugs -j
 rlm-dspy ask "Find bugs" src/ -S bugs --format markdown -o report.md
 ```
 
+### Hallucination Detection
+
+Validate outputs for potential hallucinations:
+
+```bash
+# CLI: Check for hallucinated line numbers, functions, files
+rlm-dspy ask "Find bugs and their line numbers" src/ --validate
+```
+
+```python
+from rlm_dspy import RLM, validate_all, validate_line_numbers
+
+rlm = RLM(config=config)
+result = rlm.query("Find bugs with line numbers", context)
+
+# Validate the output
+validation = validate_all(result.answer, context)
+if not validation.is_valid:
+    print(f"Warning: Possible hallucinations detected!")
+    for issue in validation.issues:
+        print(f"  - {issue}")
+    print(f"Confidence: {validation.confidence:.0%}")
+
+# Individual validators
+validate_line_numbers(result.answer, context)  # Check line references
+validate_references(result.answer, context)    # Check function/class/file names
+validate_code_blocks(result.answer, context)   # Check code snippets
+```
+
+The validators detect:
+- **Line numbers** that exceed the actual file length
+- **Function/class names** not present in the source
+- **File paths** not mentioned in the context
+- **Code blocks** that don't match the source
+
 ### Custom Interpreter
 
 Use a custom code execution environment:

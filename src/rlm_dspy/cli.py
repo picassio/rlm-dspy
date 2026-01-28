@@ -395,6 +395,10 @@ def ask(
         bool,
         typer.Option("--dry-run", "-n", help="Validate config without running query"),
     ] = False,
+    validate: Annotated[
+        bool,
+        typer.Option("--validate", "-V", help="Check output for hallucinations"),
+    ] = False,
 ) -> None:
     """
     Ask a question about files or piped content.
@@ -497,6 +501,19 @@ def ask(
                 raise typer.Exit(1)
             progress.update(task, description="Done!")
 
+    # Validate output for hallucinations if requested
+    if validate and result.success:
+        from .guards import validate_all
+        
+        validation = validate_all(result.answer, context)
+        if not validation.is_valid:
+            console.print("\n[yellow]⚠ Potential hallucinations detected:[/yellow]")
+            for issue in validation.issues:
+                console.print(f"  [dim]• {issue}[/dim]")
+            console.print(f"  [dim]Confidence: {validation.confidence:.0%}[/dim]")
+        elif verbose:
+            console.print(f"\n[green]✓ Output validated (confidence: {validation.confidence:.0%})[/green]")
+    
     # Resolve output format (--json is shorthand for --format json)
     resolved_format = output_format or ("json" if output_json else "text")
     
