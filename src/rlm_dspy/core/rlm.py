@@ -52,6 +52,34 @@ def _env_bool(key: str, default: bool) -> bool:
     return val in ("true", "1", "yes", "on")
 
 
+# Provider prefix -> environment variable mapping (single source of truth)
+PROVIDER_API_KEYS: dict[str, str] = {
+    "minimax/": "MINIMAX_API_KEY",
+    "deepseek/": "DEEPSEEK_API_KEY",
+    "moonshot/": "MOONSHOT_API_KEY",
+    "dashscope/": "DASHSCOPE_API_KEY",
+    "anthropic/": "ANTHROPIC_API_KEY",
+    "openai/": "OPENAI_API_KEY",
+    "gemini/": "GEMINI_API_KEY",
+    "groq/": "GROQ_API_KEY",
+    "together_ai/": "TOGETHER_API_KEY",
+    "fireworks_ai/": "FIREWORKS_API_KEY",
+    "openrouter/": "OPENROUTER_API_KEY",
+    "bedrock/": "AWS_ACCESS_KEY_ID",  # AWS uses different auth
+    "vertex_ai/": "GOOGLE_APPLICATION_CREDENTIALS",
+    "ollama/": "",  # No API key needed for local
+}
+
+
+def get_provider_env_var(model: str) -> str | None:
+    """Get the environment variable name for a model's provider."""
+    model_lower = model.lower()
+    for prefix, env_var in PROVIDER_API_KEYS.items():
+        if model_lower.startswith(prefix):
+            return env_var if env_var else None
+    return None
+
+
 def _resolve_api_key() -> str | None:
     """Resolve API key from environment, checking provider-specific keys.
 
@@ -65,25 +93,10 @@ def _resolve_api_key() -> str | None:
         return key
 
     # Check provider-specific keys based on model
-    model = os.environ.get("RLM_MODEL", "").lower()
-    provider_keys = {
-        "minimax/": "MINIMAX_API_KEY",
-        "deepseek/": "DEEPSEEK_API_KEY",
-        "moonshot/": "MOONSHOT_API_KEY",
-        "dashscope/": "DASHSCOPE_API_KEY",
-        "anthropic/": "ANTHROPIC_API_KEY",
-        "openai/": "OPENAI_API_KEY",
-        "gemini/": "GEMINI_API_KEY",
-        "groq/": "GROQ_API_KEY",
-        "together_ai/": "TOGETHER_API_KEY",
-        "fireworks_ai/": "FIREWORKS_API_KEY",
-        "openrouter/": "OPENROUTER_API_KEY",
-    }
-
-    for prefix, env_var in provider_keys.items():
-        if model.startswith(prefix):
-            if key := os.environ.get(env_var):
-                return key
+    model = os.environ.get("RLM_MODEL", "")
+    if env_var := get_provider_env_var(model):
+        if key := os.environ.get(env_var):
+            return key
 
     # Legacy fallback
     return os.environ.get("OPENROUTER_API_KEY")
@@ -205,10 +218,10 @@ class RLM:
 
         # Validate API key early to fail fast
         if not self.config.api_key:
-            model_prefix = self.config.model.split("/")[0] if "/" in self.config.model else ""
+            env_var = get_provider_env_var(self.config.model) or "PROVIDER_API_KEY"
             raise ValueError(
                 f"No API key configured for model '{self.config.model}'.\n"
-                f"Set one of: RLM_API_KEY, {model_prefix.upper()}_API_KEY, or pass api_key to RLMConfig."
+                f"Set one of: RLM_API_KEY, {env_var}, or pass api_key to RLMConfig."
             )
 
         self._setup_dspy()
