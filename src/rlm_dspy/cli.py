@@ -898,6 +898,11 @@ EXAMPLE_PROMPTS = {
             ),
             ("Functions", "List functions that are defined but never called"),
             ("Exports", "Check __init__.py - which exports are never imported?"),
+            (
+                "Trace",
+                "For function {X}, trace all callers. Show the call chain from "
+                "entry points (main, CLI, public API) to this function.",
+            ),
         ],
     },
     "security": {
@@ -912,6 +917,11 @@ EXAMPLE_PROMPTS = {
             ("Auth", "Review auth. Are there any bypass vulnerabilities?"),
             ("Secrets", "Find hardcoded API keys, passwords, or secrets"),
             ("Input", "Find where external input reaches dangerous functions"),
+            (
+                "Trace",
+                "Trace user input from {entry_point} through all functions until "
+                "it reaches a dangerous sink (exec, SQL, file ops). Show full path.",
+            ),
         ],
     },
     "review": {
@@ -934,6 +944,11 @@ EXAMPLE_PROMPTS = {
             ("Algorithms", "Find O(n²) algorithms, repeated computations, allocations"),
             ("Database", "Find N+1 queries, missing indexes, inefficient DB access"),
             ("Memory", "Find memory leaks, large allocations, objects kept alive"),
+            (
+                "Trace",
+                "For the hot path starting at {entry_point}, trace each function call, "
+                "count loop iterations, and identify the most expensive operations.",
+            ),
         ],
     },
     "refactor": {
@@ -943,6 +958,11 @@ EXAMPLE_PROMPTS = {
             ("Duplicates", "Find duplicate code that could be shared functions"),
             ("Smells", "Find code smells: long functions, deep nesting, god classes"),
             ("Simplify", "What code could be simplified? Find overly complex parts."),
+            (
+                "Trace",
+                "For class {X}, list all its dependencies (imports, calls) and all "
+                "dependents (who uses it). Can it be safely refactored?",
+            ),
         ],
     },
     "docs": {

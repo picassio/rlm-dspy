@@ -388,6 +388,9 @@ rlm-dspy ask "List all functions that are defined but never called anywhere in t
 
 # Find unused exports
 rlm-dspy ask "Check __init__.py exports - which ones are never imported by external code?" src/
+
+# Trace callers (verify if function is actually used)
+rlm-dspy ask "For function X, trace all callers. Show the call chain from entry points (main, CLI, public API) to this function." src/
 ```
 
 ### 🔒 Security Review
@@ -404,6 +407,9 @@ rlm-dspy ask "Find any hardcoded API keys, passwords, or secrets. Check if secre
 
 # Input sanitization
 rlm-dspy ask "Find places where external input reaches dangerous functions without sanitization" src/
+
+# Taint tracing (trace user input to dangerous sinks)
+rlm-dspy ask "Trace user input from CLI/API entry through all functions until it reaches a dangerous sink (exec, SQL, file ops). Show full path." src/
 ```
 
 ### 📝 Code Review
@@ -430,6 +436,9 @@ rlm-dspy ask "Find N+1 queries, missing indexes, or inefficient database access 
 
 # Memory
 rlm-dspy ask "Find memory issues: large allocations, memory leaks, objects kept alive unnecessarily" src/
+
+# Hot path analysis
+rlm-dspy ask "For the hot path starting at main(), trace each function call, count loop iterations, and identify the most expensive operations." src/
 ```
 
 ### 🏗️ Structural Queries (use `index` for 100% accuracy)
@@ -478,6 +487,9 @@ rlm-dspy ask "Find code smells: long functions, deep nesting, god classes, featu
 
 # Simplification
 rlm-dspy ask "What code could be simplified? Find overly complex implementations." src/
+
+# Dependency analysis (safe to refactor?)
+rlm-dspy ask "For class X, list all its dependencies (imports, calls) and all dependents (who uses it). Can it be safely refactored?" src/
 ```
 
 ### 💡 Pro Tips
