@@ -29,6 +29,7 @@ console = Console()
 
 def _get_config(
     model: str | None = None,
+    sub_model: str | None = None,
     budget: float | None = None,
     timeout: float | None = None,
     max_iterations: int | None = None,
@@ -51,7 +52,11 @@ def _get_config(
 
     if model:
         config.model = model
-        config.sub_model = model
+        # Only override sub_model with model if sub_model not explicitly set
+        if not sub_model:
+            config.sub_model = model
+    if sub_model:
+        config.sub_model = sub_model
     if budget:
         config.max_budget = budget
     if timeout:
@@ -77,7 +82,11 @@ def ask(
     ] = False,
     model: Annotated[
         Optional[str],
-        typer.Option("--model", "-m", help="Model to use"),
+        typer.Option("--model", "-m", help="Model to use for reasoning"),
+    ] = None,
+    sub_model: Annotated[
+        Optional[str],
+        typer.Option("--sub-model", "-s", help="Model for llm_query() calls (cheaper)"),
     ] = None,
     budget: Annotated[
         Optional[float],
@@ -151,7 +160,7 @@ def ask(
     if verbose or debug:
         setup_logging()
 
-    config = _get_config(model, budget, timeout, max_iterations, verbose or debug)
+    config = _get_config(model, sub_model, budget, timeout, max_iterations, verbose or debug)
     rlm = RLM(config=config)
 
     # Dry run mode - validate and exit

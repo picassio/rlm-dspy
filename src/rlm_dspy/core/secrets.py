@@ -60,19 +60,30 @@ def is_secret_key(key: str) -> bool:
     )
 
 
-def mask_value(value: Any) -> str:
+def mask_value(value: Any, reveal_prefix: bool = False) -> str:
     """Mask a secret value for safe display.
 
-    Security: Only reveals first 4 chars to minimize entropy exposure.
-    For short values (<=8 chars), shows nothing to prevent guessing.
+    Args:
+        value: The secret value to mask
+        reveal_prefix: If True, shows first 4 chars (use sparingly, e.g., for debugging).
+                      Default False for security - fully masks the value.
+
+    Security: By default, fully masks secrets to prevent entropy exposure.
+    Even partial reveals help attackers narrow down the keyspace.
     """
     if value is None:
         return "[None]"
     s = str(value)
+    if len(s) == 0:
+        return "[empty]"
+    
+    # Full masking by default for security
+    if not reveal_prefix:
+        return SECRET_MASK
+    
+    # Optional prefix reveal (use only when necessary for debugging)
     if len(s) <= 8:
         return SECRET_MASK
-    # Only show first 4 chars - revealing last chars is a security risk
-    # as it helps attackers narrow down the keyspace
     return f"{s[:4]}{'*' * min(8, len(s) - 4)}"
 
 

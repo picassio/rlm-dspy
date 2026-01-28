@@ -296,7 +296,7 @@ class RLM:
         self._start_time: float | None = None
 
     def _setup_dspy(self) -> None:
-        """Configure DSPy with the primary model."""
+        """Configure DSPy with the primary model (thread-safe)."""
         lm_kwargs: dict[str, Any] = {
             "model": self.config.model,
             "api_key": self.config.api_key,
@@ -304,8 +304,10 @@ class RLM:
         if self.config.api_base:
             lm_kwargs["api_base"] = self.config.api_base
 
-        lm = dspy.LM(**lm_kwargs)
-        dspy.configure(lm=lm)
+        # Store LM instance for thread-local configuration in query()
+        self._lm = dspy.LM(**lm_kwargs)
+        # Set as default for this instance (will use context manager in query)
+        dspy.configure(lm=self._lm)
 
     def _create_sub_lm(self) -> dspy.LM | None:
         """Create sub-LM for llm_query calls if different from primary."""
@@ -357,7 +359,7 @@ class RLM:
                 p = Path(path)
                 gitignore_path = (p if p.is_dir() else p.parent) / ".gitignore"
                 if gitignore_path.exists():
-                    patterns.extend(gitignore_path.read_text().splitlines())
+                    patterns.extend(gitignore_path.read_text(encoding="utf-8").splitlines())
 
         spec = pathspec.PathSpec.from_lines("gitwildmatch", patterns) if patterns else None
 
@@ -378,7 +380,7 @@ class RLM:
         skipped_files = []
         for f in sorted(files):
             try:
-                content = f.read_text()
+                content = f.read_text(encoding="utf-8")
                 # Add line numbers to help LLM report accurate locations
                 numbered_lines = [
                     f"{i+1:4d} | {line}"
@@ -418,17 +420,29 @@ class RLM:
         Returns:
             RLMResult with answer, trajectory, and metadata
         """
+        import concurrent.futures
+
         self._start_time = time.time()
 
+        def _execute_rlm() -> Any:
+            """Execute RLM with thread-local DSPy configuration."""
+            # Use thread-local configuration to avoid global state pollution
+            with dspy.settings.context(lm=self._lm):
+                return self._rlm(context=context, query=query)
+
         try:
-            # Execute RLM - the magic happens here!
-            # The LLM gets a REPL with:
-            # - context and query variables
-            # - llm_query(prompt) for semantic analysis
-            # - llm_query_batched(prompts) for concurrent queries
-            # - print() to see results
-            # - SUBMIT(answer) to return final answer
-            prediction = self._rlm(context=context, query=query)
+            # Execute with timeout if configured
+            if self.config.max_timeout and self.config.max_timeout > 0:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(_execute_rlm)
+                    try:
+                        prediction = future.result(timeout=self.config.max_timeout)
+                    except concurrent.futures.TimeoutError:
+                        raise TimeoutExceededError(
+                            self.config.max_timeout, self.config.max_timeout
+                        )
+            else:
+                prediction = _execute_rlm()
 
             elapsed = time.time() - self._start_time
 
@@ -439,6 +453,16 @@ class RLM:
                 trajectory=getattr(prediction, "trajectory", []),
                 final_reasoning=getattr(prediction, "final_reasoning", ""),
                 iterations=len(getattr(prediction, "trajectory", [])),
+            )
+
+        except TimeoutExceededError:
+            elapsed = time.time() - self._start_time if self._start_time else 0
+            _logger.warning("RLM execution timed out after %.1fs", elapsed)
+            return RLMResult(
+                answer="",
+                success=False,
+                error=f"Query timed out after {elapsed:.1f}s (limit: {self.config.max_timeout}s)",
+                elapsed_time=elapsed,
             )
 
         except Exception as e:
@@ -518,25 +542,12 @@ class RLM:
 
 
 # =============================================================================
-# Custom Exceptions (for backward compatibility)
+# Custom Exceptions
 # =============================================================================
 
-class BudgetExceededError(Exception):
-    def __init__(self, spent: float, budget: float):
-        self.spent = spent
-        self.budget = budget
-        super().__init__(f"Budget exceeded: ${spent:.4f} of ${budget:.4f}")
-
-
 class TimeoutExceededError(Exception):
+    """Raised when query execution exceeds the configured timeout."""
     def __init__(self, elapsed: float, timeout: float):
         self.elapsed = elapsed
         self.timeout = timeout
         super().__init__(f"Timeout: {elapsed:.1f}s of {timeout:.1f}s")
-
-
-class TokenLimitExceededError(Exception):
-    def __init__(self, tokens: int, limit: int):
-        self.tokens = tokens
-        self.limit = limit
-        super().__init__(f"Token limit: {tokens:,} of {limit:,}")
