@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 from dataclasses import dataclass, field
 
 from rich.console import Console
@@ -192,11 +191,9 @@ def check_budget(budget: float, context_size: int, model: str = "gemini-2.0-flas
     )
 
 
-def check_context_size(context: str, max_chunk_size: int) -> ValidationResult:
-    """Check context size and chunking."""
+def check_context_size(context: str) -> ValidationResult:
+    """Check context size is valid."""
     size = len(context)
-    # Ceiling division: (size + max_chunk_size - 1) // max_chunk_size
-    chunks_needed = max(1, (size + max_chunk_size - 1) // max_chunk_size) if max_chunk_size > 0 else 1
 
     if size == 0:
         return ValidationResult(
@@ -207,19 +204,19 @@ def check_context_size(context: str, max_chunk_size: int) -> ValidationResult:
             suggestion="Provide files or stdin input",
         )
 
-    if chunks_needed > 100:
+    if size > 10_000_000:
         return ValidationResult(
             name="Context Size",
             passed=True,
-            message=f"{size:,} chars → {chunks_needed} chunks",
+            message=f"{size:,} chars",
             severity="warning",
-            suggestion="Large context may be slow. Consider filtering files.",
+            suggestion="Very large context may be slow. Consider filtering files.",
         )
 
     return ValidationResult(
         name="Context Size",
         passed=True,
-        message=f"{size:,} chars → {chunks_needed} chunk(s)",
+        message=f"{size:,} chars",
     )
 
 
@@ -229,13 +226,10 @@ def preflight_check(
     api_base: str | None = None,
     budget: float | None = None,
     context: str | None = None,
-    chunk_size: int = 100_000,
     check_network: bool = True,
 ) -> PreflightResult:
     """
     Run all preflight checks before an expensive operation.
-
-    Learned from modaic: validate config before batch jobs.
 
     Args:
         api_key_required: Whether API key is required
@@ -243,7 +237,6 @@ def preflight_check(
         api_base: API endpoint to check
         budget: Budget to validate
         context: Context string to check size
-        chunk_size: Chunk size for estimation
         check_network: Whether to check API endpoint
 
     Returns:
@@ -264,112 +257,10 @@ def preflight_check(
 
     # Context size
     if context is not None:
-        result.add(check_context_size(context, chunk_size))
+        result.add(check_context_size(context))
 
         # Budget
         if budget is not None:
             result.add(check_budget(budget, len(context)))
 
     return result
-
-
-def validate_project_name(name: str) -> ValidationResult:
-    """
-    Validate a project/model name.
-
-    Learned from modaic: enforce naming conventions.
-    """
-    # Valid: lowercase, numbers, hyphens, underscores
-    pattern = r"^[a-z][a-z0-9_-]*$"
-
-    if not name:
-        return ValidationResult(
-            name="Project Name",
-            passed=False,
-            message="Name cannot be empty",
-            severity="error",
-        )
-
-    if len(name) > 64:
-        return ValidationResult(
-            name="Project Name",
-            passed=False,
-            message=f"Name too long ({len(name)} > 64 chars)",
-            severity="error",
-        )
-
-    if not re.match(pattern, name):
-        return ValidationResult(
-            name="Project Name",
-            passed=False,
-            message=f"Invalid name: {name}",
-            severity="error",
-            suggestion="Use lowercase letters, numbers, hyphens, underscores. Start with letter.",
-        )
-
-    return ValidationResult(
-        name="Project Name",
-        passed=True,
-        message=f"Valid: {name}",
-    )
-
-
-def validate_jsonl_file(path: str) -> ValidationResult:
-    """
-    Validate a JSONL file for batch processing.
-
-    Learned from modaic: validate before submission.
-    Streams file line-by-line to handle large files.
-    """
-    import json
-    from pathlib import Path
-
-    p = Path(path)
-
-    if not p.exists():
-        return ValidationResult(
-            name="JSONL File",
-            passed=False,
-            message=f"File not found: {path}",
-            severity="error",
-        )
-
-    try:
-        valid_lines = 0
-
-        # Stream file line-by-line instead of reading all into memory
-        with open(p) as f:
-            for i, line in enumerate(f):
-                if not line.strip():
-                    continue
-                try:
-                    data = json.loads(line)
-                    if "custom_id" not in data:
-                        return ValidationResult(
-                            name="JSONL File",
-                            passed=False,
-                            message=f"Line {i + 1} missing custom_id",
-                            severity="error",
-                        )
-                    valid_lines += 1
-                except json.JSONDecodeError as e:
-                    return ValidationResult(
-                        name="JSONL File",
-                        passed=False,
-                        message=f"Invalid JSON on line {i + 1}: {e}",
-                        severity="error",
-                    )
-
-        return ValidationResult(
-            name="JSONL File",
-            passed=True,
-            message=f"Valid: {valid_lines} requests",
-        )
-
-    except Exception as e:
-        return ValidationResult(
-            name="JSONL File",
-            passed=False,
-            message=f"Error reading file: {e}",
-            severity="error",
-        )

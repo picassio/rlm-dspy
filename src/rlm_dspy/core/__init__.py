@@ -3,16 +3,6 @@
 # Core RLM (uses dspy.RLM for REPL-based exploration)
 from .rlm import RLM, RLMConfig, RLMResult
 
-# Config utilities
-from .config_utils import (
-    ConfigResolver,
-    atomic_read_json,
-    atomic_write_json,
-    format_user_error,
-    get_config_dir,
-    inject_context,
-)
-
 # Debug utilities
 from .debug import (
     Verbosity,
@@ -74,8 +64,6 @@ from .validation import (
     PreflightResult,
     ValidationResult,
     preflight_check,
-    validate_jsonl_file,
-    validate_project_name,
 )
 
 __all__ = [
@@ -83,13 +71,6 @@ __all__ = [
     "RLM",
     "RLMConfig",
     "RLMResult",
-    # Config utilities
-    "atomic_read_json",
-    "atomic_write_json",
-    "ConfigResolver",
-    "format_user_error",
-    "get_config_dir",
-    "inject_context",
     # Debug utilities
     "Verbosity",
     "get_verbosity",
@@ -140,6 +121,4 @@ __all__ = [
     "ValidationResult",
     "PreflightResult",
     "preflight_check",
-    "validate_project_name",
-    "validate_jsonl_file",
 ]

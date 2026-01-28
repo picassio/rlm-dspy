@@ -1,8 +1,6 @@
 """Token usage tracking for rlm-dspy.
 
-Tracks token counts and savings from chunking/compression strategies.
-Inspired by llm-tldr's stats module.
-
+Tracks token counts and cost estimation for RLM queries.
 Uses tiktoken for accurate token counting (same tokenizer as GPT-4/Claude).
 """
 
@@ -110,40 +108,19 @@ def estimate_cost(
 
 @dataclass
 class TokenStats:
-    """Track token usage and savings for a single operation.
+    """Track token usage for a single RLM operation.
 
     Attributes:
-        raw_context_tokens: Original context size before processing
-        processed_tokens: Context size after chunking/filtering
-        llm_input_tokens: Actual tokens sent to LLM
-        llm_output_tokens: Response tokens from LLM
-        chunks_processed: Number of chunks analyzed
-        chunks_relevant: Number of chunks with relevant info
+        raw_context_tokens: Original context size in tokens
+        llm_input_tokens: Total tokens sent to LLM (across iterations)
+        llm_output_tokens: Total response tokens from LLM
+        iterations: Number of REPL iterations
     """
 
     raw_context_tokens: int = 0
-    processed_tokens: int = 0
     llm_input_tokens: int = 0
     llm_output_tokens: int = 0
-    chunks_processed: int = 0
-    chunks_relevant: int = 0
-
-    @property
-    def context_savings(self) -> float:
-        """Percentage of context tokens saved by chunking/filtering."""
-        if self.raw_context_tokens == 0:
-            return 0.0
-        return (
-            (self.raw_context_tokens - self.processed_tokens)
-            / self.raw_context_tokens
-        ) * 100
-
-    @property
-    def chunk_relevance_rate(self) -> float:
-        """Percentage of chunks that contained relevant info."""
-        if self.chunks_processed == 0:
-            return 0.0
-        return (self.chunks_relevant / self.chunks_processed) * 100
+    iterations: int = 0
 
     @property
     def total_tokens(self) -> int:
@@ -154,13 +131,9 @@ class TokenStats:
         """Serialize to dictionary."""
         return {
             "raw_context_tokens": self.raw_context_tokens,
-            "processed_tokens": self.processed_tokens,
             "llm_input_tokens": self.llm_input_tokens,
             "llm_output_tokens": self.llm_output_tokens,
-            "chunks_processed": self.chunks_processed,
-            "chunks_relevant": self.chunks_relevant,
-            "context_savings_percent": round(self.context_savings, 2),
-            "chunk_relevance_percent": round(self.chunk_relevance_rate, 2),
+            "iterations": self.iterations,
             "total_tokens": self.total_tokens,
         }
 
@@ -168,18 +141,16 @@ class TokenStats:
         """Human-readable summary."""
         lines = [
             "Token Stats:",
-            f"  Context: {self.raw_context_tokens:,} → {self.processed_tokens:,} "
-            f"({self.context_savings:.1f}% saved)",
+            f"  Context: {self.raw_context_tokens:,} tokens",
             f"  LLM: {self.llm_input_tokens:,} in, {self.llm_output_tokens:,} out",
-            f"  Chunks: {self.chunks_relevant}/{self.chunks_processed} relevant "
-            f"({self.chunk_relevance_rate:.1f}%)",
+            f"  Iterations: {self.iterations}",
         ]
         return "\n".join(lines)
 
 
 @dataclass
 class SessionStats:
-    """Aggregate stats across multiple operations in a session."""
+    """Aggregate stats across multiple RLM operations in a session."""
 
     session_id: str
     started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
@@ -187,38 +158,22 @@ class SessionStats:
 
     # Accumulated totals
     total_raw_tokens: int = 0
-    total_processed_tokens: int = 0
     total_llm_input: int = 0
     total_llm_output: int = 0
-    total_chunks: int = 0
-    total_relevant_chunks: int = 0
+    total_iterations: int = 0
 
     def record(self, stats: TokenStats) -> None:
         """Record an operation's token stats."""
         self.operations.append(stats)
         self.total_raw_tokens += stats.raw_context_tokens
-        self.total_processed_tokens += stats.processed_tokens
         self.total_llm_input += stats.llm_input_tokens
         self.total_llm_output += stats.llm_output_tokens
-        self.total_chunks += stats.chunks_processed
-        self.total_relevant_chunks += stats.chunks_relevant
+        self.total_iterations += stats.iterations
 
     @property
-    def total_savings(self) -> float:
-        """Overall context savings percentage."""
-        if self.total_raw_tokens == 0:
-            return 0.0
-        return (
-            (self.total_raw_tokens - self.total_processed_tokens)
-            / self.total_raw_tokens
-        ) * 100
-
-    @property
-    def average_chunk_relevance(self) -> float:
-        """Average chunk relevance across all operations."""
-        if self.total_chunks == 0:
-            return 0.0
-        return (self.total_relevant_chunks / self.total_chunks) * 100
+    def total_tokens(self) -> int:
+        """Total tokens across all operations."""
+        return self.total_llm_input + self.total_llm_output
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary."""
@@ -227,13 +182,10 @@ class SessionStats:
             "started_at": self.started_at.isoformat(),
             "operation_count": len(self.operations),
             "total_raw_tokens": self.total_raw_tokens,
-            "total_processed_tokens": self.total_processed_tokens,
             "total_llm_input": self.total_llm_input,
             "total_llm_output": self.total_llm_output,
-            "total_savings_percent": round(self.total_savings, 2),
-            "total_chunks": self.total_chunks,
-            "total_relevant_chunks": self.total_relevant_chunks,
-            "average_chunk_relevance": round(self.average_chunk_relevance, 2),
+            "total_tokens": self.total_tokens,
+            "total_iterations": self.total_iterations,
         }
 
     def save(self, path: Path | str) -> None:
@@ -248,11 +200,9 @@ class SessionStats:
         lines = [
             f"Session Stats ({self.session_id}):",
             f"  Operations: {len(self.operations)}",
-            f"  Context: {self.total_raw_tokens:,} → {self.total_processed_tokens:,} "
-            f"({self.total_savings:.1f}% saved)",
-            f"  LLM Total: {self.total_llm_input + self.total_llm_output:,} tokens",
-            f"  Chunks: {self.total_relevant_chunks}/{self.total_chunks} relevant "
-            f"({self.average_chunk_relevance:.1f}%)",
+            f"  Context: {self.total_raw_tokens:,} tokens",
+            f"  LLM Total: {self.total_tokens:,} tokens",
+            f"  Iterations: {self.total_iterations}",
         ]
         return "\n".join(lines)
 

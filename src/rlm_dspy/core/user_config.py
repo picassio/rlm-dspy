@@ -23,8 +23,6 @@ DEFAULT_CONFIG = {
     "model": "openai/gpt-4o-mini",
     "max_budget": 1.0,
     "max_timeout": 300,
-    "chunk_size": 100000,
-    "syntax_aware": True,
     "env_file": None,  # Optional path to .env file
 }
 
