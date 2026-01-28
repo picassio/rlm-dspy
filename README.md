@@ -378,6 +378,39 @@ max_budget: 0.5
 env_file: /path/to/.env
 ```
 
+### Config File Settings
+
+All supported settings for `~/.rlm/config.yaml`:
+
+```yaml
+# Model to use (provider/model-name format)
+model: openai/gpt-4o-mini
+
+# Maximum cost in USD per query
+max_budget: 1.0
+
+# Maximum time in seconds per query
+max_timeout: 300
+
+# Chunk size in characters
+chunk_size: 100000
+
+# Use tree-sitter for syntax-aware chunking
+syntax_aware: true
+
+# Path to .env file with API keys (auto-loaded on startup)
+env_file: ~/.env
+```
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `model` | string | `openai/gpt-4o-mini` | LLM model to use |
+| `max_budget` | float | `1.0` | Max cost in USD |
+| `max_timeout` | int | `300` | Max time in seconds |
+| `chunk_size` | int | `100000` | Chunk size (chars) |
+| `syntax_aware` | bool | `true` | Tree-sitter chunking |
+| `env_file` | string | `null` | Path to .env file |
+
 ### Configuration Priority
 
 Settings are resolved in this order (highest to lowest):

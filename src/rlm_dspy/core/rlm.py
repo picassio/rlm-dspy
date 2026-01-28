@@ -166,15 +166,27 @@ class RLMConfig:
             "RLM_MAX_BUDGET", _get_user_config_default("max_budget", 1.0)
         )
     )
-    max_timeout: float = field(default_factory=lambda: _env_float("RLM_MAX_TIMEOUT", 300.0))
+    max_timeout: float = field(
+        default_factory=lambda: _env_float(
+            "RLM_MAX_TIMEOUT", _get_user_config_default("max_timeout", 300.0)
+        )
+    )
     max_tokens: int = field(default_factory=lambda: _env_int("RLM_MAX_TOKENS", 500_000))
     max_iterations: int = field(default_factory=lambda: _env_int("RLM_MAX_ITERATIONS", 30))
     max_depth: int = field(default_factory=lambda: _env_int("RLM_MAX_DEPTH", 3))
 
     # Chunking settings
-    default_chunk_size: int = field(default_factory=lambda: _env_int("RLM_CHUNK_SIZE", 100_000))
+    default_chunk_size: int = field(
+        default_factory=lambda: _env_int(
+            "RLM_CHUNK_SIZE", _get_user_config_default("chunk_size", 100_000)
+        )
+    )
     overlap: int = field(default_factory=lambda: _env_int("RLM_OVERLAP", 500))
-    syntax_aware_chunking: bool = field(default_factory=lambda: _env_bool("RLM_SYNTAX_AWARE", True))
+    syntax_aware_chunking: bool = field(
+        default_factory=lambda: _env_bool(
+            "RLM_SYNTAX_AWARE", _get_user_config_default("syntax_aware", True)
+        )
+    )
 
     # Processing settings
     strategy: Literal["auto", "map_reduce", "iterative", "hierarchical"] = "auto"
