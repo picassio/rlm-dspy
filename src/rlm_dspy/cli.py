@@ -116,6 +116,9 @@ def _load_context(
         typer.Exit: On error
     """
     if stdin:
+        # Warn if stdin appears to be a TTY (interactive, not piped)
+        if sys.stdin.isatty():
+            console.print("[yellow]Reading from stdin (press Ctrl+D when done, or Ctrl+C to cancel)...[/yellow]")
         context = sys.stdin.read()
         if not context.strip():
             console.print("[red]Error: No input received from stdin[/red]")

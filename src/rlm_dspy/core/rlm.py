@@ -17,7 +17,7 @@ from typing import Any, Callable
 
 import dspy
 
-from .secrets import COMMON_SECRETS, mask_value
+from .secrets import COMMON_SECRETS
 
 _logger = logging.getLogger(__name__)
 

@@ -265,50 +265,6 @@ def debug_response(
             console.print(f"[dim]{truncated}[/dim]")
 
 
-def debug_chunk(
-    index: int,
-    total: int,
-    size: int,
-    relevant: bool = False,
-    confidence: str = "none",
-) -> None:
-    """Log chunk processing in verbose mode."""
-    if not is_verbose():
-        return
-
-    icon = "✓" if relevant else "·"
-    color = {"high": "green", "medium": "yellow", "low": "dim", "none": "dim"}.get(confidence, "dim")
-    console.print(f"[{color}]  {icon} Chunk {index + 1}/{total} ({size:,} chars) - {confidence}[/{color}]")
-
-
-def debug_summary(
-    chunks_processed: int,
-    chunks_relevant: int,
-    total_tokens: int,
-    total_cost: float,
-    elapsed: float,
-) -> None:
-    """Print a debug summary."""
-    if not is_verbose():
-        return
-
-    table = Table(title="Processing Summary", show_header=False, box=None)
-    table.add_column("Metric", style="cyan")
-    table.add_column("Value", style="white")
-
-    table.add_row("Chunks processed", str(chunks_processed))
-    table.add_row("Chunks with info", f"{chunks_relevant} ({chunks_relevant / max(1, chunks_processed) * 100:.0f}%)")
-
-    if _config.show_tokens:
-        table.add_row("Total tokens", f"{total_tokens:,}")
-    if _config.show_cost:
-        table.add_row("Total cost", f"${total_cost:.4f}")
-
-    table.add_row("Elapsed time", f"{elapsed:.2f}s")
-
-    console.print(table)
-
-
 def trace(name: str | None = None) -> Callable[[Callable[..., T]], Callable[..., T]]:
     """
     Decorator to trace function execution in debug mode.
