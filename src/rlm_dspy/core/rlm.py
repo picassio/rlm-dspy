@@ -392,7 +392,13 @@ class RLM:
         for f in sorted(files):
             try:
                 content = f.read_text()
-                context_parts.append(f"### {f}\n```\n{content}\n```\n")
+                # Add line numbers to help LLM report accurate locations
+                numbered_lines = [
+                    f"{i+1:4d} | {line}"
+                    for i, line in enumerate(content.splitlines())
+                ]
+                numbered_content = "\n".join(numbered_lines)
+                context_parts.append(f"### {f}\n```\n{numbered_content}\n```\n")
             except UnicodeDecodeError:
                 skipped_files.append((f, "binary/encoding"))
             except PermissionError:
