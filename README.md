@@ -1,60 +1,87 @@
 # RLM-DSPy
 
-> Recursive Language Models with DSPy optimization - combining RLM's recursive decomposition with DSPy's compiled prompts.
+> Recursive Language Models powered by DSPy - treating large contexts as environments for LLMs to explore programmatically.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+## What is RLM?
+
+**Recursive Language Models (RLMs)** are a fundamentally different approach to handling large contexts. Instead of chunking text and processing it passively, RLMs give the LLM **agency** to explore the data programmatically through a Python REPL.
+
+> Reference: ["Recursive Language Models"](https://arxiv.org/abs/2501.xxxxx) (Zhang, Kraska, Khattab, 2025)
+
 ## Why RLM-DSPy?
 
-| Feature | Traditional RLM | DSPy | **RLM-DSPy** |
-|---------|----------------|------|--------------|
-| Large context handling | ✅ Recursive decomposition | ❌ Single pass | ✅ Recursive + typed |
-| Prompt optimization | ❌ Hand-crafted | ✅ Auto-compiled | ✅ Compiled recursive |
-| Syntax-aware chunking | ❌ Character-based | ❌ N/A | ✅ Tree-sitter |
-| Response caching | ❌ None | ❌ None | ✅ DSPy disk cache |
-| Budget/timeout controls | ✅ Built-in | ❌ Manual | ✅ Built-in |
-| Parallel processing | ✅ Batched queries | ⚠️ Limited | ✅ Async + batched |
+| Approach | How it works | Limitation |
+|----------|--------------|------------|
+| **Chunking/RAG** | Split text → Process each chunk → Aggregate | Fixed boundaries, misses cross-chunk context |
+| **Long-context models** | Feed everything to model | Expensive, still has limits |
+| **RLM (this library)** | LLM writes code to explore data | LLM decides what's relevant |
+
+### Key Insight
+
+The LLM has **agency**. It writes Python code to:
+1. Navigate and slice the context
+2. Call `llm_query()` for semantic analysis of specific sections
+3. Build up an answer iteratively
+4. Call `SUBMIT()` when it has enough information
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                              rlm-dspy Pipeline                               │
+│                           RLM-DSPy Architecture                              │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
-│  INPUT                      PROCESSING                         OUTPUT       │
-│  ─────                      ──────────                         ──────       │
+│  INPUT                      REPL ENVIRONMENT                    OUTPUT      │
+│  ─────                      ────────────────                    ──────      │
 │                                                                              │
-│  ┌─────────┐               ┌─────────────────┐                              │
-│  │  Files  │───┐           │ Syntax-Aware    │  Chunks at function/class    │
-│  └─────────┘   │           │ Chunking        │  boundaries (tree-sitter)    │
-│                │           └────────┬────────┘                              │
-│  ┌─────────┐   │                    │                                       │
-│  │  Stdin  │───┼──▶ Content ──▶─────┤                                       │
-│  └─────────┘   │    Detection       │                                       │
-│                │                    ▼                                       │
-│  ┌─────────┐   │           ┌─────────────────┐                              │
-│  │  Query  │───┘           │ Strategy Auto-  │  map_reduce│iterative│       │
-│  └─────────┘               │ Selection       │  hierarchical                │
-│                            └────────┬────────┘                              │
-│                                     │                                       │
-│                                     ▼                                       │
-│                            ┌─────────────────┐                              │
-│                            │ Parallel LLM    │  20 concurrent chunks        │
-│                            │ Processing      │  via async HTTP              │
-│                            └────────┬────────┘                              │
-│                                     │                                       │
-│                                     ▼                                       │
-│                            ┌─────────────────┐               ┌────────────┐ │
-│                            │ DSPy Cache      │──────────────▶│   Answer   │ │
-│                            │ (disk-persisted)│               │ + Metadata │ │
-│                            └─────────────────┘               └────────────┘ │
+│  ┌─────────┐               ┌─────────────────────────────────┐              │
+│  │  Files  │──┐            │  Python REPL (Sandboxed)        │              │
+│  └─────────┘  │            │                                 │              │
+│               │            │  Variables:                     │              │
+│  ┌─────────┐  │            │    • context = "your files..."  │              │
+│  │  Query  │──┼──────────▶ │    • query = "your question"    │              │
+│  └─────────┘  │            │                                 │              │
+│               │            │  Tools:                         │              │
+│  ┌─────────┐  │            │    • llm_query(prompt)          │──────┐      │
+│  │ Config  │──┘            │    • llm_query_batched(prompts) │      │      │
+│  └─────────┘               │    • print()                    │      │      │
+│                            │    • SUBMIT(answer)             │      │      │
+│                            └─────────────┬───────────────────┘      │      │
+│                                          │                          │      │
+│                            ┌─────────────▼───────────────────┐      │      │
+│                            │  LLM writes Python code to:     │      │      │
+│                            │  1. Explore context             │◀─────┘      │
+│                            │  2. Call sub-LLMs               │              │
+│                            │  3. Build answer iteratively    │──────────┐  │
+│                            │  4. SUBMIT() when ready         │          │  │
+│                            └─────────────────────────────────┘          │  │
+│                                                                         │  │
+│                            ┌────────────────────────────────────────────▼──┤
+│                            │  RLMResult                                    │
+│                            │    • answer: str                              │
+│                            │    • trajectory: list[{code, output, ...}]   │
+│                            │    • iterations: int                          │
+│                            └───────────────────────────────────────────────┘
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Installation
+
+### Prerequisites
+
+**Deno** is required for the sandboxed Python REPL:
+```bash
+# Install Deno
+curl -fsSL https://deno.land/install.sh | sh
+# Add to PATH
+export PATH="$HOME/.deno/bin:$PATH"
+```
+
+### Install RLM-DSPy
 
 ```bash
 pip install rlm-dspy
@@ -64,9 +91,6 @@ Or with uv:
 ```bash
 uv pip install rlm-dspy
 ```
-
-All supported languages for syntax-aware chunking are included by default:
-Python, JavaScript, TypeScript, Go, Rust, Java, C, C++, Ruby, C#.
 
 ## Quick Start
 
@@ -118,24 +142,76 @@ rlm-dspy config
 ```python
 from rlm_dspy import RLM, RLMConfig
 
-# Uses settings from ~/.rlm/config.yaml automatically
+# Basic usage - loads settings from environment
 rlm = RLM()
 
-# Or configure explicitly
+# Load context from files
+context = rlm.load_context(["src/", "docs/README.md"])
+
+# Query - the LLM explores context via REPL
+result = rlm.query("What does the main function do?", context)
+
+print(result.answer)         # The final answer
+print(result.trajectory)     # See how LLM explored the context
+print(result.iterations)     # Number of REPL iterations
+
+# Custom configuration
 config = RLMConfig(
-    model="openai/gpt-4o",
-    max_budget=1.0,  # USD
-    syntax_aware_chunking=True,  # Use tree-sitter
+    model="openai/gpt-4o",           # Primary model for reasoning
+    sub_model="openai/gpt-4o-mini",  # Cheaper model for llm_query()
+    max_iterations=20,               # Max REPL iterations
+    max_llm_calls=50,                # Max sub-LLM calls
+    verbose=True,                    # Show iteration logs
 )
 rlm = RLM(config=config)
+```
 
-# Load context from files
-context = rlm.load_context(["src/", "docs/"])
+## How RLM Works (Example Trajectory)
 
-# Query
-result = rlm.query("What are the main components?", context)
-print(result.answer)
-print(f"Time: {result.elapsed_time:.1f}s, Cost: ${result.total_cost:.4f}")
+When you ask a question, the LLM **writes and executes Python code** to explore your context:
+
+```
+Query: "What does the main function do?"
+Context: [large codebase...]
+
+─── Iteration 1 ───
+Reasoning: I need to explore the context to find the main function.
+Code:
+    print(f"Context length: {len(context)}")
+    print(context[:2000])  # Preview first 2000 chars
+Output:
+    Context length: 45000
+    === FILE: src/main.py ===
+    1 | import sys
+    2 | from app import Application
+    ...
+
+─── Iteration 2 ───
+Reasoning: Found main.py. Let me search for the main function.
+Code:
+    for i, line in enumerate(context.split('\n')):
+        if 'def main' in line:
+            print(f"Found at line {i}: {line}")
+Output:
+    Found at line 45: def main(args):
+
+─── Iteration 3 ───
+Reasoning: Found it at line 45. Let me extract and analyze it.
+Code:
+    lines = context.split('\n')
+    main_func = '\n'.join(lines[44:70])
+    analysis = llm_query(f"Explain this function:\n{main_func}")
+    print(analysis)
+Output:
+    The main function initializes the Application with CLI args,
+    sets up logging, and calls app.run()...
+
+─── Iteration 4 ───
+Reasoning: I have enough information to answer.
+Code:
+    SUBMIT("The main function initializes the Application...")
+
+→ Answer: "The main function initializes the Application..."
 ```
 
 ## Supported Providers

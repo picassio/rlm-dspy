@@ -31,19 +31,20 @@ def _get_config(
     model: str | None = None,
     budget: float | None = None,
     timeout: float | None = None,
-    chunk_size: int | None = None,
-    strategy: str | None = None,
+    max_iterations: int | None = None,
+    verbose: bool = False,
 ) -> RLMConfig:
     """Build config from CLI args and environment.
 
     Environment variables (all optional):
     - RLM_MODEL: Model name (default: openai/gpt-4o-mini)
+    - RLM_SUB_MODEL: Model for sub-queries (defaults to RLM_MODEL)
     - RLM_API_BASE: Custom API endpoint (optional, for self-hosted)
     - RLM_API_KEY or OPENROUTER_API_KEY: API key
     - RLM_MAX_BUDGET: Max cost in USD
     - RLM_MAX_TIMEOUT: Max time in seconds
-    - RLM_CHUNK_SIZE: Chunk size in chars
-    - RLM_PARALLEL_CHUNKS: Max concurrent chunks
+    - RLM_MAX_ITERATIONS: Max REPL iterations
+    - RLM_MAX_LLM_CALLS: Max sub-LLM calls per execution
     """
     # RLMConfig reads from env by default, only override if CLI args provided
     config = RLMConfig()
@@ -55,10 +56,10 @@ def _get_config(
         config.max_budget = budget
     if timeout:
         config.max_timeout = timeout
-    if chunk_size:
-        config.default_chunk_size = chunk_size
-    if strategy:
-        config.strategy = strategy  # type: ignore
+    if max_iterations:
+        config.max_iterations = max_iterations
+    if verbose:
+        config.verbose = verbose
 
     return config
 
@@ -86,16 +87,9 @@ def ask(
         Optional[float],
         typer.Option("--timeout", "-t", help="Max timeout in seconds"),
     ] = None,
-    chunk_size: Annotated[
+    max_iterations: Annotated[
         Optional[int],
-        typer.Option("--chunk-size", "-c", help="Chunk size in characters"),
-    ] = None,
-    strategy: Annotated[
-        Optional[str],
-        typer.Option(
-            "--strategy", "-s",
-            help="Strategy: auto|map_reduce|iterative|hierarchical (see above)"
-        ),
+        typer.Option("--max-iterations", "-i", help="Max REPL iterations"),
     ] = None,
     output_json: Annotated[
         bool,
@@ -121,11 +115,15 @@ def ask(
     """
     Ask a question about files or piped content.
 
-    STRATEGIES:
-        auto         - Automatically select best strategy based on context size
-        map_reduce   - Parallel chunk analysis, then aggregate (best for large contexts)
-        iterative    - Sequential analysis with rolling context (order-dependent content)
-        hierarchical - Recursive decomposition with sub-queries (very large contexts)
+    Uses DSPy's RLM (Recursive Language Model) to explore your context
+    through a Python REPL. The LLM writes code to navigate, analyze,
+    and build up answers iteratively.
+
+    HOW IT WORKS:
+        1. Your files are loaded as the 'context' variable in a REPL
+        2. The LLM writes Python code to explore the context
+        3. It can call llm_query() for semantic analysis of sections
+        4. It iterates until it has enough info, then calls SUBMIT()
 
     EXAMPLES:
         rlm-dspy ask "What does main() do?" src/
@@ -153,7 +151,7 @@ def ask(
     if verbose or debug:
         setup_logging()
 
-    config = _get_config(model, budget, timeout, chunk_size, strategy)
+    config = _get_config(model, budget, timeout, max_iterations, verbose or debug)
     rlm = RLM(config=config)
 
     # Dry run mode - validate and exit
@@ -275,24 +273,23 @@ def ask(
             )
             if verbose or debug:
                 _print_stats(result)
-            if debug:
-                debug_summary(
-                    chunks_processed=result.chunks_processed,
-                    chunks_relevant=result.chunks_with_relevant_info,
-                    total_tokens=result.total_tokens,
-                    total_cost=result.total_cost,
-                    elapsed=result.elapsed_time,
-                )
+            if debug and result.trajectory:
+                console.print("\n[bold]Trajectory:[/bold]")
+                for i, step in enumerate(result.trajectory, 1):
+                    console.print(f"[dim]Step {i}:[/dim]")
+                    if isinstance(step, dict):
+                        if "code" in step:
+                            console.print(f"  [cyan]Code:[/cyan] {step['code'][:200]}...")
+                        if "output" in step:
+                            console.print(f"  [green]Output:[/green] {step['output'][:200]}...")
         else:
             console.print(f"[red]Error: {result.error or 'Unknown error'}[/red]")
-            if result.partial_answer:
-                console.print(
-                    Panel(
-                        Markdown(result.partial_answer),
-                        title="Partial Answer",
-                        border_style="yellow",
-                    )
-                )
+            # Show trajectory if available for debugging
+            if debug and result.trajectory:
+                console.print("\n[yellow]Partial trajectory before failure:[/yellow]")
+                for i, step in enumerate(result.trajectory[-3:], 1):  # Last 3 steps
+                    if isinstance(step, dict) and "output" in step:
+                        console.print(f"  Step: {step.get('output', '')[:200]}...")
             raise typer.Exit(1)
 
 
@@ -688,22 +685,24 @@ def config(
 
         settings = [
             ("Model", cfg.model, "RLM_MODEL"),
-            ("API Base", cfg.api_base, "RLM_API_BASE"),
+            ("Sub Model", cfg.sub_model, "RLM_SUB_MODEL"),
+            ("API Base", cfg.api_base or "(auto)", "RLM_API_BASE"),
             ("API Key", api_key_status, "RLM_API_KEY / OPENROUTER_API_KEY"),
+            ("Max Iterations", str(cfg.max_iterations), "RLM_MAX_ITERATIONS"),
+            ("Max LLM Calls", str(cfg.max_llm_calls), "RLM_MAX_LLM_CALLS"),
+            ("Max Output Chars", f"{cfg.max_output_chars:,}", "RLM_MAX_OUTPUT_CHARS"),
+            ("Verbose", str(cfg.verbose), "RLM_VERBOSE"),
             ("Max Budget", f"${cfg.max_budget:.2f}", "RLM_MAX_BUDGET"),
             ("Max Timeout", f"{cfg.max_timeout:.0f}s", "RLM_MAX_TIMEOUT"),
-            ("Chunk Size", f"{cfg.default_chunk_size:,}", "RLM_CHUNK_SIZE"),
-            ("Parallel Chunks", str(cfg.parallel_chunks), "RLM_PARALLEL_CHUNKS"),
-            ("Disable Thinking", str(cfg.disable_thinking), "RLM_DISABLE_THINKING"),
-            ("Enable Cache", str(cfg.enable_cache), "RLM_ENABLE_CACHE"),
-            ("Use Async", str(cfg.use_async), "RLM_USE_ASYNC"),
         ]
 
         for name, value, env_var in settings:
             table.add_row(name, str(value), env_var)
 
         console.print(table)
-        console.print("\n[dim]Set environment variables to override defaults.[/dim]")
+        console.print("\n[bold]RLM Mode:[/bold] REPL-based exploration (dspy.RLM)")
+        console.print("[dim]The LLM writes Python code to explore your context.[/dim]")
+        console.print("[dim]Set environment variables to override defaults.[/dim]")
 
 
 def _print_stats(result: RLMResult) -> None:
@@ -712,11 +711,14 @@ def _print_stats(result: RLMResult) -> None:
     table.add_column("Metric", style="dim")
     table.add_column("Value", style="cyan")
 
-    table.add_row("Tokens", f"{result.total_tokens:,}")
-    table.add_row("Cost", f"${result.total_cost:.4f}")
     table.add_row("Time", f"{result.elapsed_time:.1f}s")
-    table.add_row("Chunks", f"{result.chunks_processed}")
-    table.add_row("Depth", f"{result.depth_reached}")
+    table.add_row("Iterations", f"{result.iterations}")
+    if result.total_tokens > 0:
+        table.add_row("Tokens", f"{result.total_tokens:,}")
+    if result.total_cost > 0:
+        table.add_row("Cost", f"${result.total_cost:.4f}")
+    if result.final_reasoning:
+        table.add_row("Final Reasoning", result.final_reasoning[:100] + "..." if len(result.final_reasoning) > 100 else result.final_reasoning)
 
     console.print(table)
 
