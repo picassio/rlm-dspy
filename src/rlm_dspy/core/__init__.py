@@ -1,18 +1,5 @@
 """Core RLM-DSPy modules."""
 
-# Tree-sitter utilities (shared parser management)
-from .treesitter import (
-    EXTENSION_MAP,
-    LANGUAGE_MODULES,
-    get_parser,
-    get_parser_simple,
-    is_available as is_treesitter_available,
-    language_from_extension,
-)
-
-# AST indexing (tree-sitter) - used by `rlm-dspy index` command
-from .ast_index import ASTIndex, Definition, index_file, index_files
-
 # Core RLM (uses dspy.RLM for REPL-based exploration)
 from .rlm import RLM, RLMConfig, RLMResult
 
@@ -92,18 +79,6 @@ from .validation import (
 )
 
 __all__ = [
-    # Tree-sitter utilities
-    "EXTENSION_MAP",
-    "LANGUAGE_MODULES",
-    "get_parser",
-    "get_parser_simple",
-    "is_treesitter_available",
-    "language_from_extension",
-    # AST Index (tree-sitter)
-    "ASTIndex",
-    "Definition",
-    "index_file",
-    "index_files",
     # Core RLM
     "RLM",
     "RLMConfig",
