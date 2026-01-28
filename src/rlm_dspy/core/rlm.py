@@ -515,9 +515,11 @@ class RLM:
         identify function/class boundaries and avoids splitting mid-definition.
         This prevents false positives from truncated code in LLM analysis.
         """
-        # Safety check first to avoid ValueError in overlap calculation
+        # Safety check to avoid division by zero or invalid chunking
         if chunk_size <= 0:
             chunk_size = self.config.default_chunk_size
+        if chunk_size <= 0:
+            chunk_size = 100_000  # Ultimate fallback
         overlap = min(self.config.overlap, chunk_size - 1) if chunk_size > 1 else 0
 
         # Try syntax-aware chunking if enabled
