@@ -15,9 +15,13 @@ class AnalyzeChunk(dspy.Signature):
     Given a chunk of content and a query, extract relevant information
     that helps answer the query. Be specific and cite evidence.
 
-    IMPORTANT: This chunk may be a partial view of a larger file.
-    Do NOT report truncation, missing imports, or syntax errors as issues -
-    these are artifacts of chunking. Focus only on the query.
+    IMPORTANT RULES:
+    - This chunk may be a partial view of a larger file
+    - Do NOT report truncation, missing imports, or syntax errors as issues
+    - Lines are numbered (e.g., "  42 | code") - USE these exact line numbers
+    - For string searches, match EXACTLY - do not include similar strings
+    - When counting items, count carefully and verify your count
+    - Quote content exactly as shown, preserving formatting
     """
 
     query: str = dspy.InputField(desc="The question to answer")
@@ -36,6 +40,12 @@ class AggregateAnswers(dspy.Signature):
 
     Given multiple partial answers from different chunks, synthesize them
     into a single coherent final answer.
+
+    IMPORTANT RULES:
+    - Preserve exact line numbers from partial answers
+    - Do not duplicate items that appear in multiple chunks
+    - Verify counts by listing items explicitly
+    - If partial answers conflict, prefer the one with exact evidence
     """
 
     query: str = dspy.InputField(desc="The original question")
