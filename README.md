@@ -327,6 +327,22 @@ resolver = ConfigResolver(
 model = resolver.get("MODEL", default="gpt-4")
 ```
 
+## Limitations
+
+RLM-DSPy is designed for **semantic understanding**, not exact text matching:
+
+| Use Case | RLM-DSPy | Better Tool |
+|----------|----------|-------------|
+| "What does function X do?" | ✅ Excellent | - |
+| "Find all bugs in this code" | ✅ Excellent | - |
+| "How are these modules connected?" | ✅ Excellent | - |
+| "Find exact string 'foo_bar'" | ⚠️ May fuzzy match | `grep` |
+| "Count occurrences of X" | ⚠️ May miscount | `grep -c` |
+
+**Why?** LLMs are trained for semantic similarity, not exact pattern matching. For precise searches, use `grep`, `ripgrep`, or `ast-grep`.
+
+**Line numbers** are accurate (we include them in the context), but string matching may include similar-but-not-exact matches.
+
 ## Processing Strategies
 
 ### Auto (Default)
