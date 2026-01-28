@@ -335,10 +335,16 @@ def _chunk_by_characters(content: str, chunk_size: int, overlap: int) -> list[Co
             overlap_lines: list[str] = []
             overlap_size = 0
             for prev_line in reversed(current_chunk_lines):
-                if overlap_size + len(prev_line) + 1 > overlap:
+                line_len = len(prev_line) + 1
+                # If this line alone exceeds overlap but we have nothing yet,
+                # still include it to ensure at least some context
+                if overlap_size + line_len > overlap and overlap_lines:
                     break
                 overlap_lines.append(prev_line)
-                overlap_size += len(prev_line) + 1
+                overlap_size += line_len
+                # Stop if we've reached the overlap target
+                if overlap_size >= overlap:
+                    break
             overlap_lines.reverse()  # O(n) instead of O(n²) from insert(0,...)
 
             current_chunk_lines = overlap_lines

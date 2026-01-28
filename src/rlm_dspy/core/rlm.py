@@ -71,7 +71,7 @@ class RLMConfig:
     """Configuration for RLM execution.
 
     All settings can be overridden via environment variables:
-    - RLM_MODEL: Model name (default: google/gemini-3-flash-preview)
+    - RLM_MODEL: Model name (default: google/gemini-2.0-flash-exp)
     - RLM_API_BASE: API endpoint (default: https://openrouter.ai/api/v1)
     - RLM_API_KEY or OPENROUTER_API_KEY: API key
     - RLM_MAX_BUDGET: Max cost in USD (default: 1.0)
@@ -83,10 +83,10 @@ class RLMConfig:
     """
 
     # Model settings - all from environment
-    model: str = field(default_factory=lambda: _normalize_model(_env("RLM_MODEL", "google/gemini-3-flash-preview")))
+    model: str = field(default_factory=lambda: _normalize_model(_env("RLM_MODEL", "google/gemini-2.0-flash-exp")))
     sub_model: str = field(
         default_factory=lambda: _normalize_model(
-            _env("RLM_SUB_MODEL", _env("RLM_MODEL", "google/gemini-3-flash-preview"))
+            _env("RLM_SUB_MODEL", _env("RLM_MODEL", "google/gemini-2.0-flash-exp"))
         )
     )
     api_base: str = field(default_factory=lambda: _env("RLM_API_BASE", "https://openrouter.ai/api/v1"))
@@ -145,6 +145,9 @@ class RLMResult:
     # Trace for debugging
     trace: list[dict[str, Any]] = field(default_factory=list)
 
+    # Token stats (from token_stats module)
+    token_stats: Any = None  # TokenStats | None
+
 
 class RLM:
     """
@@ -175,6 +178,14 @@ class RLM:
         self._tokens_used = 0
         self._cost_spent = 0.0
         self._start_time: float | None = None
+
+        # Token tracking (from token_stats module)
+        from .token_stats import TokenStats
+        self._current_stats: TokenStats | None = None
+
+        # Large content handling (from paste_store module)
+        from .paste_store import PasteStore
+        self.paste_store = PasteStore()
 
     def _setup_dspy(self) -> None:
         """Configure DSPy with the specified model."""
@@ -290,8 +301,14 @@ class RLM:
         Returns:
             RLMResult with answer and metadata
         """
+        from .token_stats import TokenStats, count_tokens
+
         self._start_time = time.time()
         trace: list[dict[str, Any]] = []
+
+        # Track raw context size for stats
+        raw_context_tokens = count_tokens(context)
+        self._current_stats = TokenStats(raw_context_tokens=raw_context_tokens)
 
         try:
             # Determine processing strategy
@@ -326,6 +343,11 @@ class RLM:
             else:
                 answer = self._process_map_reduce(query, context, chunk_size, trace)
 
+            # Update token stats
+            if self._current_stats:
+                self._current_stats.llm_input_tokens = self._tokens_used
+                self._current_stats.processed_tokens = self._tokens_used
+
             return RLMResult(
                 answer=answer,
                 success=True,
@@ -334,6 +356,7 @@ class RLM:
                 elapsed_time=time.time() - self._start_time,
                 depth_reached=depth,
                 trace=trace,
+                token_stats=self._current_stats,
             )
 
         except (BudgetExceededError, TimeoutExceededError, TokenLimitExceededError) as e:
@@ -369,9 +392,10 @@ class RLM:
         identify function/class boundaries and avoids splitting mid-definition.
         This prevents false positives from truncated code in LLM analysis.
         """
-        overlap = min(self.config.overlap, chunk_size - 1) if chunk_size > 1 else 0
+        # Safety check first to avoid ValueError in overlap calculation
         if chunk_size <= 0:
             chunk_size = self.config.default_chunk_size
+        overlap = min(self.config.overlap, chunk_size - 1) if chunk_size > 1 else 0
 
         # Try syntax-aware chunking if enabled
         if self.config.syntax_aware_chunking:

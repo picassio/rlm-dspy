@@ -164,11 +164,15 @@ def check_api_endpoint(api_base: str) -> ValidationResult:
     )
 
 
-def check_budget(budget: float, context_size: int) -> ValidationResult:
+def check_budget(budget: float, context_size: int, model: str = "gemini-2.0-flash") -> ValidationResult:
     """Check if budget is sufficient for context size."""
-    # Rough estimate: $0.50 per 1M tokens input for Gemini Flash
-    estimated_tokens = context_size / 4  # ~4 chars per token
-    estimated_cost = (estimated_tokens / 1_000_000) * 0.50
+    from .token_stats import estimate_cost
+
+    # Estimate tokens (~4 chars per token)
+    estimated_tokens = int(context_size / 4)
+    # Assume output is ~20% of input for estimation
+    estimated_output = int(estimated_tokens * 0.2)
+    estimated_cost = estimate_cost(estimated_tokens, estimated_output, model)
 
     if budget < estimated_cost:
         return ValidationResult(

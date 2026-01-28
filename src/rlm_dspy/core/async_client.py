@@ -82,7 +82,7 @@ class AsyncLLMClient:
         enable_cache: bool | None = None,
     ):
         # All settings from env with fallbacks
-        self.model = model or _env("RLM_MODEL", "google/gemini-3-flash-preview")
+        self.model = model or _env("RLM_MODEL", "google/gemini-2.0-flash-exp")
         self.api_key = api_key or os.getenv("RLM_API_KEY") or os.getenv("OPENROUTER_API_KEY")
         self.api_base = (api_base or _env("RLM_API_BASE", "https://openrouter.ai/api/v1")).rstrip("/")
         self.max_concurrent = max_concurrent if max_concurrent is not None else _env_int("RLM_PARALLEL_CHUNKS", 20)
@@ -240,7 +240,7 @@ class AsyncLLMClient:
 async def analyze_chunks_async(
     query: str,
     chunks: list[str],
-    model: str = "google/gemini-3-flash-preview",
+    model: str = "google/gemini-2.0-flash-exp",
     max_concurrent: int = 20,
     disable_thinking: bool = True,
     enable_cache: bool = True,
@@ -337,7 +337,7 @@ RELEVANT_INFO: <extracted information or "None">"""
 async def aggregate_answers_async(
     query: str,
     partial_answers: list[str],
-    model: str = "google/gemini-3-flash-preview",
+    model: str = "google/gemini-2.0-flash-exp",
     disable_thinking: bool = True,
     enable_cache: bool = True,
 ) -> str:

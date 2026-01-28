@@ -318,7 +318,7 @@ See [.env.example](.env.example) for a complete template.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `RLM_API_KEY` | - | API key (or `OPENROUTER_API_KEY`) |
-| `RLM_MODEL` | `google/gemini-3-flash-preview` | Model to use |
+| `RLM_MODEL` | `google/gemini-2.0-flash-exp` | Model to use |
 | `RLM_SUB_MODEL` | (same as RLM_MODEL) | Model for sub-queries |
 | `RLM_API_BASE` | `https://openrouter.ai/api/v1` | API endpoint |
 | `RLM_MAX_BUDGET` | `1.0` | Maximum cost in USD |
