@@ -885,6 +885,11 @@ EXAMPLE_PROMPTS = {
                 "In function {X}, trace where variable {Y} comes from, "
                 "what produces it, and verify if {Y}['key'] can raise KeyError",
             ),
+            (
+                "Evidence",
+                "For each exception handler, quote the exact logging line. "
+                "If no logging exists, say 'no logging found'",
+            ),
         ],
     },
     "dead-code": {

@@ -375,6 +375,9 @@ rlm-dspy ask "Find resource leaks: unclosed files, connections, or memory that i
 
 # Data flow tracing (reduces false positives)
 rlm-dspy ask "In function X, trace where variable Y comes from, what produces it, and verify if Y['key'] can raise KeyError" src/
+
+# Evidence-based (quote exact lines to prevent hallucination)
+rlm-dspy ask "For each exception handler, quote the exact logging line. If no logging exists, say 'no logging found'" src/
 ```
 
 ### 🗑️ Dead Code Detection
