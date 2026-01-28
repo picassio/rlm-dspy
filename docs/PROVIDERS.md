@@ -5,12 +5,18 @@ RLM-DSPY uses [DSPy](https://dspy-docs.vercel.app/) with [LiteLLM](https://docs.
 ## Quick Start
 
 ```bash
-# Set your API key
+# Set your API key (auto-detected from provider-specific env vars)
 export OPENAI_API_KEY="sk-..."
 
-# Use any supported model
+# Model format: provider/model-name
 rlm-dspy ask "What does this code do?" ./src --model openai/gpt-4o
 ```
+
+## How It Works
+
+1. **Model format**: `provider/model-name` (e.g., `deepseek/deepseek-chat`)
+2. **API key**: Auto-detected from `{PROVIDER}_API_KEY` env var
+3. **No api_base needed**: LiteLLM handles routing automatically
 
 ---
 
