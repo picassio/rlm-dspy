@@ -372,6 +372,9 @@ rlm-dspy ask "Find places where user input isn't validated or sanitized" src/
 
 # Resource leaks
 rlm-dspy ask "Find resource leaks: unclosed files, connections, or memory that isn't freed" src/
+
+# Data flow tracing (reduces false positives)
+rlm-dspy ask "In function X, trace where variable Y comes from, what produces it, and verify if Y['key'] can raise KeyError" src/
 ```
 
 ### 🗑️ Dead Code Detection
@@ -481,13 +484,15 @@ rlm-dspy ask "What code could be simplified? Find overly complex implementations
 
 1. **Be specific** - "Find bugs" is less effective than "Find null pointer dereferences in error handling paths"
 
-2. **Combine with `index`** - Use `index` for structural queries, `ask` for semantic understanding
+2. **Trace data flow** - "Trace where X comes from" reduces false positives vs generic "find bugs"
 
-3. **Use budget wisely** - Start with `--budget 0.10` for exploration, increase for thorough analysis
+3. **Combine with `index`** - Use `index` for structural queries, `ask` for semantic understanding
 
-4. **Multi-file context** - Include related files: `rlm-dspy ask "..." src/main.py src/utils.py tests/`
+4. **Use budget wisely** - Start with `--budget 0.10` for exploration, increase for thorough analysis
 
-5. **Iterate** - If the first answer is shallow, follow up: "Go deeper on point #2"
+5. **Multi-file context** - Include related files: `rlm-dspy ask "..." src/main.py src/utils.py tests/`
+
+6. **Iterate** - If the first answer is shallow, follow up: "Go deeper on point #2"
 
 ## Processing Strategies
 
