@@ -156,6 +156,7 @@ def create_jsonl(
 def parse_jsonl(
     path: Path | str,
     parse_func: Callable[[dict[str, Any]], BatchResult] | None = None,
+    skip_errors: bool = True,
 ) -> Iterator[BatchResult]:
     """
     Parse a JSONL results file.
@@ -163,6 +164,7 @@ def parse_jsonl(
     Args:
         path: Path to JSONL file
         parse_func: Optional custom parser (defaults to OpenAI format)
+        skip_errors: If True, skip malformed lines instead of raising
 
     Yields:
         BatchResult objects
@@ -170,10 +172,17 @@ def parse_jsonl(
     parse_func = parse_func or BatchResult.from_openai
 
     with open(path) as f:
-        for line in f:
-            if line.strip():
+        for line_num, line in enumerate(f, 1):
+            if not line.strip():
+                continue
+            try:
                 data = json.loads(line)
                 yield parse_func(data)
+            except json.JSONDecodeError as e:
+                if skip_errors:
+                    logger.warning(f"Skipping malformed JSON at line {line_num}: {e}")
+                else:
+                    raise
 
 
 async def stream_download(

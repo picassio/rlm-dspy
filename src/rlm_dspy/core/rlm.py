@@ -104,6 +104,7 @@ class RLMConfig:
     # Chunking settings
     default_chunk_size: int = field(default_factory=lambda: _env_int("RLM_CHUNK_SIZE", 100_000))
     overlap: int = field(default_factory=lambda: _env_int("RLM_OVERLAP", 500))
+    syntax_aware_chunking: bool = field(default_factory=lambda: _env_bool("RLM_SYNTAX_AWARE", True))
 
     # Processing settings
     strategy: Literal["auto", "map_reduce", "iterative", "hierarchical"] = "auto"
@@ -362,18 +363,38 @@ class RLM:
         return "mixed"
 
     def _chunk_context(self, context: str, chunk_size: int) -> list[str]:
-        """Split context into overlapping chunks."""
-        # Ensure chunk_size is larger than overlap to prevent infinite loops
+        """Split context into chunks, optionally respecting syntax boundaries.
+
+        When syntax_aware_chunking is enabled (default), uses tree-sitter to
+        identify function/class boundaries and avoids splitting mid-definition.
+        This prevents false positives from truncated code in LLM analysis.
+        """
         overlap = min(self.config.overlap, chunk_size - 1) if chunk_size > 1 else 0
         if chunk_size <= 0:
             chunk_size = self.config.default_chunk_size
-        
+
+        # Try syntax-aware chunking if enabled
+        if self.config.syntax_aware_chunking:
+            try:
+                from .syntax_chunker import TREE_SITTER_AVAILABLE, chunk_code_syntax_aware
+
+                if TREE_SITTER_AVAILABLE:
+                    code_chunks = chunk_code_syntax_aware(
+                        context,
+                        chunk_size=chunk_size,
+                        overlap=overlap,
+                    )
+                    if code_chunks:
+                        return [c.content for c in code_chunks]
+            except ImportError:
+                pass  # Fall back to character-based chunking
+
+        # Fallback: character-based chunking
         chunks = []
         start = 0
         while start < len(context):
             end = min(start + chunk_size, len(context))
             chunks.append(context[start:end])
-            # Move forward by at least 1 character to prevent infinite loop
             step = max(1, chunk_size - overlap)
             start += step
             if end >= len(context):

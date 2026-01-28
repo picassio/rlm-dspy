@@ -312,6 +312,7 @@ def validate_jsonl_file(path: str) -> ValidationResult:
     Validate a JSONL file for batch processing.
 
     Learned from modaic: validate before submission.
+    Streams file line-by-line to handle large files.
     """
     import json
     from pathlib import Path
@@ -327,29 +328,30 @@ def validate_jsonl_file(path: str) -> ValidationResult:
         )
 
     try:
-        lines = p.read_text().strip().split("\n")
         valid_lines = 0
 
-        for i, line in enumerate(lines):
-            if not line.strip():
-                continue
-            try:
-                data = json.loads(line)
-                if "custom_id" not in data:
+        # Stream file line-by-line instead of reading all into memory
+        with open(p) as f:
+            for i, line in enumerate(f):
+                if not line.strip():
+                    continue
+                try:
+                    data = json.loads(line)
+                    if "custom_id" not in data:
+                        return ValidationResult(
+                            name="JSONL File",
+                            passed=False,
+                            message=f"Line {i + 1} missing custom_id",
+                            severity="error",
+                        )
+                    valid_lines += 1
+                except json.JSONDecodeError as e:
                     return ValidationResult(
                         name="JSONL File",
                         passed=False,
-                        message=f"Line {i + 1} missing custom_id",
+                        message=f"Invalid JSON on line {i + 1}: {e}",
                         severity="error",
                     )
-                valid_lines += 1
-            except json.JSONDecodeError as e:
-                return ValidationResult(
-                    name="JSONL File",
-                    passed=False,
-                    message=f"Invalid JSON on line {i + 1}: {e}",
-                    severity="error",
-                )
 
         return ValidationResult(
             name="JSONL File",
