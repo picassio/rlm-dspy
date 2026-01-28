@@ -15,6 +15,51 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
+class PathTraversalError(Exception):
+    """Raised when a path traversal attack is detected."""
+    pass
+
+
+def validate_path_safety(path: Path, base_dir: Path | None = None) -> Path:
+    """
+    Validate that a path is safe (no traversal attacks).
+    
+    Args:
+        path: The path to validate
+        base_dir: Optional base directory - path must be within this directory
+        
+    Returns:
+        The resolved (absolute) path
+        
+    Raises:
+        PathTraversalError: If path contains traversal sequences or escapes base_dir
+    """
+    # Resolve to absolute path
+    resolved = path.resolve()
+    
+    # Check for traversal patterns in the original path string
+    path_str = str(path)
+    if ".." in path_str:
+        logger.warning("Path traversal attempt detected: %s", path_str)
+        raise PathTraversalError(f"Path contains traversal sequence: {path_str}")
+    
+    # If base_dir specified, ensure path is within it
+    if base_dir is not None:
+        base_resolved = base_dir.resolve()
+        try:
+            resolved.relative_to(base_resolved)
+        except ValueError:
+            logger.warning(
+                "Path escapes base directory: %s not in %s", 
+                resolved, base_resolved
+            )
+            raise PathTraversalError(
+                f"Path {resolved} is outside base directory {base_resolved}"
+            )
+    
+    return resolved
+
+
 def is_windows() -> bool:
     """Check if running on Windows."""
     return sys.platform == "win32"
@@ -65,7 +110,16 @@ def smart_link(source: Path, target: Path, force: bool = False) -> None:
         source: Source path (must exist)
         target: Target path to create
         force: Remove existing target if it exists
+        
+    Raises:
+        PathTraversalError: If paths contain traversal sequences
+        FileNotFoundError: If source does not exist
+        FileExistsError: If target exists and force=False
     """
+    # Validate paths for traversal attacks
+    source = validate_path_safety(source)
+    target = validate_path_safety(target)
+    
     if not source.exists():
         raise FileNotFoundError(f"Source does not exist: {source}")
 
@@ -120,7 +174,13 @@ def smart_rmtree(path: Path, aggressive: bool = False) -> bool:
 
     Returns:
         True if successful
+        
+    Raises:
+        PathTraversalError: If path contains traversal sequences
     """
+    # Validate path for traversal attacks
+    path = validate_path_safety(path)
+    
     if not path.exists():
         return True
 
@@ -277,10 +337,16 @@ def atomic_write(
         mode: File mode ('w' for text, 'wb' for binary)
         retries: Number of retry attempts for rename (Windows)
         retry_delay: Delay between retries in seconds
+        
+    Raises:
+        PathTraversalError: If path contains traversal sequences
     """
     import tempfile
     import time
 
+    # Validate path for traversal attacks
+    path = validate_path_safety(path)
+    
     path.parent.mkdir(parents=True, exist_ok=True)
 
     # Write to temp file in same directory (for atomic rename)

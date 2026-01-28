@@ -363,17 +363,39 @@ class RLM:
 
         spec = pathspec.PathSpec.from_lines("gitwildmatch", patterns) if patterns else None
 
-        # Collect all files
+        # Collect all files using os.scandir() for better performance
+        # This avoids O(2N) stat calls that pathlib.iterdir() + is_file() would cause
+        def collect_files_fast(base_path: Path, spec: pathspec.PathSpec | None) -> list[Path]:
+            """Recursively collect files, pruning ignored directories early."""
+            result = []
+            try:
+                with os.scandir(base_path) as entries:
+                    for entry in entries:
+                        rel_path = Path(entry.path).relative_to(base_path)
+                        
+                        # Check if ignored before recursing (prune early)
+                        if spec and spec.match_file(str(rel_path)):
+                            continue
+                            
+                        if entry.is_file(follow_symlinks=False):
+                            result.append(Path(entry.path))
+                        elif entry.is_dir(follow_symlinks=False):
+                            # Skip common ignored directories for performance
+                            if entry.name in {'.git', '__pycache__', 'node_modules', '.venv', 'venv'}:
+                                continue
+                            # Recurse into subdirectory
+                            result.extend(collect_files_fast(Path(entry.path), spec))
+            except PermissionError:
+                _logger.debug("Permission denied: %s", base_path)
+            return result
+
         files: list[Path] = []
         for path in paths:
             p = Path(path)
             if p.is_file():
                 files.append(p)
             elif p.is_dir():
-                for f in p.rglob("*"):
-                    if f.is_file():
-                        if spec is None or not spec.match_file(str(f.relative_to(p))):
-                            files.append(f)
+                files.extend(collect_files_fast(p, spec))
 
         # Read and combine with clear file markers
         context_parts = []

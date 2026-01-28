@@ -34,6 +34,7 @@ from .debug import (
 
 # File utilities
 from .fileutils import (
+    PathTraversalError,
     atomic_write,
     ensure_dir,
     get_cache_dir,
@@ -44,6 +45,7 @@ from .fileutils import (
     smart_link,
     smart_rmtree,
     sync_directory,
+    validate_path_safety,
 )
 
 # Retry utilities
@@ -124,6 +126,8 @@ __all__ = [
     "path_to_module",
     "ensure_dir",
     "atomic_write",
+    "validate_path_safety",
+    "PathTraversalError",
     # Retry utilities
     "retry_with_backoff",
     "retry_sync",
