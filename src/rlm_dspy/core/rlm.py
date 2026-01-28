@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, TypeVar
 
 import dspy
 
@@ -29,6 +30,16 @@ _logger = logging.getLogger(__name__)
 def _env(key: str, default: str) -> str:
     """Get environment variable with default."""
     return os.environ.get(key, default)
+
+
+# Pre-compiled regex patterns for secret detection (compiled once at import)
+_SECRET_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r'sk-[a-zA-Z0-9]{20,}'), '[REDACTED_SK]'),  # OpenAI style
+    (re.compile(r'sk-ant-[a-zA-Z0-9-]{20,}'), '[REDACTED_ANTHROPIC]'),  # Anthropic
+    (re.compile(r'sk-or-v1-[a-zA-Z0-9]{20,}'), '[REDACTED_OPENROUTER]'),  # OpenRouter
+    (re.compile(r'gsk_[a-zA-Z0-9]{20,}'), '[REDACTED_GROQ]'),  # Groq
+    (re.compile(r'AIza[a-zA-Z0-9_-]{35}'), '[REDACTED_GOOGLE]'),  # Google
+]
 
 
 def _sanitize_secrets(text: str, extra_secrets: list[str] | None = None) -> str:
@@ -58,17 +69,9 @@ def _sanitize_secrets(text: str, extra_secrets: list[str] | None = None) -> str:
         if value and len(value) > 8 and value in result:
             result = result.replace(value, "[REDACTED]")
     
-    # Also check for common API key patterns
-    import re
-    patterns = [
-        (r'sk-[a-zA-Z0-9]{20,}', '[REDACTED_SK]'),  # OpenAI style
-        (r'sk-ant-[a-zA-Z0-9-]{20,}', '[REDACTED_ANTHROPIC]'),  # Anthropic
-        (r'sk-or-v1-[a-zA-Z0-9]{20,}', '[REDACTED_OPENROUTER]'),  # OpenRouter
-        (r'gsk_[a-zA-Z0-9]{20,}', '[REDACTED_GROQ]'),  # Groq
-        (r'AIza[a-zA-Z0-9_-]{35}', '[REDACTED_GOOGLE]'),  # Google
-    ]
-    for pattern, replacement in patterns:
-        result = re.sub(pattern, replacement, result)
+    # Apply pre-compiled regex patterns
+    for pattern, replacement in _SECRET_PATTERNS:
+        result = pattern.sub(replacement, result)
     
     return result
 
@@ -92,34 +95,35 @@ def _sanitize_trajectory(trajectory: list, extra_secrets: list[str] | None = Non
     return sanitized
 
 
-def _env_int(key: str, default: int) -> int:
-    """Get environment variable as int with default."""
+T = TypeVar("T", int, float, bool, str)
+
+
+def _env_get(key: str, default: T, cast: type[T] | None = None) -> T:
+    """Get environment variable with type casting and default.
+    
+    Args:
+        key: Environment variable name
+        default: Default value (also determines type if cast not specified)
+        cast: Type to cast to (int, float, bool, str). If None, inferred from default.
+        
+    Returns:
+        The environment variable value cast to the appropriate type, or default.
+    """
     val = os.environ.get(key)
     if val is None:
         return default
+    
+    target_type = cast or type(default)
+    
+    # Special handling for bool
+    if target_type is bool:
+        return val.lower() in ("true", "1", "yes", "on")  # type: ignore[return-value]
+    
     try:
-        return int(val)
+        return target_type(val)  # type: ignore[return-value]
     except ValueError:
-        _logger.warning("Invalid int for %s=%r, using default %d", key, val, default)
+        _logger.warning("Invalid %s for %s=%r, using default %r", target_type.__name__, key, val, default)
         return default
-
-
-def _env_float(key: str, default: float) -> float:
-    """Get environment variable as float with default."""
-    val = os.environ.get(key)
-    if val is None:
-        return default
-    try:
-        return float(val)
-    except ValueError:
-        _logger.warning("Invalid float for %s=%r, using default %f", key, val, default)
-        return default
-
-
-def _env_bool(key: str, default: bool) -> bool:
-    """Get environment variable as bool with default."""
-    val = os.environ.get(key, str(default)).lower()
-    return val in ("true", "1", "yes", "on")
 
 
 # =============================================================================
@@ -227,26 +231,26 @@ class RLMConfig:
 
     # RLM execution settings (maps to dspy.RLM parameters)
     max_iterations: int = field(
-        default_factory=lambda: _env_int("RLM_MAX_ITERATIONS", 20)
+        default_factory=lambda: _env_get("RLM_MAX_ITERATIONS", 20)
     )
     max_llm_calls: int = field(
-        default_factory=lambda: _env_int("RLM_MAX_LLM_CALLS", 50)
+        default_factory=lambda: _env_get("RLM_MAX_LLM_CALLS", 50)
     )
     max_output_chars: int = field(
-        default_factory=lambda: _env_int("RLM_MAX_OUTPUT_CHARS", 100_000)
+        default_factory=lambda: _env_get("RLM_MAX_OUTPUT_CHARS", 100_000)
     )
     verbose: bool = field(
-        default_factory=lambda: _env_bool("RLM_VERBOSE", False)
+        default_factory=lambda: _env_get("RLM_VERBOSE", False)
     )
 
     # Budget/safety limits
     max_budget: float = field(
-        default_factory=lambda: _env_float(
+        default_factory=lambda: _env_get(
             "RLM_MAX_BUDGET", _get_user_config_default("max_budget", 1.0)
         )
     )
     max_timeout: float = field(
-        default_factory=lambda: _env_float(
+        default_factory=lambda: _env_get(
             "RLM_MAX_TIMEOUT", _get_user_config_default("max_timeout", 300.0)
         )
     )
@@ -511,30 +515,40 @@ class RLM:
                     return True
             return False
 
-        def collect_files_fast(
-            current_path: Path, 
+        def collect_files_iterative(
+            start_path: Path, 
             root_path: Path,
             spec: pathspec.PathSpec | None
         ) -> list[Path]:
-            """Recursively collect files, pruning ignored directories early."""
+            """Iteratively collect files, pruning ignored directories early.
+            
+            Uses a stack instead of recursion to avoid RecursionError on deep trees.
+            """
+            from collections import deque
+            
             result: list[Path] = []
+            dirs_to_process: deque[Path] = deque([start_path])
             
-            try:
-                entries = list(os.scandir(current_path))
-            except PermissionError:
-                _logger.debug("Permission denied: %s", current_path)
-                return result
-            
-            for entry in entries:
-                entry_path = Path(entry.path)
+            while dirs_to_process:
+                current_path = dirs_to_process.popleft()
                 
-                if _should_skip_entry(entry, entry_path, root_path, spec):
+                try:
+                    entries = os.scandir(current_path)
+                except PermissionError:
+                    _logger.debug("Permission denied: %s", current_path)
                     continue
                 
-                if entry.is_file(follow_symlinks=False):
-                    result.append(entry_path)
-                elif entry.is_dir(follow_symlinks=False):
-                    result.extend(collect_files_fast(entry_path, root_path, spec))
+                with entries:
+                    for entry in entries:
+                        entry_path = Path(entry.path)
+                        
+                        if _should_skip_entry(entry, entry_path, root_path, spec):
+                            continue
+                        
+                        if entry.is_file(follow_symlinks=False):
+                            result.append(entry_path)
+                        elif entry.is_dir(follow_symlinks=False):
+                            dirs_to_process.append(entry_path)
             
             return result
 
@@ -545,7 +559,7 @@ class RLM:
                 files.append(p)
             elif p.is_dir():
                 # Pass p as both current and root path
-                files.extend(collect_files_fast(p, p, spec))
+                files.extend(collect_files_iterative(p, p, spec))
 
         # Read and combine with clear file markers
         context_parts = []

@@ -180,7 +180,7 @@ def _run_dry_run(config: RLMConfig, context: str) -> None:
 
 def _output_result(
     result: RLMResult,
-    output_json: bool,
+    output_format: str,
     output_file: Path | None,
     verbose: bool,
     debug: bool,
@@ -189,7 +189,7 @@ def _output_result(
     
     Args:
         result: Query result
-        output_json: Output as JSON
+        output_format: Output format (text, json, markdown)
         output_file: File to write to
         verbose: Show stats
         debug: Show trajectory
@@ -197,7 +197,7 @@ def _output_result(
     Raises:
         typer.Exit: On error
     """
-    if output_json:
+    if output_format == "json":
         output_data = {
             "answer": result.answer,
             "success": result.success,
@@ -217,6 +217,17 @@ def _output_result(
             print(json_output)
         return
     
+    # Markdown format
+    if output_format == "markdown":
+        md_output = _format_as_markdown(result)
+        if output_file:
+            _safe_write_output(output_file, md_output)
+            console.print(f"[green]Markdown written to {output_file}[/green]")
+        else:
+            print(md_output)
+        return
+    
+    # Text format (default) to file
     if output_file:
         if result.success:
             _safe_write_output(output_file, result.answer)
@@ -268,6 +279,39 @@ def _output_result(
         raise typer.Exit(1)
 
 
+def _format_as_markdown(result: RLMResult) -> str:
+    """Format result as Markdown."""
+    lines = ["# Analysis Result\n"]
+    
+    if not result.success:
+        lines.append(f"**Error:** {result.error or 'Unknown error'}\n")
+        return "\n".join(lines)
+    
+    if result.outputs:
+        # Structured output from custom signature
+        for key, value in result.outputs.items():
+            # Convert key from snake_case to Title Case
+            title = key.replace("_", " ").title()
+            lines.append(f"## {title}\n")
+            
+            if isinstance(value, list):
+                for item in value:
+                    lines.append(f"- {item}")
+                lines.append("")
+            elif isinstance(value, bool):
+                lines.append(f"{'Yes' if value else 'No'}\n")
+            else:
+                lines.append(f"{value}\n")
+    else:
+        lines.append(result.answer)
+    
+    # Add stats
+    lines.append("\n---\n")
+    lines.append(f"*Time: {result.elapsed_time:.1f}s | Iterations: {result.iterations}*")
+    
+    return "\n".join(lines)
+
+
 def _print_trajectory(trajectory: list, title: str = "Trajectory") -> None:
     """Print query trajectory for debugging."""
     console.print(f"\n[bold]{title}:[/bold]")
@@ -315,9 +359,13 @@ def ask(
         Optional[str],
         typer.Option("--signature", "-S", help="Output signature: security, bugs, review, architecture, performance, diff"),
     ] = None,
+    output_format: Annotated[
+        Optional[str],
+        typer.Option("--format", "-f", help="Output format: text, json, markdown"),
+    ] = None,
     output_json: Annotated[
         bool,
-        typer.Option("--json", "-j", help="Output as JSON"),
+        typer.Option("--json", "-j", help="Shorthand for --format json"),
     ] = False,
     output_file: Annotated[
         Optional[Path],
@@ -427,8 +475,11 @@ def ask(
             result = rlm.query(query, context)
             progress.update(task, description="Done!")
 
+    # Resolve output format (--json is shorthand for --format json)
+    resolved_format = output_format or ("json" if output_json else "text")
+    
     # Output result
-    _output_result(result, output_json, output_file, verbose, debug)
+    _output_result(result, resolved_format, output_file, verbose, debug)
 
 
 @app.command()
