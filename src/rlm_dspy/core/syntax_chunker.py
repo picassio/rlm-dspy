@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 # Tree-sitter is REQUIRED for syntax-aware chunking
 _PARSERS: dict[str, "Parser"] = {}
 _PARSERS_LOCK = threading.Lock()
+_PARSE_LOCKS: dict[str, threading.Lock] = {}  # Per-language locks for thread-safe parsing
 
 try:
     from tree_sitter import Language, Parser
@@ -96,24 +97,29 @@ class CodeChunk:
     name: str | None = None  # e.g., function/class name
 
 
-def _get_parser(language: str) -> "Parser | None":
-    """Get or create a tree-sitter parser for the language (thread-safe)."""
+def _get_parser(language: str) -> tuple["Parser | None", "threading.Lock | None"]:
+    """Get or create a tree-sitter parser for the language (thread-safe).
+
+    Returns:
+        Tuple of (parser, parse_lock) - both None if language not supported.
+        The parse_lock MUST be held during parser.parse() calls.
+    """
     if not TREE_SITTER_AVAILABLE:
-        return None
+        return None, None
 
     # Fast path: check without lock
     if language in _PARSERS:
-        return _PARSERS[language]
+        return _PARSERS[language], _PARSE_LOCKS[language]
 
     module_name = LANGUAGE_MODULES.get(language)
     if not module_name:
-        return None
+        return None, None
 
     # Slow path: acquire lock and create parser
     with _PARSERS_LOCK:
         # Double-check after acquiring lock
         if language in _PARSERS:
-            return _PARSERS[language]
+            return _PARSERS[language], _PARSE_LOCKS[language]
 
         try:
             import importlib
@@ -127,14 +133,16 @@ def _get_parser(language: str) -> "Parser | None":
             elif hasattr(lang_module, "language"):
                 lang = Language(lang_module.language())
             else:
-                return None
+                return None, None
 
             parser = Parser(lang)
+            parse_lock = threading.Lock()
             _PARSERS[language] = parser
-            return parser
+            _PARSE_LOCKS[language] = parse_lock
+            return parser, parse_lock
         except (ImportError, AttributeError, Exception) as e:
             logger.debug(f"Failed to load tree-sitter for {language}: {e}")
-            return None
+            return None, None
 
 
 def _detect_language(content: str, filename: str | None = None) -> str | None:
@@ -195,12 +203,15 @@ class ParseResult:
 
 def _parse_code(content: str, language: str) -> ParseResult:
     """Parse code once to extract both boundaries and imports (single tree traversal)."""
-    parser = _get_parser(language)
-    if not parser:
+    parser, parse_lock = _get_parser(language)
+    if not parser or not parse_lock:
         return ParseResult(boundaries=[], imports=[])
 
     source_bytes = content.encode("utf-8")
-    tree = parser.parse(source_bytes)
+
+    # Parser.parse() is not thread-safe, must hold lock
+    with parse_lock:
+        tree = parser.parse(source_bytes)
 
     boundaries: list[tuple[int, int, str, str | None]] = []
     imports: list[str] = []

@@ -148,6 +148,9 @@ class SalsaDB:
         # Query cache: query_key -> CacheEntry (OrderedDict for LRU)
         self._query_cache: OrderedDict[QueryKey, CacheEntry] = OrderedDict()
 
+        # Track file dependencies during query execution (before cache entry exists)
+        self._pending_file_deps: dict[QueryKey, dict[str, int]] = {}
+
         # Reverse dependencies: query_key -> set of dependent query_keys
         self._reverse_deps: dict[QueryKey, set[QueryKey]] = {}
 
@@ -206,10 +209,16 @@ class SalsaDB:
                     self._file_to_queries[path] = set()
                 self._file_to_queries[path].add(current_query)
 
-                # Also track in the cache entry
+                # Track file dependency - use pending if entry doesn't exist yet
+                file_rev = self._file_revisions.get(path, 0)
                 if current_query in self._query_cache:
                     entry = self._query_cache[current_query]
-                    entry.file_dependencies[path] = self._file_revisions.get(path, 0)
+                    entry.file_dependencies[path] = file_rev
+                else:
+                    # First run - entry not created yet, use pending deps
+                    if current_query not in self._pending_file_deps:
+                        self._pending_file_deps[current_query] = {}
+                    self._pending_file_deps[current_query][path] = file_rev
 
             return self._file_contents.get(path)
 
@@ -288,8 +297,10 @@ class SalsaDB:
                 original_func = getattr(func, "_original_func", func)
                 result = original_func(self, *args)
 
-                # Create cache entry
+                # Create cache entry with any file dependencies recorded during execution
                 entry = CacheEntry(result=result)
+                if query_key in self._pending_file_deps:
+                    entry.file_dependencies = self._pending_file_deps.pop(query_key)
 
                 # Record reverse dependencies for cache invalidation
                 # When parent calls child (query_key), parent depends on child
