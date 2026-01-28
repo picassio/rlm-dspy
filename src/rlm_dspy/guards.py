@@ -300,6 +300,7 @@ def validate_groundedness(
     context: str,
     query: str,
     threshold: float = 0.66,
+    model: str | None = None,
 ) -> GroundednessResult:
     """Validate output groundedness using DSPy's LLM-as-judge.
     
@@ -312,6 +313,7 @@ def validate_groundedness(
         context: Source context the output should be grounded in
         query: Original question asked
         threshold: Minimum groundedness score (0-1) to pass
+        model: Model to use for validation (default: from env or gpt-4o-mini)
         
     Returns:
         GroundednessResult with score, claims, and discussion
@@ -327,19 +329,40 @@ def validate_groundedness(
             print(f"Output may be hallucinated: {result.discussion}")
         ```
     """
+    import os
     import dspy
     from dspy.evaluate.auto_evaluation import AnswerGroundedness
     from dspy.predict.chain_of_thought import ChainOfThought
     
-    # Create the groundedness checker
-    checker = ChainOfThought(AnswerGroundedness)
+    # Configure LM - use same resolution as RLM class
+    if model is None:
+        model = os.environ.get("RLM_MODEL")
+        if not model:
+            try:
+                from .core.user_config import get_config_value
+                model = get_config_value("model")
+            except Exception:
+                pass
+        model = model or "openai/gpt-4o-mini"
     
-    # Run the check
-    result = checker(
-        question=query,
-        retrieved_context=context,
-        system_response=output,
-    )
+    # Get API key for the model
+    from .core.rlm import get_provider_env_var
+    api_key = None
+    if env_var := get_provider_env_var(model):
+        api_key = os.environ.get(env_var)
+    if not api_key:
+        api_key = os.environ.get("RLM_API_KEY") or os.environ.get("OPENROUTER_API_KEY")
+    
+    lm = dspy.LM(model, api_key=api_key)
+    
+    # Run with configured LM
+    with dspy.settings.context(lm=lm):
+        checker = ChainOfThought(AnswerGroundedness)
+        result = checker(
+            question=query,
+            retrieved_context=context,
+            system_response=output,
+        )
     
     return GroundednessResult(
         score=float(result.groundedness),
@@ -355,6 +378,7 @@ def validate_completeness(
     expected: str,
     query: str,
     threshold: float = 0.66,
+    model: str | None = None,
 ) -> float:
     """Check if output covers expected content using LLM-as-judge.
     
@@ -366,20 +390,43 @@ def validate_completeness(
         expected: Expected/ground truth response
         query: Original question
         threshold: Minimum completeness to pass
+        model: Model to use for validation (default: from env or gpt-4o-mini)
         
     Returns:
         Completeness score (0-1)
     """
+    import os
     import dspy
     from dspy.evaluate.auto_evaluation import AnswerCompleteness
     from dspy.predict.chain_of_thought import ChainOfThought
     
-    checker = ChainOfThought(AnswerCompleteness)
-    result = checker(
-        question=query,
-        ground_truth=expected,
-        system_response=output,
-    )
+    # Configure LM - use same resolution as RLM class
+    if model is None:
+        model = os.environ.get("RLM_MODEL")
+        if not model:
+            try:
+                from .core.user_config import get_config_value
+                model = get_config_value("model")
+            except Exception:
+                pass
+        model = model or "openai/gpt-4o-mini"
+    
+    from .core.rlm import get_provider_env_var
+    api_key = None
+    if env_var := get_provider_env_var(model):
+        api_key = os.environ.get(env_var)
+    if not api_key:
+        api_key = os.environ.get("RLM_API_KEY") or os.environ.get("OPENROUTER_API_KEY")
+    
+    lm = dspy.LM(model, api_key=api_key)
+    
+    with dspy.settings.context(lm=lm):
+        checker = ChainOfThought(AnswerCompleteness)
+        result = checker(
+            question=query,
+            ground_truth=expected,
+            system_response=output,
+        )
     
     return float(result.completeness)
 
@@ -389,6 +436,7 @@ def semantic_f1(
     expected: str,
     query: str,
     decompositional: bool = False,
+    model: str | None = None,
 ) -> float:
     """Calculate semantic F1 score between output and expected.
     
@@ -401,11 +449,33 @@ def semantic_f1(
         expected: Ground truth/expected response
         query: Original question
         decompositional: Use detailed key-idea decomposition
+        model: Model to use for evaluation (default: from env or gpt-4o-mini)
         
     Returns:
         F1 score (0-1)
     """
+    import os
     import dspy
+    
+    # Configure LM - use same resolution as RLM class
+    if model is None:
+        model = os.environ.get("RLM_MODEL")
+        if not model:
+            try:
+                from .core.user_config import get_config_value
+                model = get_config_value("model")
+            except Exception:
+                pass
+        model = model or "openai/gpt-4o-mini"
+    
+    from .core.rlm import get_provider_env_var
+    api_key = None
+    if env_var := get_provider_env_var(model):
+        api_key = os.environ.get(env_var)
+    if not api_key:
+        api_key = os.environ.get("RLM_API_KEY") or os.environ.get("OPENROUTER_API_KEY")
+    
+    lm = dspy.LM(model, api_key=api_key)
     
     # Create example and prediction objects
     class Example:
@@ -417,5 +487,6 @@ def semantic_f1(
         def __init__(self, response):
             self.response = response
     
-    evaluator = dspy.evaluate.SemanticF1(decompositional=decompositional)
-    return evaluator(Example(query, expected), Prediction(output))
+    with dspy.settings.context(lm=lm):
+        evaluator = dspy.evaluate.SemanticF1(decompositional=decompositional)
+        return evaluator(Example(query, expected), Prediction(output))
