@@ -62,7 +62,7 @@ class BatchRequest:
 
 
 @dataclass
-class BatchResult:
+class BatchJobResult:
     """Result from a single batch request."""
 
     custom_id: str
@@ -73,7 +73,7 @@ class BatchResult:
     latency_ms: float = 0.0
 
     @classmethod
-    def from_openai(cls, data: dict[str, Any]) -> "BatchResult":
+    def from_openai(cls, data: dict[str, Any]) -> "BatchJobResult":
         """Parse OpenAI batch result format."""
         custom_id = data.get("custom_id", "")
         response = data.get("response", {})
@@ -155,9 +155,9 @@ def create_jsonl(
 
 def parse_jsonl(
     path: Path | str,
-    parse_func: Callable[[dict[str, Any]], BatchResult] | None = None,
+    parse_func: Callable[[dict[str, Any]], BatchJobResult] | None = None,
     skip_errors: bool = True,
-) -> Iterator[BatchResult]:
+) -> Iterator[BatchJobResult]:
     """
     Parse a JSONL results file.
 
@@ -167,9 +167,9 @@ def parse_jsonl(
         skip_errors: If True, skip malformed lines instead of raising
 
     Yields:
-        BatchResult objects
+        BatchJobResult objects
     """
-    parse_func = parse_func or BatchResult.from_openai
+    parse_func = parse_func or BatchJobResult.from_openai
 
     with open(path) as f:
         for line_num, line in enumerate(f, 1):
@@ -279,14 +279,14 @@ class BatchPoller:
             await asyncio.sleep(self.poll_interval)
 
 
-def sort_results_by_custom_id(results: list[BatchResult]) -> list[BatchResult]:
+def sort_results_by_custom_id(results: list[BatchJobResult]) -> list[BatchJobResult]:
     """
     Sort batch results by custom_id to maintain input order.
 
     Learned from modaic: custom_id pattern (request-0, request-1, etc.)
     """
 
-    def extract_index(result: BatchResult) -> int:
+    def extract_index(result: BatchJobResult) -> int:
         # Handle formats like "request-42" or just "42"
         custom_id = result.custom_id
         if "-" in custom_id:

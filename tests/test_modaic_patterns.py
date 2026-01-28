@@ -390,12 +390,12 @@ class TestBatch:
 
     def test_sort_results_by_custom_id(self):
         """Test result sorting."""
-        from rlm_dspy.core.batch import BatchResult, sort_results_by_custom_id
+        from rlm_dspy.core.batch import BatchJobResult, sort_results_by_custom_id
 
         results = [
-            BatchResult(custom_id="request-2", content="C"),
-            BatchResult(custom_id="request-0", content="A"),
-            BatchResult(custom_id="request-1", content="B"),
+            BatchJobResult(custom_id="request-2", content="C"),
+            BatchJobResult(custom_id="request-0", content="A"),
+            BatchJobResult(custom_id="request-1", content="B"),
         ]
 
         sorted_results = sort_results_by_custom_id(results)

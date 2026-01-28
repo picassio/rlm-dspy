@@ -3,6 +3,7 @@
 from .async_client import AsyncLLMClient, aggregate_answers_async, analyze_chunks_async
 from .batch import (
     BATCH_DIR,
+    BatchJobResult,
     BatchPoller,
     BatchRequest,
     BatchStatus,
@@ -11,9 +12,6 @@ from .batch import (
     parse_jsonl,
     sort_results_by_custom_id,
     stream_download,
-)
-from .batch import (
-    BatchResult as BatchJobResult,
 )
 from .config_utils import (
     ConfigResolver,
