@@ -803,10 +803,10 @@ class RLM:
             self._check_limits()
             if len(chunk) > chunk_size:
                 # Recurse for large chunks
-                sub_rlm = RLM(config=sub_config)
-                sub_result = sub_rlm.query(query, chunk, depth=depth + 1)
-                if sub_result.success:
-                    partial_answers.append(sub_result.answer)
+                with RLM(config=sub_config) as sub_rlm:
+                    sub_result = sub_rlm.query(query, chunk, depth=depth + 1)
+                    if sub_result.success:
+                        partial_answers.append(sub_result.answer)
             else:
                 # Process small chunks directly
                 result = self.chunk_analyzer(
