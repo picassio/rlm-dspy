@@ -343,6 +343,13 @@ def analyze(
             context,
         )
 
+    # Check for failures
+    results = [("structure", structure), ("components", components), ("issues", issues)]
+    for name, result in results:
+        if not result.success:
+            console.print(f"[red]Error analyzing {name}: {result.error}[/red]")
+            raise typer.Exit(1)
+
     # Format output
     if format == "json":
         analysis = {
@@ -446,8 +453,15 @@ def compile(
     config = _get_config(model)
 
     # Load training data
-    with open(training_data) as f:
-        examples = json.load(f)
+    try:
+        with open(training_data) as f:
+            examples = json.load(f)
+    except json.JSONDecodeError as e:
+        console.print(f"[red]Error: Invalid JSON in {training_data}: {e}[/red]")
+        raise typer.Exit(1)
+    except FileNotFoundError:
+        console.print(f"[red]Error: Training data file not found: {training_data}[/red]")
+        raise typer.Exit(1)
 
     trainset = [
         dspy.Example(
