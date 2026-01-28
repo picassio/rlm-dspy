@@ -282,13 +282,16 @@ class SalsaDB:
                 # Create cache entry
                 entry = CacheEntry(result=result)
 
-                # Record dependencies from nested queries
+                # Record reverse dependencies for cache invalidation
+                # When parent calls child (query_key), parent depends on child
+                # So if child's result changes, parent should be invalidated
+                # _reverse_deps maps: child -> set of parents that depend on it
                 if len(self._query_stack) > 1:
                     parent_key = self._query_stack[-2]
-                    if parent_key not in self._reverse_deps:
-                        self._reverse_deps[parent_key] = set()
-                    self._reverse_deps[parent_key].add(query_key)
-                    entry.dependencies.add(parent_key)
+                    # Track that parent depends on this child query
+                    if query_key not in self._reverse_deps:
+                        self._reverse_deps[query_key] = set()
+                    self._reverse_deps[query_key].add(parent_key)
 
                 self._query_cache[query_key] = entry
 

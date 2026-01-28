@@ -9,23 +9,33 @@ Uses tiktoken for accurate token counting (same tokenizer as GPT-4/Claude).
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+logger = logging.getLogger(__name__)
+
 # Lazy-loaded encoder (singleton)
 _encoder = None
+_tiktoken_warning_shown = False
 
 
 def _get_encoder():
     """Get or create tiktoken encoder (lazy loading)."""
-    global _encoder
+    global _encoder, _tiktoken_warning_shown
     if _encoder is None:
         try:
             import tiktoken
             _encoder = tiktoken.get_encoding("cl100k_base")
         except ImportError:
+            if not _tiktoken_warning_shown:
+                logger.warning(
+                    "tiktoken not available, using approximate token counting. "
+                    "Install with: pip install tiktoken"
+                )
+                _tiktoken_warning_shown = True
             return None
     return _encoder
 
@@ -249,7 +259,8 @@ class SessionStats:
 
 # Global session for convenience
 _current_session: SessionStats | None = None
-_session_lock = __import__("threading").Lock()
+# Use RLock to allow reentrant locking (record_operation calls get_session)
+_session_lock = __import__("threading").RLock()
 
 
 def get_session(session_id: str | None = None) -> SessionStats:
@@ -267,8 +278,8 @@ def get_session(session_id: str | None = None) -> SessionStats:
 
 def record_operation(stats: TokenStats) -> None:
     """Record an operation to the current session (thread-safe)."""
-    session = get_session()
     with _session_lock:
+        session = get_session()
         session.record(stats)
 
 

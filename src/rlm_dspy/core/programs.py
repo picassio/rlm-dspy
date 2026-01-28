@@ -22,6 +22,9 @@ class RecursiveAnalyzer(dspy.Module):
     Uses DSPy's ChainOfThought for better reasoning at each step.
     """
 
+    # Minimum chunk size to prevent infinite recursion (1KB)
+    MIN_CHUNK_SIZE = 1000
+
     def __init__(self, max_depth: int = 3):
         super().__init__()
         self.max_depth = max_depth
@@ -66,12 +69,9 @@ class RecursiveAnalyzer(dspy.Module):
         chunks = self._chunk(context, chunk_size)
         partial_answers = []
 
-        # Minimum chunk size to prevent infinite recursion (1KB)
-        MIN_CHUNK_SIZE = 1000
-
         for i, chunk in enumerate(chunks):
-            # Recursively analyze each chunk
-            next_chunk_size = max(MIN_CHUNK_SIZE, chunk_size // 2)
+            # Recursively analyze each chunk (halve size but respect minimum)
+            next_chunk_size = max(self.MIN_CHUNK_SIZE, chunk_size // 2)
             sub_result = self.forward(
                 query=query,
                 context=chunk,
@@ -103,13 +103,19 @@ class RecursiveAnalyzer(dspy.Module):
 
     def _chunk(self, text: str, size: int, overlap: int = 500) -> list[str]:
         """Split text into overlapping chunks."""
+        # Validate inputs to prevent infinite loops
+        if size <= 0:
+            size = 100_000  # Default chunk size
+        overlap = min(overlap, size - 1)  # Ensure overlap < size
+
         chunks = []
         start = 0
         while start < len(text):
             end = min(start + size, len(text))
             chunks.append(text[start:end])
-            start = end - overlap
-            if start >= len(text) - overlap:
+            step = max(1, size - overlap)  # Ensure we make progress
+            start += step
+            if end >= len(text):
                 break
         return chunks
 
@@ -144,14 +150,21 @@ class ChunkedProcessor(dspy.Module):
         Returns:
             Prediction with answer
         """
-        # Split into chunks
+        # Split into chunks with safety checks
         chunks = []
         start = 0
+        overlap = 500
+        # Ensure chunk_size is valid and overlap doesn't cause infinite loop
+        if chunk_size <= 0:
+            chunk_size = 100_000
+        overlap = min(overlap, chunk_size - 1)  # Ensure overlap < chunk_size
+
         while start < len(context):
             end = min(start + chunk_size, len(context))
             chunks.append(context[start:end])
-            start = end - 500  # Small overlap
-            if start >= len(context) - 500:
+            step = max(1, chunk_size - overlap)  # Ensure we make progress
+            start += step
+            if end >= len(context):
                 break
 
         # Analyze each chunk

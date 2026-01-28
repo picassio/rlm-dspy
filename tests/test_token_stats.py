@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 
 from rlm_dspy.core.token_stats import (
-    TokenStats,
     SessionStats,
+    TokenStats,
     count_tokens,
     estimate_cost,
     get_session,
@@ -98,7 +98,7 @@ class TestTokenStats:
             chunks_relevant=2,
         )
         d = stats.to_dict()
-        
+
         assert d["raw_context_tokens"] == 1000
         assert d["processed_tokens"] == 200
         assert d["context_savings_percent"] == 80.0
@@ -116,7 +116,7 @@ class TestTokenStats:
             chunks_relevant=3,
         )
         s = str(stats)
-        
+
         assert "Token Stats" in s
         assert "10,000" in s
         assert "2,000" in s
@@ -129,7 +129,7 @@ class TestSessionStats:
     def test_record_operation(self):
         """Recording operations accumulates stats."""
         session = SessionStats(session_id="test")
-        
+
         stats1 = TokenStats(
             raw_context_tokens=1000,
             processed_tokens=200,
@@ -146,10 +146,10 @@ class TestSessionStats:
             chunks_processed=10,
             chunks_relevant=4,
         )
-        
+
         session.record(stats1)
         session.record(stats2)
-        
+
         assert len(session.operations) == 2
         assert session.total_raw_tokens == 3000
         assert session.total_processed_tokens == 600
@@ -163,7 +163,7 @@ class TestSessionStats:
         session = SessionStats(session_id="test")
         session.record(TokenStats(raw_context_tokens=1000, processed_tokens=200))
         session.record(TokenStats(raw_context_tokens=1000, processed_tokens=200))
-        
+
         assert session.total_savings == 80.0
 
     def test_average_chunk_relevance(self):
@@ -171,16 +171,16 @@ class TestSessionStats:
         session = SessionStats(session_id="test")
         session.record(TokenStats(chunks_processed=10, chunks_relevant=5))
         session.record(TokenStats(chunks_processed=10, chunks_relevant=3))
-        
+
         assert session.average_chunk_relevance == 40.0
 
     def test_to_dict(self):
         """Serialization to dict."""
         session = SessionStats(session_id="test123")
         session.record(TokenStats(raw_context_tokens=1000, processed_tokens=200))
-        
+
         d = session.to_dict()
-        
+
         assert d["session_id"] == "test123"
         assert d["operation_count"] == 1
         assert d["total_raw_tokens"] == 1000
@@ -190,15 +190,15 @@ class TestSessionStats:
         """Save stats to JSONL file."""
         session = SessionStats(session_id="test")
         session.record(TokenStats(raw_context_tokens=1000, processed_tokens=200))
-        
+
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "stats.jsonl"
             session.save(path)
-            
+
             assert path.exists()
             with open(path) as f:
                 data = json.loads(f.readline())
-            
+
             assert data["session_id"] == "test"
             assert data["total_raw_tokens"] == 1000
 
@@ -211,7 +211,7 @@ class TestSessionStats:
             llm_input_tokens=1500,
             llm_output_tokens=500,
         ))
-        
+
         s = str(session)
         assert "test" in s
         assert "Operations: 1" in s
@@ -230,5 +230,5 @@ class TestGlobalSession:
         """record_operation uses global session."""
         session = get_session("global_test")
         record_operation(TokenStats(raw_context_tokens=500, processed_tokens=100))
-        
+
         assert session.total_raw_tokens == 500

@@ -10,8 +10,14 @@ while still making them available for analysis.
 
 from __future__ import annotations
 
+import logging
 import os
+import time
+from collections import OrderedDict
 from dataclasses import dataclass, field
+from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def _env_int(key: str, default: int) -> int:
@@ -33,8 +39,13 @@ class PasteStore:
     placeholder like "[paste_1: 5000 chars]". The full content can be
     injected into the final context separately.
 
+    Features:
+    - LRU eviction when max_entries is exceeded
+    - TTL-based expiration for stale entries
+    - Memory-aware storage limits
+
     Example:
-        store = PasteStore(threshold=2000)
+        store = PasteStore(threshold=2000, max_entries=100, ttl_seconds=3600)
 
         # Large content gets stored
         text, paste_id = store.maybe_store(large_code)
@@ -48,9 +59,76 @@ class PasteStore:
     threshold: int = field(
         default_factory=lambda: _env_int("RLM_PASTE_THRESHOLD", 2000)
     )
-    _store: dict[str, str] = field(default_factory=dict)
+    max_entries: int = field(
+        default_factory=lambda: _env_int("RLM_PASTE_MAX_ENTRIES", 100)
+    )
+    ttl_seconds: float = field(
+        default_factory=lambda: float(_env_int("RLM_PASTE_TTL", 3600))  # 1 hour default
+    )
+    max_total_bytes: int = field(
+        default_factory=lambda: _env_int("RLM_PASTE_MAX_BYTES", 50_000_000)  # 50MB default
+    )
+
+    # Internal state - using OrderedDict for LRU ordering
+    _store: OrderedDict[str, str] = field(default_factory=OrderedDict)
     _counter: int = 0
-    _metadata: dict[str, dict] = field(default_factory=dict)
+    _metadata: dict[str, dict[str, Any]] = field(default_factory=dict)
+    _total_bytes: int = 0
+
+    def _evict_expired(self) -> int:
+        """Remove entries older than TTL. Returns count of evicted entries."""
+        if self.ttl_seconds <= 0:
+            return 0  # TTL disabled
+
+        now = time.time()
+        expired = []
+        for paste_id, meta in self._metadata.items():
+            if now - meta.get("created_at", now) > self.ttl_seconds:
+                expired.append(paste_id)
+
+        for paste_id in expired:
+            self._remove(paste_id)
+
+        if expired:
+            logger.debug("PasteStore: evicted %d expired entries", len(expired))
+
+        return len(expired)
+
+    def _evict_lru(self, needed_bytes: int = 0) -> int:
+        """Evict least recently used entries until under limits. Returns count evicted."""
+        evicted = 0
+
+        # Evict until under max_entries
+        while len(self._store) >= self.max_entries:
+            if not self._store:
+                break
+            # Pop oldest (first) item from OrderedDict
+            oldest_id = next(iter(self._store))
+            self._remove(oldest_id)
+            evicted += 1
+
+        # Evict until under max_total_bytes (considering needed_bytes for new entry)
+        while self._total_bytes + needed_bytes > self.max_total_bytes and self._store:
+            oldest_id = next(iter(self._store))
+            self._remove(oldest_id)
+            evicted += 1
+
+        if evicted:
+            logger.debug("PasteStore: LRU evicted %d entries", evicted)
+
+        return evicted
+
+    def _remove(self, paste_id: str) -> None:
+        """Remove a paste by ID."""
+        if paste_id in self._store:
+            content = self._store.pop(paste_id)
+            self._total_bytes -= len(content.encode('utf-8'))
+        self._metadata.pop(paste_id, None)
+
+    def _touch(self, paste_id: str) -> None:
+        """Move entry to end of OrderedDict (most recently used)."""
+        if paste_id in self._store:
+            self._store.move_to_end(paste_id)
 
     def maybe_store(
         self,
@@ -71,13 +149,25 @@ class PasteStore:
         if len(text) <= self.threshold:
             return text, None
 
+        # Evict expired entries first
+        self._evict_expired()
+
+        # Calculate bytes needed
+        text_bytes = len(text.encode('utf-8'))
+
+        # Evict LRU entries if needed
+        self._evict_lru(needed_bytes=text_bytes)
+
         self._counter += 1
         paste_id = f"paste_{self._counter}"
         self._store[paste_id] = text
+        self._total_bytes += text_bytes
         self._metadata[paste_id] = {
             "chars": len(text),
             "lines": text.count("\n") + 1,
             "label": label,
+            "created_at": time.time(),
+            "bytes": text_bytes,
         }
 
         # Create informative placeholder
@@ -97,19 +187,43 @@ class PasteStore:
         Returns:
             The paste_id
         """
+        # Evict expired entries first
+        self._evict_expired()
+
+        # Calculate bytes needed
+        text_bytes = len(text.encode('utf-8'))
+
+        # Evict LRU entries if needed
+        self._evict_lru(needed_bytes=text_bytes)
+
         self._counter += 1
         paste_id = f"paste_{self._counter}"
         self._store[paste_id] = text
+        self._total_bytes += text_bytes
         self._metadata[paste_id] = {
             "chars": len(text),
             "lines": text.count("\n") + 1,
             "label": label,
+            "created_at": time.time(),
+            "bytes": text_bytes,
         }
         return paste_id
 
     def get(self, paste_id: str) -> str | None:
-        """Retrieve stored content by ID."""
-        return self._store.get(paste_id)
+        """Retrieve stored content by ID. Marks as recently used."""
+        # Check expiration
+        if paste_id in self._metadata:
+            meta = self._metadata[paste_id]
+            if self.ttl_seconds > 0:
+                age = time.time() - meta.get("created_at", 0)
+                if age > self.ttl_seconds:
+                    self._remove(paste_id)
+                    return None
+
+        content = self._store.get(paste_id)
+        if content is not None:
+            self._touch(paste_id)  # Mark as recently used
+        return content
 
     def inject_context(self, max_per_paste: int | None = None) -> str:
         """Generate context section with all stored pastes.
@@ -120,6 +234,9 @@ class PasteStore:
         Returns:
             Formatted string with all stored content
         """
+        # Evict expired before generating context
+        self._evict_expired()
+
         if not self._store:
             return ""
 
@@ -144,6 +261,9 @@ class PasteStore:
 
     def summary(self) -> str:
         """Get a summary of stored content without the full text."""
+        # Evict expired before summary
+        self._evict_expired()
+
         if not self._store:
             return "No stored content"
 
@@ -158,6 +278,7 @@ class PasteStore:
             lines.append(f"  - [{paste_id}]{label_str}: {chars} chars")
 
         lines.append(f"Total: {total_chars} chars in {len(self._store)} pastes")
+        lines.append(f"Memory: {self._total_bytes:,} bytes")
         return "\n".join(lines)
 
     def clear(self) -> None:
@@ -165,6 +286,19 @@ class PasteStore:
         self._store.clear()
         self._metadata.clear()
         self._counter = 0
+        self._total_bytes = 0
+
+    def stats(self) -> dict[str, Any]:
+        """Get storage statistics."""
+        return {
+            "entries": len(self._store),
+            "total_bytes": self._total_bytes,
+            "max_entries": self.max_entries,
+            "max_bytes": self.max_total_bytes,
+            "ttl_seconds": self.ttl_seconds,
+            "utilization_percent": round(self._total_bytes / self.max_total_bytes * 100, 1)
+            if self.max_total_bytes > 0 else 0,
+        }
 
     def __len__(self) -> int:
         """Number of stored pastes."""

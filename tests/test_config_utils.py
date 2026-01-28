@@ -5,15 +5,13 @@ import os
 import tempfile
 from pathlib import Path
 
-import pytest
-
 from rlm_dspy.core.config_utils import (
-    atomic_write_json,
-    atomic_read_json,
     ConfigResolver,
+    atomic_read_json,
+    atomic_write_json,
     format_user_error,
-    inject_context,
     get_config_dir,
+    inject_context,
 )
 
 
@@ -25,9 +23,9 @@ class TestAtomicIO:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "test.json"
             data = {"key": "value", "number": 42}
-            
+
             atomic_write_json(path, data)
-            
+
             assert path.exists()
             with open(path) as f:
                 loaded = json.load(f)
@@ -37,18 +35,18 @@ class TestAtomicIO:
         """Atomic write creates parent directories."""
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "nested" / "dir" / "test.json"
-            
+
             atomic_write_json(path, {"test": True})
-            
+
             assert path.exists()
 
     def test_atomic_write_secure_permissions(self):
         """Atomic write with secure=True sets 0o600 permissions."""
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "secret.json"
-            
+
             atomic_write_json(path, {"secret": "data"}, secure=True)
-            
+
             mode = path.stat().st_mode & 0o777
             assert mode == 0o600
 
@@ -59,9 +57,9 @@ class TestAtomicIO:
             data = {"key": "value"}
             with open(path, "w") as f:
                 json.dump(data, f)
-            
+
             result = atomic_read_json(path)
-            
+
             assert result == data
 
     def test_atomic_read_missing_file(self):
@@ -75,9 +73,9 @@ class TestAtomicIO:
             path = Path(tmpdir) / "invalid.json"
             with open(path, "w") as f:
                 f.write("not valid json")
-            
+
             result = atomic_read_json(path, default={"fallback": True})
-            
+
             assert result == {"fallback": True}
 
 
@@ -88,7 +86,7 @@ class TestConfigResolver:
         """Explicit value takes precedence over everything."""
         resolver = ConfigResolver(env_prefix="TEST_")
         os.environ["TEST_KEY"] = "from_env"
-        
+
         try:
             result = resolver.get("KEY", default="default", explicit="explicit")
             assert result == "explicit"
@@ -101,10 +99,10 @@ class TestConfigResolver:
             cache_path = Path(tmpdir) / "config.json"
             with open(cache_path, "w") as f:
                 json.dump({"KEY": "from_cache"}, f)
-            
+
             resolver = ConfigResolver(env_prefix="TEST_", cache_path=cache_path)
             os.environ["TEST_KEY"] = "from_env"
-            
+
             try:
                 result = resolver.get("KEY", default="default")
                 assert result == "from_env"
@@ -117,10 +115,10 @@ class TestConfigResolver:
             cache_path = Path(tmpdir) / "config.json"
             with open(cache_path, "w") as f:
                 json.dump({"KEY": "from_cache"}, f)
-            
+
             resolver = ConfigResolver(env_prefix="TEST_", cache_path=cache_path)
             result = resolver.get("KEY", default="default")
-            
+
             assert result == "from_cache"
 
     def test_default_fallback(self):
@@ -133,7 +131,7 @@ class TestConfigResolver:
         """Boolean values are coerced correctly."""
         resolver = ConfigResolver(env_prefix="TEST_")
         os.environ["TEST_FLAG"] = "true"
-        
+
         try:
             result = resolver.get("FLAG", default=False)
             assert result is True
@@ -144,7 +142,7 @@ class TestConfigResolver:
         """Integer values are coerced correctly."""
         resolver = ConfigResolver(env_prefix="TEST_")
         os.environ["TEST_COUNT"] = "42"
-        
+
         try:
             result = resolver.get("COUNT", default=0)
             assert result == 42
@@ -157,9 +155,9 @@ class TestConfigResolver:
         with tempfile.TemporaryDirectory() as tmpdir:
             cache_path = Path(tmpdir) / "config.json"
             resolver = ConfigResolver(env_prefix="TEST_", cache_path=cache_path)
-            
+
             resolver.set("KEY", "new_value")
-            
+
             # Verify persisted
             with open(cache_path) as f:
                 data = json.load(f)
@@ -173,7 +171,7 @@ class TestFormatUserError:
         """Authentication errors are formatted helpfully."""
         error = Exception("401 Unauthorized: Invalid API key")
         result = format_user_error(error)
-        
+
         assert "Authentication failed" in result
         assert "API key" in result
 
@@ -181,7 +179,7 @@ class TestFormatUserError:
         """Rate limit errors are formatted helpfully."""
         error = Exception("429 Too Many Requests")
         result = format_user_error(error)
-        
+
         assert "Rate limited" in result
         assert "RLM_PARALLEL_CHUNKS" in result
 
@@ -189,7 +187,7 @@ class TestFormatUserError:
         """Context length errors are formatted helpfully."""
         error = Exception("Context length exceeded")
         result = format_user_error(error)
-        
+
         assert "Context too long" in result
         assert "RLM_CHUNK_SIZE" in result
 
@@ -197,7 +195,7 @@ class TestFormatUserError:
         """Unknown errors include type and message."""
         error = ValueError("Something went wrong")
         result = format_user_error(error, context="processing")
-        
+
         assert "ValueError" in result
         assert "Something went wrong" in result
         assert "processing" in result
@@ -209,14 +207,14 @@ class TestInjectContext:
     def test_inject_cwd(self):
         """Current directory is injected."""
         result = inject_context("Do something", include_cwd=True, include_time=False)
-        
+
         assert "Working Directory:" in result
         assert os.getcwd() in result
 
     def test_inject_time(self):
         """Timestamp is injected."""
         result = inject_context("Do something", include_cwd=False, include_time=True)
-        
+
         assert "Timestamp:" in result
 
     def test_inject_extra(self):
@@ -227,14 +225,14 @@ class TestInjectContext:
             include_time=False,
             extra={"Project": "test-project", "Branch": "main"}
         )
-        
+
         assert "Project: test-project" in result
         assert "Branch: main" in result
 
     def test_task_section(self):
         """Task is in its own section."""
         result = inject_context("My task here", include_cwd=True)
-        
+
         assert "## Task" in result
         assert "My task here" in result
 

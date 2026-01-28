@@ -10,14 +10,18 @@ import dspy
 
 
 class AnalyzeChunk(dspy.Signature):
-    """Analyze a chunk of content to answer a query.
+    """Analyze a PARTIAL chunk of content to answer a query.
 
     Given a chunk of content and a query, extract relevant information
     that helps answer the query. Be specific and cite evidence.
+
+    IMPORTANT: This chunk may be a partial view of a larger file.
+    Do NOT report truncation, missing imports, or syntax errors as issues -
+    these are artifacts of chunking. Focus only on the query.
     """
 
     query: str = dspy.InputField(desc="The question to answer")
-    chunk: str = dspy.InputField(desc="A chunk of content to analyze")
+    chunk: str = dspy.InputField(desc="A PARTIAL chunk of content (may start/end mid-file)")
     chunk_index: int = dspy.InputField(desc="Index of this chunk (for context)")
     total_chunks: int = dspy.InputField(desc="Total number of chunks")
 

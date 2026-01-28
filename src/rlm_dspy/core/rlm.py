@@ -185,6 +185,13 @@ class RLM:
 
     def __init__(self, config: RLMConfig | None = None):
         self.config = config or RLMConfig()
+
+        # Validate API key early to fail fast
+        if not self.config.api_key:
+            raise ValueError(
+                "No API key configured. Set RLM_API_KEY or OPENROUTER_API_KEY environment variable."
+            )
+
         self._setup_dspy()
         self._setup_programs()
 
@@ -200,6 +207,12 @@ class RLM:
         # Large content handling (from paste_store module)
         from .paste_store import PasteStore
         self.paste_store = PasteStore()
+
+        # Reusable thread pool for async operations (prevents thread exhaustion)
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+        self._executor: ThreadPoolExecutor | None = None
+        self._executor_lock = threading.Lock()
 
     def _setup_dspy(self) -> None:
         """Configure DSPy with the specified model."""
@@ -521,15 +534,28 @@ class RLM:
             try:
                 asyncio.get_running_loop()
                 # We're in an async context - run in thread to avoid blocking
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(run_in_new_loop, coro)
-                    return future.result()
+                # Reuse executor to prevent thread exhaustion (thread-safe init)
+                with self._executor_lock:
+                    if self._executor is None:
+                        from concurrent.futures import ThreadPoolExecutor
+                        self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="rlm_async")
+                future = self._executor.submit(run_in_new_loop, coro)
+                return future.result()
             except RuntimeError:
                 # No running loop - safe to use asyncio.run()
                 return asyncio.run(coro)
 
         results = run_coro(run_analysis())
+
+        # Track token usage from results
+        for r in results:
+            usage = r.get("usage", {})
+            self._tokens_used += usage.get("total_tokens", 0)
+            # Estimate cost (rough approximation - actual pricing varies by model)
+            input_tokens = usage.get("prompt_tokens", 0)
+            output_tokens = usage.get("completion_tokens", 0)
+            # Using generic pricing estimate ($0.50/$1.50 per 1M tokens)
+            self._cost_spent += (input_tokens * 0.5 + output_tokens * 1.5) / 1_000_000
 
         # Collect partial answers
         partial_answers = []
@@ -672,10 +698,13 @@ class RLM:
         trace.append({"step": "hierarchical", "depth": depth, "num_chunks": len(chunks)})
 
         # Create sub-RLM for each major section
+        # Use REMAINING budget/timeout, not original, to prevent overspending
+        remaining_budget = max(0.01, self.config.max_budget - self._cost_spent)
+        remaining_timeout = max(10.0, self.config.max_timeout - (time.time() - (self._start_time or time.time())))
         sub_config = RLMConfig(
             model=self.config.sub_model,
-            max_budget=self.config.max_budget / len(chunks),
-            max_timeout=self.config.max_timeout / len(chunks),
+            max_budget=remaining_budget / len(chunks),
+            max_timeout=remaining_timeout / len(chunks),
             max_depth=self.config.max_depth,
         )
 
@@ -718,6 +747,24 @@ class RLM:
     ) -> RLMResult:
         """Async version of query for concurrent processing."""
         return await asyncio.to_thread(self.query, query, context)
+
+    def close(self) -> None:
+        """Clean up resources (thread pool, etc.)."""
+        if self._executor is not None:
+            self._executor.shutdown(wait=False)
+            self._executor = None
+
+    def __enter__(self) -> "RLM":
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """Context manager exit - clean up resources."""
+        self.close()
+
+    def __del__(self) -> None:
+        """Destructor - clean up resources."""
+        self.close()
 
 
 # Custom exceptions

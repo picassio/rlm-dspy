@@ -3,9 +3,9 @@
 import pytest
 
 from rlm_dspy.core.content_hash import (
-    content_hash,
     ContentHashedIndex,
     DirtyTracker,
+    content_hash,
 )
 
 
@@ -47,10 +47,10 @@ class TestContentHashedIndex:
     def test_set_and_get(self):
         """Basic set and get works."""
         index = ContentHashedIndex[str]()
-        
+
         index.set("file.txt", "content", "result")
         result = index.get("file.txt")
-        
+
         assert result == "result"
 
     def test_get_missing(self):
@@ -62,10 +62,10 @@ class TestContentHashedIndex:
         """Same content shares entry."""
         index = ContentHashedIndex[str]()
         content = "shared content"
-        
+
         index.set("file1.txt", content, "result")
         index.set("file2.txt", content, "result")
-        
+
         # Only 1 unique entry
         assert len(index) == 1
         # But 2 paths
@@ -76,13 +76,13 @@ class TestContentHashedIndex:
     def test_dedup_ratio(self):
         """Dedup ratio is calculated correctly."""
         index = ContentHashedIndex[str]()
-        
+
         # Add 4 files with 2 unique contents
         index.set("a.txt", "content1", "r1")
         index.set("b.txt", "content1", "r1")
         index.set("c.txt", "content2", "r2")
         index.set("d.txt", "content2", "r2")
-        
+
         # 4 paths, 2 unique = 50% dedup
         assert index.dedup_ratio == 0.5
 
@@ -90,24 +90,24 @@ class TestContentHashedIndex:
         """Get duplicates returns paths with same content."""
         index = ContentHashedIndex[str]()
         content = "shared"
-        
+
         index.set("a.txt", content, "r")
         index.set("b.txt", content, "r")
         index.set("c.txt", content, "r")
-        
+
         duplicates = index.get_duplicates("a.txt")
-        
+
         assert duplicates == {"b.txt", "c.txt"}
 
     def test_remove(self):
         """Remove works correctly."""
         index = ContentHashedIndex[str]()
-        
+
         index.set("file.txt", "content", "result")
         assert "file.txt" in index
-        
+
         removed = index.remove("file.txt")
-        
+
         assert removed
         assert "file.txt" not in index
         assert index.get("file.txt") is None
@@ -116,12 +116,12 @@ class TestContentHashedIndex:
         """Remove one duplicate keeps others."""
         index = ContentHashedIndex[str]()
         content = "shared"
-        
+
         index.set("a.txt", content, "r")
         index.set("b.txt", content, "r")
-        
+
         index.remove("a.txt")
-        
+
         # b.txt still works
         assert index.get("b.txt") == "r"
         assert len(index) == 1
@@ -129,38 +129,38 @@ class TestContentHashedIndex:
     def test_update_content(self):
         """Updating content updates hash."""
         index = ContentHashedIndex[str]()
-        
+
         index.set("file.txt", "old content", "old result")
         h1 = index.get_hash("file.txt")
-        
+
         index.set("file.txt", "new content", "new result")
         h2 = index.get_hash("file.txt")
-        
+
         assert h1 != h2
         assert index.get("file.txt") == "new result"
 
     def test_hit_rate(self):
         """Hit rate is tracked correctly."""
         index = ContentHashedIndex[str]()
-        
+
         index.set("file.txt", "content", "result")
-        
+
         index.get("file.txt")  # hit
         index.get("file.txt")  # hit
         index.get("missing.txt")  # miss
-        
+
         assert index.hit_rate == pytest.approx(2/3, rel=0.01)
 
     def test_stats(self):
         """Stats returns correct info."""
         index = ContentHashedIndex[str]()
-        
+
         index.set("a.txt", "c1", "r1")
         index.set("b.txt", "c1", "r1")
         index.get("a.txt")
-        
+
         stats = index.stats()
-        
+
         assert stats["paths"] == 2
         assert stats["unique_entries"] == 1
         assert stats["dedup_ratio"] == 50.0
@@ -169,12 +169,12 @@ class TestContentHashedIndex:
     def test_clear(self):
         """Clear removes everything."""
         index = ContentHashedIndex[str]()
-        
+
         index.set("a.txt", "c1", "r1")
         index.set("b.txt", "c2", "r2")
-        
+
         index.clear()
-        
+
         assert len(index) == 0
         assert index.path_count == 0
 
@@ -185,64 +185,64 @@ class TestDirtyTracker:
     def test_mark_dirty(self):
         """Mark dirty works."""
         tracker = DirtyTracker()
-        
+
         tracker.mark_dirty("file.txt")
-        
+
         assert tracker.is_dirty("file.txt")
         assert len(tracker) == 1
 
     def test_mark_clean(self):
         """Mark clean works."""
         tracker = DirtyTracker()
-        
+
         tracker.mark_dirty("file.txt")
         tracker.mark_clean("file.txt")
-        
+
         assert not tracker.is_dirty("file.txt")
         assert len(tracker) == 0
 
     def test_get_dirty(self):
         """Get dirty returns all dirty files."""
         tracker = DirtyTracker()
-        
+
         tracker.mark_dirty("a.txt")
         tracker.mark_dirty("b.txt")
         tracker.mark_dirty("c.txt")
-        
+
         dirty = tracker.get_dirty()
-        
+
         assert dirty == {"a.txt", "b.txt", "c.txt"}
 
     def test_bool(self):
         """Bool conversion works."""
         tracker = DirtyTracker()
-        
+
         assert not tracker
-        
+
         tracker.mark_dirty("file.txt")
-        
+
         assert tracker
 
     def test_stats(self):
         """Stats tracks cleaned count."""
         tracker = DirtyTracker()
-        
+
         tracker.mark_dirty("a.txt")
         tracker.mark_dirty("b.txt")
         tracker.mark_clean("a.txt")
-        
+
         stats = tracker.stats()
-        
+
         assert stats["dirty"] == 1
         assert stats["cleaned"] == 1
 
     def test_clear(self):
         """Clear removes all dirty flags."""
         tracker = DirtyTracker()
-        
+
         tracker.mark_dirty("a.txt")
         tracker.mark_dirty("b.txt")
-        
+
         tracker.clear()
-        
+
         assert len(tracker) == 0

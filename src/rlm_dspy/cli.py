@@ -92,12 +92,19 @@ def ask(
     ] = None,
     strategy: Annotated[
         Optional[str],
-        typer.Option("--strategy", "-s", help="Processing strategy: auto|map_reduce|iterative|hierarchical"),
+        typer.Option(
+            "--strategy", "-s",
+            help="Strategy: auto|map_reduce|iterative|hierarchical (see above)"
+        ),
     ] = None,
     output_json: Annotated[
         bool,
         typer.Option("--json", "-j", help="Output as JSON"),
     ] = False,
+    output_file: Annotated[
+        Optional[Path],
+        typer.Option("--output", "-o", help="Write output to file"),
+    ] = None,
     verbose: Annotated[
         bool,
         typer.Option("--verbose", "-v", help="Show detailed progress"),
@@ -114,13 +121,21 @@ def ask(
     """
     Ask a question about files or piped content.
 
-    Examples:
+    STRATEGIES:
+        auto         - Automatically select best strategy based on context size
+        map_reduce   - Parallel chunk analysis, then aggregate (best for large contexts)
+        iterative    - Sequential analysis with rolling context (order-dependent content)
+        hierarchical - Recursive decomposition with sub-queries (very large contexts)
+
+    EXAMPLES:
         rlm-dspy ask "What does main() do?" src/
-        cat large_file.txt | rlm-dspy ask "Summarize this" --stdin
-        rlm-dspy ask "Find bugs" src/*.py --model claude-3-opus
-        rlm-dspy ask "Explain" file.py -v  # verbose
-        rlm-dspy ask "Debug" file.py -d    # full debug
-        rlm-dspy ask "Test" file.py -n     # dry run (validate only)
+        rlm-dspy ask "Summarize this" --stdin < large_file.txt
+        rlm-dspy ask "Find bugs" src/*.py --model anthropic/claude-sonnet-4
+        rlm-dspy ask "Explain" file.py -v           # verbose progress
+        rlm-dspy ask "Debug" file.py -d             # full debug output
+        rlm-dspy ask "Test" file.py -n              # dry run (validate only)
+        rlm-dspy ask "Analyze" src/ -o report.md    # write to file
+        rlm-dspy ask "Analyze" src/ -j -o data.json # JSON output to file
     """
     import os
 
@@ -213,19 +228,32 @@ def ask(
 
     # Output
     if output_json:
-        print(
-            json.dumps(
-                {
-                    "answer": result.answer,
-                    "success": result.success,
-                    "tokens": result.total_tokens,
-                    "cost": result.total_cost,
-                    "time": result.elapsed_time,
-                    "error": result.error,
-                },
-                indent=2,
-            )
+        json_output = json.dumps(
+            {
+                "answer": result.answer,
+                "success": result.success,
+                "tokens": result.total_tokens,
+                "cost": result.total_cost,
+                "time": result.elapsed_time,
+                "error": result.error,
+            },
+            indent=2,
         )
+        if output_file:
+            output_file.write_text(json_output)
+            console.print(f"[green]Output written to {output_file}[/green]")
+        else:
+            print(json_output)
+    elif output_file:
+        # Write plain text/markdown to file
+        if result.success:
+            output_file.write_text(result.answer)
+            console.print(f"[green]Output written to {output_file}[/green]")
+            if verbose or debug:
+                _print_stats(result)
+        else:
+            console.print(f"[red]Error: {result.error}[/red]")
+            raise typer.Exit(1)
     else:
         if result.success:
             console.print(

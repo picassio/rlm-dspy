@@ -3,18 +3,16 @@
 import tempfile
 from pathlib import Path
 
-import pytest
-
 from rlm_dspy.core.salsa import (
     SalsaDB,
-    salsa_query,
-    is_salsa_query,
-    get_db,
-    reset_db,
     file_content,
     file_hash,
-    file_lines,
     file_line_count,
+    file_lines,
+    get_db,
+    is_salsa_query,
+    reset_db,
+    salsa_query,
 )
 
 
@@ -54,19 +52,19 @@ class TestSalsaDBFiles:
         """Set and get file content."""
         db = SalsaDB()
         db.set_file("test.py", "print('hello')")
-        
+
         content = db.get_file("test.py")
         assert content == "print('hello')"
 
     def test_file_revision_increments(self):
         """File revision increments on update."""
         db = SalsaDB()
-        
+
         assert db.get_file_revision("test.py") == 0
-        
+
         db.set_file("test.py", "v1")
         assert db.get_file_revision("test.py") == 1
-        
+
         db.set_file("test.py", "v2")
         assert db.get_file_revision("test.py") == 2
 
@@ -80,10 +78,10 @@ class TestSalsaDBFiles:
         with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
             f.write("# test file")
             f.flush()
-            
+
             db = SalsaDB()
             content = db.load_file(f.name)
-            
+
             assert content == "# test file"
             assert db.get_file(f.name) == "# test file"
 
@@ -125,7 +123,7 @@ class TestSalsaDBQueries:
 
         db.query(my_query, 5)
         db.query(my_query, 10)
-        
+
         assert call_count == 2
 
     def test_file_dependency_invalidation(self):
@@ -141,19 +139,19 @@ class TestSalsaDBQueries:
             return f"processed: {content}"
 
         db.set_file("data.txt", "original")
-        
+
         # First query
         result1 = db.query(read_and_process, "data.txt")
         assert result1 == "processed: original"
         assert call_count == 1
 
         # Cached
-        result2 = db.query(read_and_process, "data.txt")
+        _ = db.query(read_and_process, "data.txt")
         assert call_count == 1
 
         # Update file - should invalidate cache
         db.set_file("data.txt", "updated")
-        
+
         # Query recomputes
         result3 = db.query(read_and_process, "data.txt")
         assert result3 == "processed: updated"
@@ -193,9 +191,9 @@ class TestSalsaDBInvalidation:
 
         db.query(my_query, 5)
         assert call_count == 1
-        
+
         db.invalidate(my_query, 5)
-        
+
         db.query(my_query, 5)
         assert call_count == 2
 
@@ -210,11 +208,11 @@ class TestSalsaDBInvalidation:
         db.query(my_query, 1)
         db.query(my_query, 2)
         db.query(my_query, 3)
-        
+
         assert db.cache_size() == 3
-        
+
         count = db.invalidate_all()
-        
+
         assert count == 3
         assert db.cache_size() == 0
 
@@ -226,17 +224,17 @@ class TestSalsaDBPersistence:
         """Save and load state."""
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "salsa.json"
-            
+
             # Create and populate DB
             db1 = SalsaDB()
             db1.set_file("a.py", "# file a")
             db1.set_file("b.py", "# file b")
             db1.save(path)
-            
+
             # Load into new DB
             db2 = SalsaDB()
             loaded = db2.load(path)
-            
+
             assert loaded
             assert db2.get_file("a.py") == "# file a"
             assert db2.get_file("b.py") == "# file b"
@@ -255,7 +253,7 @@ class TestBuiltinQueries:
         """file_content query works."""
         db = SalsaDB()
         db.set_file("test.py", "hello")
-        
+
         content = db.query(file_content, "test.py")
         assert content == "hello"
 
@@ -263,7 +261,7 @@ class TestBuiltinQueries:
         """file_hash query works."""
         db = SalsaDB()
         db.set_file("test.py", "hello")
-        
+
         h = db.query(file_hash, "test.py")
         assert h is not None
         assert len(h) == 16  # Truncated SHA256
@@ -272,7 +270,7 @@ class TestBuiltinQueries:
         """file_lines query works."""
         db = SalsaDB()
         db.set_file("test.py", "line1\nline2\nline3")
-        
+
         lines = db.query(file_lines, "test.py")
         assert lines == ["line1", "line2", "line3"]
 
@@ -280,7 +278,7 @@ class TestBuiltinQueries:
         """file_line_count query works."""
         db = SalsaDB()
         db.set_file("test.py", "line1\nline2\nline3")
-        
+
         count = db.query(file_line_count, "test.py")
         assert count == 3
 

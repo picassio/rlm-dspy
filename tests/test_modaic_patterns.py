@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Tests for patterns learned from modaic."""
 
-import asyncio
 import json
 import tempfile
 import time
@@ -19,7 +18,8 @@ class TestRetry:
 
         call_count = 0
 
-        @retry_sync(max_retries=3, base_delay=0.01)
+        # Specify ValueError as retryable for this test
+        @retry_sync(max_retries=3, base_delay=0.01, retryable_exceptions=(ValueError,))
         def flaky_function():
             nonlocal call_count
             call_count += 1
@@ -35,7 +35,8 @@ class TestRetry:
         """Test retry gives up after max retries."""
         from rlm_dspy.core import retry_sync
 
-        @retry_sync(max_retries=2, base_delay=0.01)
+        # Specify ValueError as retryable for this test
+        @retry_sync(max_retries=2, base_delay=0.01, retryable_exceptions=(ValueError,))
         def always_fails():
             raise ValueError("Always fails")
 
@@ -190,6 +191,7 @@ class TestSecrets:
     def test_inject_secrets(self):
         """Test secret injection from env."""
         import os
+
         from rlm_dspy.core import inject_secrets
 
         data = {"api_key": "********", "name": "test"}
@@ -211,11 +213,11 @@ class TestObservability:
 
     def test_tracker_span(self):
         """Test span tracking."""
-        from rlm_dspy.core import Tracker, SpanType
+        from rlm_dspy.core import SpanType, Tracker
 
         tracker = Tracker(enabled=True)
 
-        with tracker.span("test_op", SpanType.LLM) as span:
+        with tracker.span("test_op", SpanType.LLM):
             time.sleep(0.01)
 
         assert len(tracker.spans) == 1
@@ -225,7 +227,7 @@ class TestObservability:
 
     def test_tracker_summary(self):
         """Test summary statistics."""
-        from rlm_dspy.core import Tracker, SpanType
+        from rlm_dspy.core import SpanType, Tracker
 
         tracker = Tracker(enabled=True)
 
@@ -243,7 +245,7 @@ class TestObservability:
 
     def test_track_decorator(self):
         """Test @track decorator."""
-        from rlm_dspy.core import track, SpanType, get_tracker, enable_tracking
+        from rlm_dspy.core import SpanType, enable_tracking, get_tracker, track
 
         enable_tracking(True)
         tracker = get_tracker()
@@ -263,7 +265,7 @@ class TestObservability:
         tracker = Tracker(enabled=True)
 
         with pytest.raises(ValueError):
-            with tracker.span("failing_op") as span:
+            with tracker.span("failing_op"):
                 raise ValueError("Something went wrong")
 
         assert len(tracker.spans) == 1
@@ -405,7 +407,7 @@ class TestFileUtils:
 
     def test_platform_detection(self):
         """Test platform detection."""
-        from rlm_dspy.core import is_linux, is_windows, is_macos
+        from rlm_dspy.core import is_linux, is_macos, is_windows
 
         # At least one should be true
         assert is_linux() or is_windows() or is_macos()
@@ -474,9 +476,9 @@ class TestIntegration:
     def test_tracked_batch_with_secrets(self):
         """Test combining tracking, batching, and secret handling."""
         from rlm_dspy.core import (
-            Tracker,
-            SpanType,
             BatchRequest,
+            SpanType,
+            Tracker,
             clean_secrets,
             create_jsonl,
         )

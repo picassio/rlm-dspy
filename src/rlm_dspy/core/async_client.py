@@ -85,7 +85,9 @@ class AsyncLLMClient:
         self.model = model or _env("RLM_MODEL", "google/gemini-3-flash-preview")
         self.api_key = api_key or os.getenv("RLM_API_KEY") or os.getenv("OPENROUTER_API_KEY")
         self.api_base = (api_base or _env("RLM_API_BASE", "https://openrouter.ai/api/v1")).rstrip("/")
-        self.max_concurrent = max_concurrent if max_concurrent is not None else _env_int("RLM_PARALLEL_CHUNKS", 20)
+        # Limit max_concurrent to prevent "too many open files" errors
+        raw_max = max_concurrent if max_concurrent is not None else _env_int("RLM_PARALLEL_CHUNKS", 20)
+        self.max_concurrent = min(raw_max, 100)  # Hard cap at 100 concurrent requests
         self.timeout = timeout
         self.disable_thinking = (
             disable_thinking if disable_thinking is not None else _env_bool("RLM_DISABLE_THINKING", True)
@@ -95,18 +97,17 @@ class AsyncLLMClient:
         # Lazy-initialized async resources (created in event loop context)
         self._semaphore: asyncio.Semaphore | None = None
         self._client: httpx.AsyncClient | None = None
-        self._init_lock: asyncio.Lock | None = None
+        # Use threading.Lock for the initialization gate (safe to create outside event loop)
+        import threading
+        self._init_lock = threading.Lock()
 
     async def _ensure_initialized(self) -> tuple[asyncio.Semaphore, httpx.AsyncClient]:
         """Lazily create semaphore and client in the right event loop (thread-safe)."""
         if self._semaphore is not None and self._client is not None:
             return self._semaphore, self._client
 
-        # Create lock if needed (this is safe - Lock() doesn't need event loop)
-        if self._init_lock is None:
-            self._init_lock = asyncio.Lock()
-
-        async with self._init_lock:
+        # Use threading lock for synchronization (works across coroutines)
+        with self._init_lock:
             # Double-check after acquiring lock
             if self._semaphore is None:
                 self._semaphore = asyncio.Semaphore(self.max_concurrent)
@@ -122,6 +123,14 @@ class AsyncLLMClient:
         if self._client is not None:
             await self._client.aclose()
             self._client = None
+
+    async def __aenter__(self) -> "AsyncLLMClient":
+        """Async context manager entry."""
+        return self
+
+    async def __aexit__(self, exc_type: type | None, exc_val: Exception | None, exc_tb: object) -> None:
+        """Async context manager exit - ensures client is closed."""
+        await self.close()
 
     async def complete(
         self,
@@ -164,10 +173,16 @@ class AsyncLLMClient:
                 "require_parameters": False,
             }
             # For models that support it, disable reasoning tokens
-            if "gemini" in self.model.lower():
+            model_lower = self.model.lower()
+            # Match gemini models (google/gemini-*, gemini-*, etc.)
+            if "gemini" in model_lower or "/gemini" in model_lower:
                 payload["reasoning"] = {"effort": "none"}
-            elif "claude" in self.model.lower():
+            # Match claude models (anthropic/claude-*, claude-*, etc.)
+            elif "claude" in model_lower or "/claude" in model_lower:
                 payload["thinking"] = {"type": "disabled"}
+            # Match other thinking models (o1, o3, deepseek-reasoner, etc.)
+            elif any(x in model_lower for x in ["o1-", "o3-", "reasoner", "thinking"]):
+                payload["reasoning"] = {"effort": "none"}
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -197,8 +212,20 @@ class AsyncLLMClient:
 
                     latency = (time.perf_counter() - start) * 1000
 
+                    # Safely extract content from response
+                    try:
+                        content = data["choices"][0]["message"]["content"]
+                    except (KeyError, IndexError, TypeError) as e:
+                        return AsyncResponse(
+                            content="",
+                            model=self.model,
+                            usage=data.get("usage", {}),
+                            latency_ms=latency,
+                            error=f"Malformed API response: {e}",
+                        )
+
                     return AsyncResponse(
-                        content=data["choices"][0]["message"]["content"],
+                        content=content,
                         model=data.get("model", self.model),
                         usage=data.get("usage", {}),
                         latency_ms=latency,
@@ -257,7 +284,14 @@ class AsyncLLMClient:
             List of AsyncResponse in same order as prompts
         """
         tasks = [self.complete(prompt, system, max_tokens, temperature) for prompt in prompts]
-        return await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Convert any exceptions to AsyncResponse with error
+        return [
+            r if isinstance(r, AsyncResponse)
+            else AsyncResponse(content="", model=self.model, usage={}, latency_ms=0, error=str(r))
+            for r in results
+        ]
 
 
 async def analyze_chunks_async(
@@ -289,7 +323,15 @@ async def analyze_chunks_async(
         enable_cache=enable_cache,
     )
 
-    system = """You are analyzing a chunk of content to answer a query.
+    try:
+        system = """You are analyzing a PARTIAL chunk of a larger codebase to answer a query.
+
+IMPORTANT CONSTRAINTS:
+- This chunk may start/end mid-file, mid-function, or mid-line
+- Do NOT report "truncated files", "missing imports", or "syntax errors" - these are chunking artifacts
+- Do NOT make claims about file completeness - you only see a portion
+- Focus ONLY on extracting information relevant to the query
+
 Extract ALL information relevant to the query. Be thorough and specific.
 If the chunk contains relevant information, extract it completely.
 If no relevant information, say "None".
@@ -298,63 +340,68 @@ Your response format:
 CONFIDENCE: high|medium|low|none
 RELEVANT_INFO: <extracted information or "None">"""
 
-    prompts = [f"Query: {query}\n\nChunk {i + 1} of {len(chunks)}:\n{chunk}" for i, chunk in enumerate(chunks)]
+        prompts = [
+            f"Query: {query}\n\n[Chunk {i + 1} of {len(chunks)} - content may be partial]:\n{chunk}"
+            for i, chunk in enumerate(chunks)
+        ]
 
-    responses = await client.batch_complete(prompts, system=system)
+        responses = await client.batch_complete(prompts, system=system)
 
-    results = []
-    for i, resp in enumerate(responses):
-        if resp.error:
-            results.append(
-                {
-                    "index": i,
-                    "relevant_info": "",
-                    "confidence": "none",
-                    "error": resp.error,
-                }
-            )
-        else:
-            # Parse response - robust multi-line parsing
-            content = resp.content.strip()
-            info = ""
-            confidence = "medium"  # Default if not specified
-
-            # Parse CONFIDENCE
-            if "CONFIDENCE:" in content:
-                conf_part = content.split("CONFIDENCE:")[1]
-                conf_line = conf_part.split("\n")[0].strip().lower()
-                for c in ("high", "medium", "low", "none"):
-                    if c in conf_line:
-                        confidence = c
-                        break
-
-            # Parse RELEVANT_INFO (can be multi-line)
-            if "RELEVANT_INFO:" in content:
-                info_part = content.split("RELEVANT_INFO:")[1].strip()
-                if info_part.lower().startswith("none"):
-                    info = ""
-                    confidence = "none"
-                else:
-                    info = info_part
+        results = []
+        for i, resp in enumerate(responses):
+            if resp.error:
+                results.append(
+                    {
+                        "index": i,
+                        "relevant_info": "",
+                        "confidence": "none",
+                        "error": resp.error,
+                    }
+                )
             else:
-                # No structured format - use full content if not "none"
-                lower = content.lower()
-                if any(x in lower for x in ["no relevant", "not relevant", "none found"]):
-                    confidence = "none"
+                # Parse response - robust multi-line parsing
+                content = resp.content.strip()
+                info = ""
+                confidence = "medium"  # Default if not specified
+
+                # Parse CONFIDENCE
+                if "CONFIDENCE:" in content:
+                    conf_part = content.split("CONFIDENCE:")[1]
+                    conf_line = conf_part.split("\n")[0].strip().lower()
+                    for c in ("high", "medium", "low", "none"):
+                        if c in conf_line:
+                            confidence = c
+                            break
+
+                # Parse RELEVANT_INFO (can be multi-line)
+                if "RELEVANT_INFO:" in content:
+                    info_part = content.split("RELEVANT_INFO:")[1].strip()
+                    if info_part.lower().startswith("none"):
+                        info = ""
+                        confidence = "none"
+                    else:
+                        info = info_part
                 else:
-                    info = content
+                    # No structured format - use full content if not "none"
+                    lower = content.lower()
+                    if any(x in lower for x in ["no relevant", "not relevant", "none found"]):
+                        confidence = "none"
+                    else:
+                        info = content
 
-            results.append(
-                {
-                    "index": i,
-                    "relevant_info": info,
-                    "confidence": confidence,
-                    "latency_ms": resp.latency_ms,
-                    "usage": resp.usage,
-                }
-            )
+                results.append(
+                    {
+                        "index": i,
+                        "relevant_info": info,
+                        "confidence": confidence,
+                        "latency_ms": resp.latency_ms,
+                        "usage": resp.usage,
+                    }
+                )
 
-    return results
+        return results
+    finally:
+        await client.close()
 
 
 async def aggregate_answers_async(
@@ -383,19 +430,22 @@ async def aggregate_answers_async(
         enable_cache=enable_cache,
     )
 
-    system = """You are synthesizing multiple partial answers into a comprehensive final answer.
+    try:
+        system = """You are synthesizing multiple partial answers into a comprehensive final answer.
 Combine the information coherently, remove redundancy, and provide a complete response."""
 
-    prompt = f"""Query: {query}
+        prompt = f"""Query: {query}
 
 Partial answers from different sources:
 {chr(10).join(f"{i + 1}. {ans}" for i, ans in enumerate(partial_answers))}
 
 Provide a comprehensive final answer:"""
 
-    response = await client.complete(prompt, system=system)
+        response = await client.complete(prompt, system=system)
 
-    if response.error:
-        return f"Error aggregating: {response.error}"
+        if response.error:
+            return f"Error aggregating: {response.error}"
 
-    return response.content
+        return response.content
+    finally:
+        await client.close()

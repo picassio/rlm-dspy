@@ -3,12 +3,12 @@
 import pytest
 
 from rlm_dspy.core.syntax_chunker import (
+    TREE_SITTER_AVAILABLE,
     CodeChunk,
+    _detect_language,
     chunk_code_syntax_aware,
     chunk_mixed_content,
     extract_imports,
-    TREE_SITTER_AVAILABLE,
-    _detect_language,
 )
 
 
@@ -66,7 +66,7 @@ def world():
         code = """class MyClass:
     def __init__(self):
         pass
-    
+
     def method(self):
         pass
 """
@@ -93,7 +93,7 @@ def function_two():
             content = chunk.content.strip()
             if "def " in content:
                 # Count 'def' and make sure each has a matching body
-                def_count = content.count("def ")
+                _ = content.count("def ")
                 # Should have at least as many 'return' or 'pass' as 'def'
                 # (indicating complete function bodies)
                 assert "return" in content or "pass" in content or "print" in content
@@ -197,7 +197,7 @@ def function_two():
 """
         # Small chunk size to force multiple chunks
         chunks = chunk_code_syntax_aware(code, chunk_size=50, include_imports=True)
-        
+
         # Each chunk should have the imports preamble
         for chunk in chunks:
             assert "# File imports:" in chunk.content or "import os" in chunk.content
@@ -211,7 +211,7 @@ def main():
     pass
 """
         chunks = chunk_code_syntax_aware(code, chunk_size=1000, include_imports=False)
-        
+
         # Should not have preamble header
         for chunk in chunks:
             assert "# File imports:" not in chunk.content
@@ -222,7 +222,7 @@ def main():
     print("hello")
 """
         chunks = chunk_code_syntax_aware(code, chunk_size=1000, include_imports=True)
-        
+
         # No imports = no preamble header
         for chunk in chunks:
             assert "# File imports:" not in chunk.content

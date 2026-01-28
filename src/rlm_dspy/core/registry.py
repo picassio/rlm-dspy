@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 from functools import lru_cache
-from typing import Callable, Generic, TypeVar
+from typing import Any, Callable, Generic, TypeVar
 
 logger = logging.getLogger(__name__)
 
@@ -141,9 +141,10 @@ class Registry(Generic[T]):
 
 
 # Global registries for RLM-DSPy components
-strategies = Registry["Strategy"]("strategies")
-processors = Registry["Processor"]("processors")
-models = Registry["Model"]("models")
+# Using Any since concrete types are defined at runtime
+strategies: Registry[Any] = Registry("strategies")
+processors: Registry[Any] = Registry("processors")
+models: Registry[Any] = Registry("models")
 
 
 def builtin_strategy(name: str) -> Callable[[type[T]], type[T]]:

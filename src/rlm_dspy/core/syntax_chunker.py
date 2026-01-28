@@ -281,6 +281,11 @@ def chunk_code_syntax_aware(
 
     # If no language detected or no tree-sitter, fall back to character chunking
     if language is None or not TREE_SITTER_AVAILABLE:
+        if not TREE_SITTER_AVAILABLE:
+            logger.warning(
+                "tree-sitter not available, using character-based chunking. "
+                "Install with: pip install tree-sitter tree-sitter-python"
+            )
         return _chunk_by_characters(content, chunk_size, overlap)
 
     # Parse once to get both boundaries and imports (single tree traversal)

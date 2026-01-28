@@ -258,13 +258,28 @@ def ensure_dir(path: Path) -> Path:
     return path
 
 
-def atomic_write(path: Path, content: str | bytes, mode: str = "w") -> None:
+def atomic_write(
+    path: Path,
+    content: str | bytes,
+    mode: str = "w",
+    retries: int = 3,
+    retry_delay: float = 0.1,
+) -> None:
     """
     Atomically write to a file (write to temp, then rename).
 
-    Prevents partial writes on crash.
+    Prevents partial writes on crash. On Windows, includes retry logic
+    for cases where the target file is temporarily locked.
+
+    Args:
+        path: Target file path
+        content: Content to write
+        mode: File mode ('w' for text, 'wb' for binary)
+        retries: Number of retry attempts for rename (Windows)
+        retry_delay: Delay between retries in seconds
     """
     import tempfile
+    import time
 
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -275,7 +290,43 @@ def atomic_write(path: Path, content: str | bytes, mode: str = "w") -> None:
     try:
         with os.fdopen(fd, mode) as f:
             f.write(content)
-        temp.replace(path)
+
+        # Retry loop for rename (helps with Windows file locking)
+        last_error: Exception | None = None
+        for attempt in range(retries + 1):
+            try:
+                temp.replace(path)
+                return  # Success
+            except PermissionError as e:
+                last_error = e
+                if attempt < retries:
+                    logger.debug(
+                        "atomic_write: rename failed (attempt %d/%d), retrying...",
+                        attempt + 1, retries + 1
+                    )
+                    time.sleep(retry_delay * (2 ** attempt))  # Exponential backoff
+                else:
+                    raise
+            except OSError as e:
+                # On Windows, file in use raises OSError
+                if is_windows() and attempt < retries:
+                    last_error = e
+                    logger.debug(
+                        "atomic_write: rename failed with OSError (attempt %d/%d), retrying...",
+                        attempt + 1, retries + 1
+                    )
+                    time.sleep(retry_delay * (2 ** attempt))
+                else:
+                    raise
+
+        # Should not reach here, but just in case
+        if last_error:
+            raise last_error
+
     except Exception:
-        temp.unlink(missing_ok=True)
+        # Clean up temp file on any failure
+        try:
+            temp.unlink(missing_ok=True)
+        except Exception:
+            pass  # Best effort cleanup
         raise
