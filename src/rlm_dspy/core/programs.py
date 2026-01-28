@@ -316,13 +316,13 @@ class ValidatedAnalyzer(dspy.Module):
         )
 
         # Phase 2: Validate
-        # Use a sample of the context for validation
-        evidence_sample = context[: min(len(context), chunk_size)]
-
+        # Use the full context for validation, not just first chunk
+        # Bug fix: Previously only used first chunk_size chars, missing evidence
+        # from later in the document that may have contributed to the answer
         validation = self.validator(
             query=query,
             proposed_answer=analysis.answer,
-            evidence=evidence_sample,
+            evidence=context,  # Use full context, not truncated sample
         )
 
         # Return validated or corrected answer

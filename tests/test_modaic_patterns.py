@@ -159,7 +159,7 @@ class TestSecrets:
         """Test value masking."""
         from rlm_dspy.core import mask_value
 
-        assert mask_value("sk-1234567890abcdef") == "sk-1...cdef"
+        assert mask_value("sk-1234567890abcdef") == "sk-1********"
         assert mask_value("short") == "********"
         assert mask_value(None) == "[None]"
 

@@ -61,14 +61,19 @@ def is_secret_key(key: str) -> bool:
 
 
 def mask_value(value: Any) -> str:
-    """Mask a secret value for safe display."""
+    """Mask a secret value for safe display.
+
+    Security: Only reveals first 4 chars to minimize entropy exposure.
+    For short values (<=8 chars), shows nothing to prevent guessing.
+    """
     if value is None:
         return "[None]"
     s = str(value)
     if len(s) <= 8:
         return SECRET_MASK
-    # Show first 4 and last 4 chars
-    return f"{s[:4]}...{s[-4:]}"
+    # Only show first 4 chars - revealing last chars is a security risk
+    # as it helps attackers narrow down the keyspace
+    return f"{s[:4]}{'*' * min(8, len(s) - 4)}"
 
 
 def clean_secrets(data: dict[str, Any], in_place: bool = False) -> dict[str, Any]:
