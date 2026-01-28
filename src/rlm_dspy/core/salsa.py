@@ -381,6 +381,10 @@ class SalsaDB:
         for deps_set in self._reverse_deps.values():
             deps_set.discard(query_key)
 
+        # Clean up file-to-query mappings (prevent memory leak)
+        for file_queries in self._file_to_queries.values():
+            file_queries.discard(query_key)
+
         logger.debug(f"Evicted (LRU): {query_key[0]}")
 
     def _invalidate_file_dependents(self, path: str) -> int:
