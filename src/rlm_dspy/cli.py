@@ -498,6 +498,156 @@ def compile(
 
 
 @app.command()
+def setup(
+    env_file: Annotated[
+        Optional[Path],
+        typer.Option("--env-file", "-e", help="Path to .env file with API keys"),
+    ] = None,
+    model: Annotated[
+        Optional[str],
+        typer.Option("--model", "-m", help="Default model (e.g., openai/gpt-4o)"),
+    ] = None,
+    budget: Annotated[
+        Optional[float],
+        typer.Option("--budget", "-b", help="Default max budget in USD"),
+    ] = None,
+    interactive: Annotated[
+        bool,
+        typer.Option("--interactive/--no-interactive", "-i", help="Interactive setup wizard"),
+    ] = True,
+) -> None:
+    """
+    Configure RLM-DSPy settings.
+
+    Creates ~/.rlm/config.yaml with your preferences.
+
+    Examples:
+        rlm-dspy setup                           # Interactive wizard
+        rlm-dspy setup --env-file ~/.claude/.env # Set env file location
+        rlm-dspy setup --model deepseek/deepseek-chat --budget 0.50
+    """
+    from .core.rlm import PROVIDER_API_KEYS
+    from .core.user_config import (
+        CONFIG_FILE,
+        get_config_status,
+        load_config,
+        load_env_file,
+        save_config,
+    )
+
+    config = load_config()
+    changed = False
+
+    if interactive and not (env_file or model or budget):
+        # Interactive wizard
+        console.print(Panel.fit(
+            "[bold cyan]RLM-DSPy Setup Wizard[/bold cyan]\n\n"
+            "This will create a config file at ~/.rlm/config.yaml",
+            title="Welcome"
+        ))
+
+        # Step 1: Env file
+        console.print("\n[bold]Step 1: Environment File[/bold]")
+        console.print("Where are your API keys stored? (e.g., ~/.claude/.env)")
+        console.print("[dim]Press Enter to skip if you use environment variables directly.[/dim]")
+
+        env_input = typer.prompt("Env file path", default=config.get("env_file") or "", show_default=False)
+        if env_input:
+            env_path = Path(env_input).expanduser()
+            if env_path.exists():
+                config["env_file"] = str(env_path)
+                changed = True
+                # Load and show what keys were found
+                loaded = load_env_file(env_path)
+                if loaded:
+                    console.print(f"[green]✓ Found {len(loaded)} environment variables[/green]")
+                    for key in loaded:
+                        if "KEY" in key or "TOKEN" in key:
+                            console.print(f"  • {key}")
+            else:
+                console.print(f"[yellow]⚠ File not found: {env_path}[/yellow]")
+
+        # Step 2: Default model
+        console.print("\n[bold]Step 2: Default Model[/bold]")
+        console.print("Available providers:")
+        providers = sorted(set(p.rstrip("/") for p in PROVIDER_API_KEYS.keys() if p))
+        for i, p in enumerate(providers, 1):
+            console.print(f"  {i}. {p}/")
+
+        model_input = typer.prompt(
+            "Default model",
+            default=config.get("model", "openai/gpt-4o-mini"),
+        )
+        if model_input != config.get("model"):
+            config["model"] = model_input
+            changed = True
+
+        # Step 3: Budget
+        console.print("\n[bold]Step 3: Default Budget[/bold]")
+        budget_input = typer.prompt(
+            "Max budget (USD)",
+            default=str(config.get("max_budget", 1.0)),
+        )
+        try:
+            budget_val = float(budget_input)
+            if budget_val != config.get("max_budget"):
+                config["max_budget"] = budget_val
+                changed = True
+        except ValueError:
+            pass
+
+    else:
+        # Non-interactive: apply provided options
+        if env_file:
+            env_path = Path(env_file).expanduser()
+            if env_path.exists():
+                config["env_file"] = str(env_path)
+                changed = True
+            else:
+                console.print(f"[red]Error: File not found: {env_path}[/red]")
+                raise typer.Exit(1)
+
+        if model:
+            config["model"] = model
+            changed = True
+
+        if budget is not None:
+            config["max_budget"] = budget
+            changed = True
+
+    # Save config
+    if changed:
+        save_config(config)
+        console.print(f"\n[green]✓ Configuration saved to {CONFIG_FILE}[/green]")
+    else:
+        console.print("\n[dim]No changes made.[/dim]")
+
+    # Show status
+    status = get_config_status()
+
+    console.print("\n[bold]Current Status:[/bold]")
+    table = Table(show_header=False, box=None)
+    table.add_column("Key", style="dim")
+    table.add_column("Value")
+
+    table.add_row("Config file", str(CONFIG_FILE) if CONFIG_FILE.exists() else "[dim]not created[/dim]")
+    table.add_row("Env file", status["env_file"] or "[dim]not set[/dim]")
+    table.add_row("Model", status["model"])
+    if status["api_key_found"]:
+        table.add_row("API key", "[green]✓ found[/green]")
+    else:
+        table.add_row("API key", f"[red]✗ set {status['api_key_env_var']}[/red]")
+
+    console.print(table)
+
+    if status["is_configured"]:
+        console.print("\n[green]✓ RLM-DSPy is ready to use![/green]")
+        console.print("[dim]Try: rlm-dspy ask 'What does this code do?' ./src[/dim]")
+    else:
+        console.print(f"\n[yellow]⚠ Set {status['api_key_env_var']} to complete setup.[/yellow]")
+
+
+@app.command()
 def config(
     show: Annotated[
         bool,

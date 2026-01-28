@@ -80,14 +80,27 @@ def get_provider_env_var(model: str) -> str | None:
     return None
 
 
+def _load_user_env() -> None:
+    """Load environment variables from user's configured env file."""
+    try:
+        from .user_config import load_env_file
+        load_env_file()
+    except ImportError:
+        pass  # user_config not available
+
+
 def _resolve_api_key() -> str | None:
     """Resolve API key from environment, checking provider-specific keys.
 
     Priority:
     1. RLM_API_KEY (explicit override)
     2. Provider-specific keys based on RLM_MODEL
-    3. OPENROUTER_API_KEY (legacy fallback)
+    3. User's env_file (from ~/.rlm/config.yaml)
+    4. OPENROUTER_API_KEY (legacy fallback)
     """
+    # Load user's env file first
+    _load_user_env()
+
     # Explicit override
     if key := os.environ.get("RLM_API_KEY"):
         return key
@@ -102,25 +115,43 @@ def _resolve_api_key() -> str | None:
     return os.environ.get("OPENROUTER_API_KEY")
 
 
+def _get_user_config_default(key: str, default: Any) -> Any:
+    """Get default from user config, falling back to provided default."""
+    try:
+        from .user_config import get_config_value
+        return get_config_value(key, default)
+    except ImportError:
+        return default
+
+
 @dataclass
 class RLMConfig:
     """Configuration for RLM execution.
 
-    All settings can be overridden via environment variables:
-    - RLM_MODEL: Model name (default: google/gemini-3-flash-preview)
+    Settings priority (highest to lowest):
+    1. Constructor arguments
+    2. Environment variables (RLM_*)
+    3. User config (~/.rlm/config.yaml)
+    4. Built-in defaults
+
+    Environment variables:
+    - RLM_MODEL: Model name (e.g., openai/gpt-4o, deepseek/deepseek-chat)
     - RLM_API_BASE: Custom API endpoint (optional, for self-hosted or proxies)
-    - RLM_API_KEY: API key (or use provider-specific: OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.)
+    - RLM_API_KEY: API key (or use provider-specific: OPENAI_API_KEY, etc.)
     - RLM_MAX_BUDGET: Max cost in USD (default: 1.0)
     - RLM_MAX_TIMEOUT: Max time in seconds (default: 300)
     - RLM_CHUNK_SIZE: Chunk size in chars (default: 100000)
-    - RLM_PARALLEL_CHUNKS: Max concurrent chunks (default: 20)
-    - RLM_DISABLE_THINKING: Disable extended thinking (default: true)
-    - RLM_ENABLE_CACHE: Enable prompt caching (default: true)
+
+    Run 'rlm-dspy setup' to configure defaults interactively.
     """
 
-    # Model settings - all from environment
+    # Model settings - check env first, then user config, then built-in default
     # Model format: provider/model-name (e.g., openai/gpt-4o, deepseek/deepseek-chat)
-    model: str = field(default_factory=lambda: _env("RLM_MODEL", "openai/gpt-4o-mini"))
+    model: str = field(
+        default_factory=lambda: _env(
+            "RLM_MODEL", _get_user_config_default("model", "openai/gpt-4o-mini")
+        )
+    )
     sub_model: str = field(
         default_factory=lambda: _env("RLM_SUB_MODEL", _env("RLM_MODEL", "openai/gpt-4o-mini"))
     )
@@ -130,7 +161,11 @@ class RLMConfig:
     api_key: str | None = field(default_factory=_resolve_api_key)
 
     # Execution limits
-    max_budget: float = field(default_factory=lambda: _env_float("RLM_MAX_BUDGET", 1.0))
+    max_budget: float = field(
+        default_factory=lambda: _env_float(
+            "RLM_MAX_BUDGET", _get_user_config_default("max_budget", 1.0)
+        )
+    )
     max_timeout: float = field(default_factory=lambda: _env_float("RLM_MAX_TIMEOUT", 300.0))
     max_tokens: int = field(default_factory=lambda: _env_int("RLM_MAX_TOKENS", 500_000))
     max_iterations: int = field(default_factory=lambda: _env_int("RLM_MAX_ITERATIONS", 30))
