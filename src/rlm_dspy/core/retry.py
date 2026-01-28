@@ -96,7 +96,9 @@ def is_retryable_error(error: Exception) -> bool:
     # Check for HTTP status codes with word boundaries (avoid matching IDs like "user 503")
     import re
     # Match patterns like "503", "HTTP 503", "status 503", "error 503", "(503)"
-    status_pattern = r'\b(?:http\s*)?(?:status\s*)?(?:code\s*)?(?:error\s*)?(502|503|504|429)\b'
+    # Include all codes from RETRYABLE_STATUS_CODES
+    retryable_codes = "|".join(str(c) for c in RETRYABLE_STATUS_CODES)
+    status_pattern = rf'\b(?:http\s*)?(?:status\s*)?(?:code\s*)?(?:error\s*)?({retryable_codes})\b'
     if re.search(status_pattern, error_str, re.IGNORECASE):
         return True
 

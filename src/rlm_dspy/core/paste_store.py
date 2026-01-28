@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -74,6 +75,7 @@ class PasteStore:
     _counter: int = 0
     _metadata: dict[str, dict[str, Any]] = field(default_factory=dict)
     _total_bytes: int = 0
+    _lock: threading.Lock = field(default_factory=threading.Lock)
 
     def _evict_expired(self) -> int:
         """Remove entries older than TTL. Returns count of evicted entries."""
@@ -135,7 +137,7 @@ class PasteStore:
         text: str,
         label: str | None = None,
     ) -> tuple[str, str | None]:
-        """Store text if it exceeds threshold, returning placeholder.
+        """Store text if it exceeds threshold, returning placeholder (thread-safe).
 
         Args:
             text: Content to potentially store
@@ -149,36 +151,37 @@ class PasteStore:
         if len(text) <= self.threshold:
             return text, None
 
-        # Evict expired entries first
-        self._evict_expired()
+        with self._lock:
+            # Evict expired entries first
+            self._evict_expired()
 
-        # Calculate bytes needed
-        text_bytes = len(text.encode('utf-8'))
+            # Calculate bytes needed
+            text_bytes = len(text.encode('utf-8'))
 
-        # Evict LRU entries if needed
-        self._evict_lru(needed_bytes=text_bytes)
+            # Evict LRU entries if needed
+            self._evict_lru(needed_bytes=text_bytes)
 
-        self._counter += 1
-        paste_id = f"paste_{self._counter}"
-        self._store[paste_id] = text
-        self._total_bytes += text_bytes
-        self._metadata[paste_id] = {
-            "chars": len(text),
-            "lines": text.count("\n") + 1,
-            "label": label,
-            "created_at": time.time(),
-            "bytes": text_bytes,
-        }
+            self._counter += 1
+            paste_id = f"paste_{self._counter}"
+            self._store[paste_id] = text
+            self._total_bytes += text_bytes
+            self._metadata[paste_id] = {
+                "chars": len(text),
+                "lines": text.count("\n") + 1,
+                "label": label,
+                "created_at": time.time(),
+                "bytes": text_bytes,
+            }
 
-        # Create informative placeholder
-        meta = self._metadata[paste_id]
-        label_str = f" ({label})" if label else ""
-        placeholder = f"[{paste_id}{label_str}: {meta['chars']} chars, {meta['lines']} lines]"
+            # Create informative placeholder
+            meta = self._metadata[paste_id]
+            label_str = f" ({label})" if label else ""
+            placeholder = f"[{paste_id}{label_str}: {meta['chars']} chars, {meta['lines']} lines]"
 
-        return placeholder, paste_id
+            return placeholder, paste_id
 
     def store(self, text: str, label: str | None = None) -> str:
-        """Force store text regardless of threshold.
+        """Force store text regardless of threshold (thread-safe).
 
         Args:
             text: Content to store
@@ -187,18 +190,19 @@ class PasteStore:
         Returns:
             The paste_id
         """
-        # Evict expired entries first
-        self._evict_expired()
+        with self._lock:
+            # Evict expired entries first
+            self._evict_expired()
 
-        # Calculate bytes needed
-        text_bytes = len(text.encode('utf-8'))
+            # Calculate bytes needed
+            text_bytes = len(text.encode('utf-8'))
 
-        # Evict LRU entries if needed
-        self._evict_lru(needed_bytes=text_bytes)
+            # Evict LRU entries if needed
+            self._evict_lru(needed_bytes=text_bytes)
 
-        self._counter += 1
-        paste_id = f"paste_{self._counter}"
-        self._store[paste_id] = text
+            self._counter += 1
+            paste_id = f"paste_{self._counter}"
+            self._store[paste_id] = text
         self._total_bytes += text_bytes
         self._metadata[paste_id] = {
             "chars": len(text),
@@ -210,23 +214,24 @@ class PasteStore:
         return paste_id
 
     def get(self, paste_id: str) -> str | None:
-        """Retrieve stored content by ID. Marks as recently used."""
-        # Check expiration
-        if paste_id in self._metadata:
-            meta = self._metadata[paste_id]
-            if self.ttl_seconds > 0:
-                age = time.time() - meta.get("created_at", 0)
-                if age > self.ttl_seconds:
-                    self._remove(paste_id)
-                    return None
+        """Retrieve stored content by ID. Marks as recently used (thread-safe)."""
+        with self._lock:
+            # Check expiration
+            if paste_id in self._metadata:
+                meta = self._metadata[paste_id]
+                if self.ttl_seconds > 0:
+                    age = time.time() - meta.get("created_at", 0)
+                    if age > self.ttl_seconds:
+                        self._remove(paste_id)
+                        return None
 
-        content = self._store.get(paste_id)
-        if content is not None:
-            self._touch(paste_id)  # Mark as recently used
-        return content
+            content = self._store.get(paste_id)
+            if content is not None:
+                self._touch(paste_id)  # Mark as recently used
+            return content
 
     def inject_context(self, max_per_paste: int | None = None) -> str:
-        """Generate context section with all stored pastes.
+        """Generate context section with all stored pastes (thread-safe).
 
         Args:
             max_per_paste: Optional max chars per paste (truncates if exceeded)
@@ -234,79 +239,85 @@ class PasteStore:
         Returns:
             Formatted string with all stored content
         """
-        # Evict expired before generating context
-        self._evict_expired()
+        with self._lock:
+            # Evict expired before generating context
+            self._evict_expired()
 
-        if not self._store:
-            return ""
+            if not self._store:
+                return ""
 
-        lines = ["## Stored Content\n"]
-        for paste_id, content in self._store.items():
-            meta = self._metadata.get(paste_id, {})
-            label = meta.get("label", "")
-            label_str = f" ({label})" if label else ""
+            lines = ["## Stored Content\n"]
+            for paste_id, content in self._store.items():
+                meta = self._metadata.get(paste_id, {})
+                label = meta.get("label", "")
+                label_str = f" ({label})" if label else ""
 
-            lines.append(f"### [{paste_id}]{label_str}")
-            lines.append("```")
+                lines.append(f"### [{paste_id}]{label_str}")
+                lines.append("```")
 
-            if max_per_paste and len(content) > max_per_paste:
-                lines.append(content[:max_per_paste])
-                lines.append(f"\n... truncated ({len(content) - max_per_paste} more chars)")
-            else:
-                lines.append(content)
+                if max_per_paste and len(content) > max_per_paste:
+                    lines.append(content[:max_per_paste])
+                    lines.append(f"\n... truncated ({len(content) - max_per_paste} more chars)")
+                else:
+                    lines.append(content)
 
-            lines.append("```\n")
+                lines.append("```\n")
 
-        return "\n".join(lines)
+            return "\n".join(lines)
 
     def summary(self) -> str:
-        """Get a summary of stored content without the full text."""
-        # Evict expired before summary
-        self._evict_expired()
+        """Get a summary of stored content without the full text (thread-safe)."""
+        with self._lock:
+            # Evict expired before summary
+            self._evict_expired()
 
-        if not self._store:
-            return "No stored content"
+            if not self._store:
+                return "No stored content"
 
-        lines = ["Stored content:"]
-        total_chars = 0
-        for paste_id in self._store:
-            meta = self._metadata.get(paste_id, {})
-            chars = meta.get("chars", 0)
-            label = meta.get("label", "")
-            total_chars += chars
-            label_str = f" ({label})" if label else ""
-            lines.append(f"  - [{paste_id}]{label_str}: {chars} chars")
+            lines = ["Stored content:"]
+            total_chars = 0
+            for paste_id in self._store:
+                meta = self._metadata.get(paste_id, {})
+                chars = meta.get("chars", 0)
+                label = meta.get("label", "")
+                total_chars += chars
+                label_str = f" ({label})" if label else ""
+                lines.append(f"  - [{paste_id}]{label_str}: {chars} chars")
 
-        lines.append(f"Total: {total_chars} chars in {len(self._store)} pastes")
-        lines.append(f"Memory: {self._total_bytes:,} bytes")
-        return "\n".join(lines)
+            lines.append(f"Total: {total_chars} chars in {len(self._store)} pastes")
+            lines.append(f"Memory: {self._total_bytes:,} bytes")
+            return "\n".join(lines)
 
     def clear(self) -> None:
-        """Clear all stored content."""
-        self._store.clear()
-        self._metadata.clear()
-        self._counter = 0
-        self._total_bytes = 0
+        """Clear all stored content (thread-safe)."""
+        with self._lock:
+            self._store.clear()
+            self._metadata.clear()
+            self._counter = 0
+            self._total_bytes = 0
 
     def stats(self) -> dict[str, Any]:
-        """Get storage statistics."""
-        return {
-            "entries": len(self._store),
-            "total_bytes": self._total_bytes,
-            "max_entries": self.max_entries,
-            "max_bytes": self.max_total_bytes,
-            "ttl_seconds": self.ttl_seconds,
-            "utilization_percent": round(self._total_bytes / self.max_total_bytes * 100, 1)
-            if self.max_total_bytes > 0 else 0,
-        }
+        """Get storage statistics (thread-safe)."""
+        with self._lock:
+            return {
+                "entries": len(self._store),
+                "total_bytes": self._total_bytes,
+                "max_entries": self.max_entries,
+                "max_bytes": self.max_total_bytes,
+                "ttl_seconds": self.ttl_seconds,
+                "utilization_percent": round(self._total_bytes / self.max_total_bytes * 100, 1)
+                if self.max_total_bytes > 0 else 0,
+            }
 
     def __len__(self) -> int:
         """Number of stored pastes."""
-        return len(self._store)
+        with self._lock:
+            return len(self._store)
 
     def __bool__(self) -> bool:
         """True if any pastes are stored."""
-        return bool(self._store)
+        with self._lock:
+            return bool(self._store)
 
 
 # Convenience function for one-off use
