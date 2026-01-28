@@ -140,13 +140,6 @@ def setup_logging(
     return logger
 
 
-def truncate(text: str, max_len: int, suffix: str = "...") -> str:
-    """Truncate text to max length with suffix."""
-    if len(text) <= max_len:
-        return text
-    return text[: max_len - len(suffix)] + suffix
-
-
 def truncate_for_log(data: Any, max_size: int = 10_000) -> Any:
     """
     Truncate data for logging.

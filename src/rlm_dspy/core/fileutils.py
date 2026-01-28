@@ -245,29 +245,60 @@ def _kill_blocking_processes(path: Path) -> None:
 def sync_directory(
     source: Path,
     target: Path,
-    delete_extra: bool = True,
+    delete_extra: bool = False,  # CHANGED: Default to safe copy-only mode
     ignore_times: bool = False,
 ) -> bool:
     """
     Synchronize directories using platform-appropriate tools.
 
     Learned from modaic: rsync on Unix, robocopy on Windows.
+    
+    SECURITY: delete_extra defaults to False to prevent accidental data loss.
+    When True, files in target not in source will be PERMANENTLY DELETED.
 
     Args:
         source: Source directory
         target: Target directory
-        delete_extra: Delete files in target not in source
+        delete_extra: Delete files in target not in source (DANGEROUS - default False)
         ignore_times: Compare by content, not timestamps
 
     Returns:
         True if successful
+        
+    Raises:
+        PathTraversalError: If paths contain traversal sequences
+        ValueError: If target is a protected system directory
     """
+    # Validate paths for traversal attacks
+    source = validate_path_safety(source)
+    target = validate_path_safety(target)
+    
+    # Prevent syncing to dangerous system directories
+    dangerous_paths = {
+        Path.home(),
+        Path("/"),
+        Path("/home"),
+        Path("/etc"),
+        Path("/var"),
+        Path("/usr"),
+        Path("/bin"),
+        Path("/sbin"),
+    }
+    target_resolved = target.resolve()
+    for dangerous in dangerous_paths:
+        try:
+            if target_resolved == dangerous.resolve():
+                raise ValueError(f"Cannot sync to protected directory: {target}")
+        except (OSError, RuntimeError):
+            pass  # Path doesn't exist or can't be resolved
+    
     target.mkdir(parents=True, exist_ok=True)
 
     if is_windows():
         cmd = ["robocopy", str(source), str(target), "/E"]
         if delete_extra:
             cmd.append("/MIR")
+            logger.warning("sync_directory: delete_extra=True - files may be deleted from %s", target)
         # robocopy returns non-zero for success, 0-7 are OK
         result = subprocess.run(cmd, capture_output=True, timeout=300)
         return result.returncode < 8
@@ -275,6 +306,7 @@ def sync_directory(
         cmd = ["rsync", "-a"]
         if delete_extra:
             cmd.append("--delete")
+            logger.warning("sync_directory: delete_extra=True - files may be deleted from %s", target)
         if ignore_times:
             cmd.append("--ignore-times")
         cmd.extend([f"{source}/", str(target)])

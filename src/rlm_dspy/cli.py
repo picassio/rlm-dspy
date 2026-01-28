@@ -18,6 +18,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
 from .core.rlm import RLM, RLMConfig, RLMResult
+from .core.fileutils import PathTraversalError, validate_path_safety
 
 app = typer.Typer(
     name="rlm-dspy",
@@ -25,6 +26,27 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 console = Console()
+
+
+def _safe_write_output(output_file: Path, content: str) -> None:
+    """Write content to output file with path validation.
+    
+    Args:
+        output_file: Target file path
+        content: Content to write
+        
+    Raises:
+        typer.Exit: If path validation fails
+    """
+    try:
+        # Validate path for traversal attacks
+        safe_path = validate_path_safety(output_file)
+        # Ensure parent directory exists
+        safe_path.parent.mkdir(parents=True, exist_ok=True)
+        safe_path.write_text(content, encoding="utf-8")
+    except PathTraversalError as e:
+        console.print(f"[red]Security Error: {e}[/red]")
+        raise typer.Exit(1)
 
 
 def _get_config(
@@ -154,7 +176,7 @@ def ask(
         os.environ["RLM_VERBOSE"] = "1"
 
     # Import and setup debug logging
-    from .core.debug import debug_summary, is_debug, setup_logging, timer
+    from .core.debug import is_debug, setup_logging, timer
     from .core.validation import preflight_check
 
     if verbose or debug:
@@ -256,14 +278,14 @@ def ask(
             indent=2,
         )
         if output_file:
-            output_file.write_text(json_output)
+            _safe_write_output(output_file, json_output)
             console.print(f"[green]Output written to {output_file}[/green]")
         else:
             print(json_output)
     elif output_file:
         # Write plain text/markdown to file
         if result.success:
-            output_file.write_text(result.answer)
+            _safe_write_output(output_file, result.answer)
             console.print(f"[green]Output written to {output_file}[/green]")
             if verbose or debug:
                 _print_stats(result)
@@ -387,7 +409,7 @@ def analyze(
 """
 
     if output:
-        output.write_text(output_text)
+        _safe_write_output(output, output_text)
         console.print(f"[green]Analysis saved to {output}[/green]")
     else:
         console.print(Markdown(output_text))

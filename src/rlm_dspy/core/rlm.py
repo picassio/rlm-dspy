@@ -13,9 +13,11 @@ import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Literal
+from typing import Any, Callable
 
 import dspy
+
+from .secrets import COMMON_SECRETS, mask_value
 
 _logger = logging.getLogger(__name__)
 
@@ -27,6 +29,56 @@ _logger = logging.getLogger(__name__)
 def _env(key: str, default: str) -> str:
     """Get environment variable with default."""
     return os.environ.get(key, default)
+
+
+def _sanitize_secrets(text: str) -> str:
+    """Remove any leaked secrets from output text.
+    
+    Scans for common secret patterns and replaces them with masks.
+    This prevents API keys from appearing in logs, trajectory, or answers.
+    """
+    if not text:
+        return text
+    
+    result = text
+    # Check for actual secret values from environment
+    for key in COMMON_SECRETS:
+        value = os.environ.get(key)
+        if value and len(value) > 8 and value in result:
+            result = result.replace(value, "[REDACTED]")
+    
+    # Also check for common API key patterns
+    import re
+    patterns = [
+        (r'sk-[a-zA-Z0-9]{20,}', '[REDACTED_SK]'),  # OpenAI style
+        (r'sk-ant-[a-zA-Z0-9-]{20,}', '[REDACTED_ANTHROPIC]'),  # Anthropic
+        (r'sk-or-v1-[a-zA-Z0-9]{20,}', '[REDACTED_OPENROUTER]'),  # OpenRouter
+        (r'gsk_[a-zA-Z0-9]{20,}', '[REDACTED_GROQ]'),  # Groq
+        (r'AIza[a-zA-Z0-9_-]{35}', '[REDACTED_GOOGLE]'),  # Google
+    ]
+    for pattern, replacement in patterns:
+        result = re.sub(pattern, replacement, result)
+    
+    return result
+
+
+def _sanitize_trajectory(trajectory: list) -> list:
+    """Sanitize all strings in a trajectory list."""
+    if not trajectory:
+        return trajectory
+    
+    sanitized = []
+    for item in trajectory:
+        if isinstance(item, str):
+            sanitized.append(_sanitize_secrets(item))
+        elif isinstance(item, dict):
+            sanitized.append({
+                k: _sanitize_secrets(v) if isinstance(v, str) else v
+                for k, v in item.items()
+            })
+        else:
+            sanitized.append(item)
+    return sanitized
 
 
 def _env_int(key: str, default: int) -> int:
@@ -365,28 +417,38 @@ class RLM:
 
         # Collect all files using os.scandir() for better performance
         # This avoids O(2N) stat calls that pathlib.iterdir() + is_file() would cause
-        def collect_files_fast(base_path: Path, spec: pathspec.PathSpec | None) -> list[Path]:
+        def collect_files_fast(
+            current_path: Path, 
+            root_path: Path,  # Track original root for proper gitignore matching
+            spec: pathspec.PathSpec | None
+        ) -> list[Path]:
             """Recursively collect files, pruning ignored directories early."""
             result = []
             try:
-                with os.scandir(base_path) as entries:
+                with os.scandir(current_path) as entries:
                     for entry in entries:
-                        rel_path = Path(entry.path).relative_to(base_path)
+                        entry_path = Path(entry.path)
+                        # Calculate relative path from ROOT, not current directory
+                        # This ensures gitignore patterns match correctly
+                        try:
+                            rel_path = entry_path.relative_to(root_path)
+                        except ValueError:
+                            rel_path = entry_path  # Fallback if not relative
                         
                         # Check if ignored before recursing (prune early)
                         if spec and spec.match_file(str(rel_path)):
                             continue
                             
                         if entry.is_file(follow_symlinks=False):
-                            result.append(Path(entry.path))
+                            result.append(entry_path)
                         elif entry.is_dir(follow_symlinks=False):
                             # Skip common ignored directories for performance
                             if entry.name in {'.git', '__pycache__', 'node_modules', '.venv', 'venv'}:
                                 continue
-                            # Recurse into subdirectory
-                            result.extend(collect_files_fast(Path(entry.path), spec))
+                            # Recurse into subdirectory, keeping same root
+                            result.extend(collect_files_fast(entry_path, root_path, spec))
             except PermissionError:
-                _logger.debug("Permission denied: %s", base_path)
+                _logger.debug("Permission denied: %s", current_path)
             return result
 
         files: list[Path] = []
@@ -395,7 +457,8 @@ class RLM:
             if p.is_file():
                 files.append(p)
             elif p.is_dir():
-                files.extend(collect_files_fast(p, spec))
+                # Pass p as both current and root path
+                files.extend(collect_files_fast(p, p, spec))
 
         # Read and combine with clear file markers
         context_parts = []
@@ -468,13 +531,17 @@ class RLM:
 
             elapsed = time.time() - self._start_time
 
+            # Sanitize output to prevent secret leakage
+            raw_trajectory = getattr(prediction, "trajectory", [])
+            raw_reasoning = getattr(prediction, "final_reasoning", "")
+            
             return RLMResult(
-                answer=prediction.answer,
+                answer=_sanitize_secrets(prediction.answer),
                 success=True,
                 elapsed_time=elapsed,
-                trajectory=getattr(prediction, "trajectory", []),
-                final_reasoning=getattr(prediction, "final_reasoning", ""),
-                iterations=len(getattr(prediction, "trajectory", [])),
+                trajectory=_sanitize_trajectory(raw_trajectory),
+                final_reasoning=_sanitize_secrets(raw_reasoning),
+                iterations=len(raw_trajectory),
             )
 
         except TimeoutExceededError:
@@ -510,13 +577,17 @@ class RLM:
 
             elapsed = time.time() - self._start_time
 
+            # Sanitize output to prevent secret leakage
+            raw_trajectory = getattr(prediction, "trajectory", [])
+            raw_reasoning = getattr(prediction, "final_reasoning", "")
+            
             return RLMResult(
-                answer=prediction.answer,
+                answer=_sanitize_secrets(prediction.answer),
                 success=True,
                 elapsed_time=elapsed,
-                trajectory=getattr(prediction, "trajectory", []),
-                final_reasoning=getattr(prediction, "final_reasoning", ""),
-                iterations=len(getattr(prediction, "trajectory", [])),
+                trajectory=_sanitize_trajectory(raw_trajectory),
+                final_reasoning=_sanitize_secrets(raw_reasoning),
+                iterations=len(raw_trajectory),
             )
 
         except Exception as e:

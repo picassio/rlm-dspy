@@ -165,15 +165,18 @@ def index_file(path: Path | str) -> ASTIndex:
         return ASTIndex()
 
     try:
-        code = path.read_text()
+        code = path.read_text(encoding="utf-8")
         tree = parser.parse(bytes(code, "utf8"))
 
         definitions: list[Definition] = []
         _extract_definitions(tree.root_node, language, definitions, str(path))
 
         return ASTIndex(definitions=definitions)
+    except UnicodeDecodeError:
+        logger.debug("Skipping binary/non-UTF8 file: %s", path)
+        return ASTIndex()
     except Exception as e:
-        logger.warning(f"Failed to index {path}: {e}")
+        logger.warning("Failed to index %s: %s", path, e)
         return ASTIndex()
 
 

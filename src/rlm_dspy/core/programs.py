@@ -76,7 +76,7 @@ class RecursiveAnalyzer(dspy.Module):
                 chunk_size=next_chunk_size,
                 depth=depth + 1,
             )
-            if sub_result.confidence != "none":
+            if sub_result.confidence.lower() != "none":
                 partial_answers.append(sub_result.answer)
 
         # Aggregate partial answers
@@ -182,7 +182,7 @@ class ChunkedProcessor(dspy.Module):
                     "confidence": result.confidence,
                 }
             )
-            if result.confidence != "none":
+            if result.confidence.lower() != "none":
                 partial_answers.append(result.relevant_info)
 
         # Aggregate
@@ -191,6 +191,7 @@ class ChunkedProcessor(dspy.Module):
                 answer="No relevant information found in the provided context.",
                 chunks_analyzed=len(chunks),
                 chunks_with_info=0,
+                chunk_metadata=chunk_metadata,  # Include for debugging
             )
 
         aggregated = self.aggregator(
@@ -203,6 +204,7 @@ class ChunkedProcessor(dspy.Module):
             chunks_analyzed=len(chunks),
             chunks_with_info=len(partial_answers),
             sources=aggregated.sources_used,
+            chunk_metadata=chunk_metadata,  # Include for debugging
         )
 
 
@@ -253,7 +255,8 @@ class MapReduceProcessor(dspy.Module):
 
         # Filter relevant results
         partial_answers = [
-            r.relevant_info for r in mapped_results if hasattr(r, "confidence") and r.confidence != "none"
+            r.relevant_info for r in mapped_results 
+            if hasattr(r, "confidence") and r.confidence.lower() != "none"
         ]
 
         if not partial_answers:
@@ -326,7 +329,12 @@ class ValidatedAnalyzer(dspy.Module):
         )
 
         # Return validated or corrected answer
-        if validation.is_valid:
+        # Normalize is_valid to boolean (DSPy may return string "True"/"False")
+        is_valid = validation.is_valid
+        if isinstance(is_valid, str):
+            is_valid = is_valid.lower() in ("true", "yes", "1")
+        
+        if is_valid:
             return dspy.Prediction(
                 answer=analysis.answer,
                 validated=True,
