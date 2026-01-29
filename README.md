@@ -793,6 +793,73 @@ for f in findings:
     print(f.format())  # "[CRITICAL:security] SQL injection → db.py:45"
 ```
 
+### Project Management
+
+Manage multiple indexed codebases with named projects:
+
+```bash
+# Register a project
+rlm-dspy project add my-app ~/projects/my-app
+rlm-dspy project add backend ./backend --tags python,api
+
+# List all projects
+rlm-dspy project list
+# ┏━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━┓
+# ┃ Name      ┃ Path           ┃ Snippets ┃ Files ┃ Tags      ┃ Indexed    ┃
+# ┡━━━━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━┩
+# │ * my-app  │ ~/projects/... │      450 │    32 │ -         │ 2025-01-28 │
+# │ backend   │ ./backend      │      120 │    15 │ python,api│ 2025-01-27 │
+# └───────────┴────────────────┴──────────┴───────┴───────────┴────────────┘
+
+# Set default project
+rlm-dspy project default my-app
+
+# Add tags for organization
+rlm-dspy project tag my-app python,web,frontend
+
+# Remove a project
+rlm-dspy project remove old-project
+rlm-dspy project remove old-project --delete-index  # Also delete index
+
+# Migrate legacy hash-based indexes
+rlm-dspy project migrate
+
+# Cleanup orphaned index directories
+rlm-dspy project cleanup
+```
+
+```python
+from rlm_dspy.core import get_project_registry
+
+# Access registry
+registry = get_project_registry()
+
+# List projects
+for project in registry.list(tags=["python"]):
+    print(f"{project.name}: {project.snippet_count} snippets")
+
+# Get project by name or alias
+project = registry.get("my-app")
+```
+
+**Features:**
+- **Named projects**: Clear names instead of hash directories
+- **Auto-register**: Projects registered on first `index build`
+- **Tags**: Organize projects by category
+- **Default project**: Set default for searches
+- **Migration**: Auto-migrate legacy hash-based indexes
+- **Cleanup**: Remove orphaned index directories
+
+**Storage Structure:**
+```
+~/.rlm/
+├── config.yaml      # Global configuration
+├── projects.json    # Project registry
+└── indexes/
+    ├── my-app/      # Named project indexes
+    └── backend/
+```
+
 ## Documentation
 
 - **[Provider Guide](docs/PROVIDERS.md)** - Supported LLM providers
