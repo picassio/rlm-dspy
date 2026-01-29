@@ -14,10 +14,14 @@ from typing import Literal
 
 logger = logging.getLogger(__name__)
 
-# Language mappings
+# Language mappings (extension -> tree-sitter language name)
 LANGUAGE_MAP = {
+    # Core languages
     ".py": "python",
+    ".pyi": "python",
     ".js": "javascript",
+    ".jsx": "javascript",
+    ".mjs": "javascript",
     ".ts": "typescript",
     ".tsx": "typescript",
     ".go": "go",
@@ -26,9 +30,24 @@ LANGUAGE_MAP = {
     ".c": "c",
     ".h": "c",
     ".cpp": "cpp",
+    ".cc": "cpp",
+    ".cxx": "cpp",
     ".hpp": "cpp",
+    ".hxx": "cpp",
     ".rb": "ruby",
     ".cs": "c_sharp",
+    # Additional languages
+    ".kt": "kotlin",
+    ".kts": "kotlin",
+    ".scala": "scala",
+    ".sc": "scala",
+    ".php": "php",
+    ".lua": "lua",
+    ".sh": "bash",
+    ".bash": "bash",
+    ".zsh": "bash",
+    ".hs": "haskell",
+    ".lhs": "haskell",
 }
 
 
@@ -80,14 +99,19 @@ class ASTIndex:
         self._build_indexes()
         
         if name and kind:
-            # Both filters: intersect results
+            # Both filters: intersect results using id() for comparison
             name_lower = name.lower()
-            name_matches = set()
+            name_matches: list[Definition] = []
             for key in self._by_name:
                 if name_lower in key:
-                    name_matches.update(self._by_name[key])
-            kind_matches = set(self._by_kind.get(kind, []))
-            return list(name_matches & kind_matches)
+                    name_matches.extend(self._by_name[key])
+            
+            # Get kind matches
+            kind_matches = self._by_kind.get(kind, [])
+            kind_ids = {id(d) for d in kind_matches}
+            
+            # Return intersection
+            return [d for d in name_matches if id(d) in kind_ids]
         elif name:
             # Name filter only (substring match)
             name_lower = name.lower()
@@ -130,6 +154,7 @@ def _get_parser(language: str):
     try:
         from tree_sitter import Language, Parser
 
+        # Core languages
         if language == "python":
             import tree_sitter_python as ts_lang
         elif language == "javascript":
@@ -154,6 +179,24 @@ def _get_parser(language: str):
             import tree_sitter_ruby as ts_lang
         elif language == "c_sharp":
             import tree_sitter_c_sharp as ts_lang
+        # Additional languages
+        elif language == "kotlin":
+            import tree_sitter_kotlin as ts_lang
+        elif language == "scala":
+            import tree_sitter_scala as ts_lang
+        elif language == "php":
+            import tree_sitter_php as ts_mod
+            # PHP has separate language for PHP code
+            ts_lang = ts_mod.language_php()
+            lang = Language(ts_lang)
+            parser = Parser(lang)
+            return parser
+        elif language == "lua":
+            import tree_sitter_lua as ts_lang
+        elif language == "bash":
+            import tree_sitter_bash as ts_lang
+        elif language == "haskell":
+            import tree_sitter_haskell as ts_lang
         else:
             return None
 
@@ -167,8 +210,10 @@ def _get_parser(language: str):
 def _extract_definitions(node, language: str, results: list[Definition], file: str, current_class: str | None = None):
     """Recursively extract definitions from AST."""
 
-    # Class definitions
-    if node.type in ("class_definition", "class_declaration"):
+    # Class definitions (various languages)
+    if node.type in ("class_definition", "class_declaration", "class_specifier",
+                     "object_declaration",  # Kotlin/Scala companion objects
+                     "interface_declaration"):  # Java/Kotlin interfaces
         name_node = node.child_by_field_name("name")
         if name_node:
             name = name_node.text.decode()
@@ -184,8 +229,12 @@ def _extract_definitions(node, language: str, results: list[Definition], file: s
                 _extract_definitions(child, language, results, file, current_class=name)
             return
 
-    # Function/method definitions
-    if node.type in ("function_definition", "function_declaration", "method_definition"):
+    # Function/method definitions (various languages)
+    if node.type in ("function_definition", "function_declaration", "method_definition",
+                     "function_item",  # Rust
+                     "method_declaration",  # Java/Kotlin
+                     "function_declaration_statement",  # PHP
+                     ):
         name_node = node.child_by_field_name("name")
         if name_node:
             name = name_node.text.decode()
@@ -197,6 +246,37 @@ def _extract_definitions(node, language: str, results: list[Definition], file: s
                 file=file,
                 parent=current_class,
             ))
+            return  # Don't recurse into function body
+
+    # Haskell: function definitions use "function" with "variable" child for name
+    if language == "haskell" and node.type == "function":
+        # Get the first variable child (the function name)
+        for child in node.children:
+            if child.type == "variable":
+                name = child.text.decode()
+                results.append(Definition(
+                    name=name,
+                    kind="function",
+                    line=node.start_point[0] + 1,
+                    end_line=node.end_point[0] + 1,
+                    file=file,
+                ))
+                break
+        return  # Don't recurse into function body
+    
+    # Lua: function_declaration with name child
+    if language == "lua" and node.type == "function_declaration":
+        name_node = node.child_by_field_name("name")
+        if name_node:
+            name = name_node.text.decode()
+            results.append(Definition(
+                name=name,
+                kind="function",
+                line=node.start_point[0] + 1,
+                end_line=node.end_point[0] + 1,
+                file=file,
+            ))
+        return
 
     # Recurse
     for child in node.children:

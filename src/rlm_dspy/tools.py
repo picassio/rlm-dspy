@@ -77,7 +77,7 @@ def ripgrep(pattern: str, path: str = ".", flags: str = "") -> str:
     
     Args:
         pattern: Regex pattern to search for
-        path: Path to search in (file or directory)
+        path: Path to search in (file or directory, relative to current project)
         flags: Additional rg flags like "-i" for case-insensitive, "-l" for files-only
         
     Returns:
@@ -88,6 +88,9 @@ def ripgrep(pattern: str, path: str = ".", flags: str = "") -> str:
         ripgrep("def\\s+\\w+", ".", "-l")    # List files with function definitions
     """
     try:
+        # Resolve path relative to current project
+        path = _resolve_project_path(path)
+        
         # Safety check on path
         is_safe, error = _is_safe_path(path)
         if not is_safe:
@@ -173,13 +176,16 @@ def find_files(pattern: str, path: str = ".", file_type: str = "") -> str:
     
     Args:
         pattern: Glob pattern (e.g., "*.py", "test_*.py")
-        path: Directory to search
+        path: Directory to search (relative to current project)
         file_type: Filter by extension (e.g., "py", "js")
         
     Returns:
         List of matching file paths
     """
     try:
+        # Resolve path relative to current project
+        path = _resolve_project_path(path)
+        
         # Safety check on path
         is_safe, error = _is_safe_path(path)
         if not is_safe:
@@ -218,7 +224,7 @@ def read_file(path: str, start_line: int = 1, end_line: int | None = None) -> st
     Read a file or portion of a file.
     
     Args:
-        path: Path to the file
+        path: Path to the file (relative to current project)
         start_line: First line to read (1-indexed)
         end_line: Last line to read (None for end of file)
         
@@ -226,6 +232,9 @@ def read_file(path: str, start_line: int = 1, end_line: int | None = None) -> st
         File contents with line numbers
     """
     try:
+        # Resolve path relative to current project
+        path = _resolve_project_path(path)
+        
         # Safety check
         is_safe, error = _is_safe_path(path)
         if not is_safe:
@@ -260,12 +269,15 @@ def file_stats(path: str) -> str:
     Get statistics about a file or directory.
     
     Args:
-        path: Path to analyze
+        path: Path to analyze (relative to current project)
         
     Returns:
         JSON with file count, line count, size info
     """
     try:
+        # Resolve path relative to current project
+        path = _resolve_project_path(path)
+        
         # Safety check
         is_safe, error = _is_safe_path(path)
         if not is_safe:
@@ -322,7 +334,7 @@ def index_code(path: str, kind: str | None = None, name: str | None = None) -> s
     Supports: Python, JavaScript, TypeScript, Go, Rust, Java, C, C++, Ruby, C#
     
     Args:
-        path: File or directory to index
+        path: File or directory to index (relative to current project)
         kind: Filter by type: "class", "function", "method", or None for all
         name: Filter by name (case-insensitive substring match)
         
@@ -336,6 +348,9 @@ def index_code(path: str, kind: str | None = None, name: str | None = None) -> s
         index_code("file.py", kind="method")  # Methods in a single file
     """
     try:
+        # Resolve path relative to current project
+        path = _resolve_project_path(path)
+        
         # Safety check
         is_safe, error = _is_safe_path(path)
         if not is_safe:
@@ -553,7 +568,7 @@ def semantic_search(query: str, path: str | None = None, k: int = 5) -> str:
     
     Args:
         query: Natural language description of what you're looking for
-        path: Directory to search in (default: current project from context)
+        path: Directory to search in (default: current project, relative paths resolved to project)
         k: Number of results to return (default: 5)
         
     Returns:
@@ -562,8 +577,8 @@ def semantic_search(query: str, path: str | None = None, k: int = 5) -> str:
     try:
         from .core.vector_index import get_index_manager
         
-        # Use current project if no path specified
-        search_path = path or _current_project_path or "."
+        # Resolve path relative to current project
+        search_path = _resolve_project_path(path)
         
         manager = get_index_manager()
         results = manager.search(search_path, query, k=k)
@@ -590,7 +605,7 @@ _current_project_path: str | None = None
 
 
 def set_current_project(path: str | None) -> None:
-    """Set the current project path for semantic search (called by CLI)."""
+    """Set the current project path for tools (called by CLI)."""
     global _current_project_path
     _current_project_path = path
 
@@ -598,6 +613,37 @@ def set_current_project(path: str | None) -> None:
 def get_current_project() -> str | None:
     """Get the current project path."""
     return _current_project_path
+
+
+def _resolve_project_path(path: str | None) -> str:
+    """Resolve a path relative to the current project.
+    
+    When the LLM specifies a path like "." or "./src", it should resolve
+    relative to the project being analyzed, not the CWD.
+    
+    Args:
+        path: Path from tool argument (may be None, ".", or relative)
+        
+    Returns:
+        Resolved absolute path
+    """
+    # Use current project if no path or "." specified
+    if not path or path == ".":
+        return _current_project_path or "."
+    
+    # If path is relative and we have a project path, resolve relative to project
+    if _current_project_path and not Path(path).is_absolute():
+        project_path = Path(_current_project_path)
+        resolved = (project_path / path).resolve()
+        # Only use resolved path if it exists within the project
+        try:
+            resolved.relative_to(project_path)
+            return str(resolved)
+        except ValueError:
+            # Path escapes project - use as-is (will be caught by safety check)
+            pass
+    
+    return path
 
 
 def list_projects(include_empty: bool = False) -> str:
@@ -765,6 +811,162 @@ def search_all_projects(query: str, k: int = 3) -> str:
         return f"Cross-project search error: {e}"
 
 
+# =============================================================================
+# LSP-Powered Tools (IDE-quality precision)
+# =============================================================================
+
+def find_references(file_path: str, line: int, column: int = 0) -> str:
+    """Find all references to the symbol at the given position using LSP.
+    
+    More precise than ripgrep - finds actual usages, not just text matches.
+    Requires a language server for the file's language.
+    
+    Args:
+        file_path: Path to the file (relative to current project)
+        line: Line number (1-indexed)
+        column: Column number (0-indexed, default 0 = first non-whitespace)
+        
+    Returns:
+        List of references with file:line locations
+        
+    Example:
+        find_references("src/auth.py", 25, 10)  # References to symbol at line 25, col 10
+    """
+    try:
+        from .core.lsp import get_lsp_manager
+        
+        # Resolve path relative to current project
+        file_path = _resolve_project_path(file_path)
+        
+        manager = get_lsp_manager()
+        refs = manager.find_references(file_path, line, column)
+        
+        if not refs:
+            return f"No references found at {file_path}:{line}:{column}"
+        
+        output = [f"Found {len(refs)} references:\n"]
+        for ref in refs:
+            output.append(f"  {ref['file']}:{ref['line']}:{ref['column']}")
+        
+        return "\n".join(output)
+    except ImportError:
+        return "(LSP not available - install solidlsp for this feature)"
+    except Exception as e:
+        return f"(find_references error: {e})"
+
+
+def go_to_definition(file_path: str, line: int, column: int = 0) -> str:
+    """Jump to the definition of the symbol at the given position using LSP.
+    
+    More precise than text search - follows actual code references.
+    
+    Args:
+        file_path: Path to the file (relative to current project)
+        line: Line number (1-indexed)
+        column: Column number (0-indexed)
+        
+    Returns:
+        Definition location with file:line
+        
+    Example:
+        go_to_definition("src/main.py", 10, 15)  # Definition of symbol at line 10
+    """
+    try:
+        from .core.lsp import get_lsp_manager
+        
+        # Resolve path relative to current project
+        file_path = _resolve_project_path(file_path)
+        
+        manager = get_lsp_manager()
+        defn = manager.go_to_definition(file_path, line, column)
+        
+        if not defn:
+            return f"No definition found at {file_path}:{line}:{column}"
+        
+        return f"Definition: {defn['file']}:{defn['line']}:{defn['column']}"
+    except ImportError:
+        return "(LSP not available - install solidlsp for this feature)"
+    except Exception as e:
+        return f"(go_to_definition error: {e})"
+
+
+def get_type_info(file_path: str, line: int, column: int = 0) -> str:
+    """Get type signature and documentation for symbol at position using LSP.
+    
+    Shows type information, function signatures, docstrings - like IDE hover.
+    
+    Args:
+        file_path: Path to the file (relative to current project)
+        line: Line number (1-indexed)
+        column: Column number (0-indexed)
+        
+    Returns:
+        Type signature and documentation
+        
+    Example:
+        get_type_info("src/utils.py", 42, 8)  # Type info for symbol at line 42
+    """
+    try:
+        from .core.lsp import get_lsp_manager
+        
+        # Resolve path relative to current project
+        file_path = _resolve_project_path(file_path)
+        
+        manager = get_lsp_manager()
+        info = manager.get_hover_info(file_path, line, column)
+        
+        if not info:
+            return f"No type info found at {file_path}:{line}:{column}"
+        
+        return info
+    except ImportError:
+        return "(LSP not available - install solidlsp for this feature)"
+    except Exception as e:
+        return f"(get_type_info error: {e})"
+
+
+def get_symbol_hierarchy(file_path: str) -> str:
+    """Get the symbol tree for a file (classes, methods, functions) using LSP.
+    
+    Shows the structural hierarchy of a file - more detailed than index_code.
+    
+    Args:
+        file_path: Path to the file (relative to current project)
+        
+    Returns:
+        Symbol hierarchy with types and line numbers
+        
+    Example:
+        get_symbol_hierarchy("src/models.py")  # All symbols in models.py
+    """
+    try:
+        from .core.lsp import get_lsp_manager
+        
+        # Resolve path relative to current project
+        file_path = _resolve_project_path(file_path)
+        
+        manager = get_lsp_manager()
+        symbols = manager.get_document_symbols(file_path)
+        
+        if not symbols:
+            return f"No symbols found in {file_path}"
+        
+        output = [f"Symbols in {file_path}:\n"]
+        for sym in symbols:
+            indent = "  " if sym.get('parent') else ""
+            parent_info = f" (in {sym['parent']})" if sym.get('parent') else ""
+            output.append(
+                f"{indent}{sym['kind']}: {sym['name']} "
+                f"[lines {sym['line']}-{sym['end_line']}]{parent_info}"
+            )
+        
+        return "\n".join(output)
+    except ImportError:
+        return "(LSP not available - install solidlsp for this feature)"
+    except Exception as e:
+        return f"(get_symbol_hierarchy error: {e})"
+
+
 # Collection of all built-in tools
 BUILTIN_TOOLS: dict[str, Any] = {
     # Structural search
@@ -782,6 +984,11 @@ BUILTIN_TOOLS: dict[str, Any] = {
     "find_calls": find_calls,
     # Semantic search (uses current project by default)
     "semantic_search": semantic_search,
+    # LSP-powered tools (precise, IDE-quality)
+    "find_references": find_references,
+    "go_to_definition": go_to_definition,
+    "get_type_info": get_type_info,
+    "get_symbol_hierarchy": get_symbol_hierarchy,
     # Shell (unsafe)
     "shell": shell,
 }

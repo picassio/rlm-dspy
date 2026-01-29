@@ -39,6 +39,11 @@ class IndexConfig:
     faiss_threshold: int = 100
     auto_update: bool = True
     cache_ttl: int = 3600
+    # Maximum snippet size in characters.
+    # text-embedding-3-small has 8191 token limit.
+    # Normal code: ~4 chars/token, minified code: ~2.5 chars/token
+    # Using 18K chars = ~7200 tokens at 2.5 ratio, safely under limit
+    max_snippet_chars: int = 18000
     
     @classmethod
     def from_user_config(cls) -> "IndexConfig":
@@ -71,10 +76,103 @@ class CodeSnippet:
     type: str  # function, class, method
     name: str
     language: str = "python"
+    chunk_index: int = 0  # For chunked large snippets
+    total_chunks: int = 1  # Total chunks if split
     
     def to_document(self) -> str:
         """Convert to document string for embedding."""
-        return f"# {self.type}: {self.name}\n# File: {self.file}:{self.line}\n\n{self.text}"
+        header = f"# {self.type}: {self.name}\n# File: {self.file}:{self.line}"
+        if self.total_chunks > 1:
+            header += f" (chunk {self.chunk_index + 1}/{self.total_chunks})"
+        return f"{header}\n\n{self.text}"
+
+
+def _chunk_snippet(snippet: CodeSnippet, max_chars: int) -> list[CodeSnippet]:
+    """Split a large snippet into smaller chunks.
+    
+    Tries to split on logical boundaries (newlines) first.
+    Falls back to character-level splitting for minified code with long lines.
+    Each chunk preserves context with the snippet name and file info.
+    
+    Args:
+        snippet: The snippet to chunk
+        max_chars: Maximum characters per chunk (for text only, not including header)
+        
+    Returns:
+        List of snippets (original if small enough, or chunked versions)
+    """
+    text = snippet.text
+    
+    # Reserve space for header in to_document():
+    # "# {type}: {name}\n# File: {file}:{line} (chunk N/M)\n\n"
+    # Worst case: ~200 chars for long names/paths
+    header_reserve = 200
+    effective_max = max_chars - header_reserve
+    
+    # If small enough, return as-is
+    if len(text) <= effective_max:
+        return [snippet]
+    
+    chunks = []
+    lines = text.split('\n')
+    current_chunk_lines: list[str] = []
+    current_size = 0
+    chunk_start_line = snippet.line
+    
+    for i, line in enumerate(lines):
+        line_size = len(line) + 1  # +1 for newline
+        
+        # Handle very long lines (e.g., minified JS)
+        if line_size > effective_max:
+            # First, save any accumulated lines
+            if current_chunk_lines:
+                chunk_text = '\n'.join(current_chunk_lines)
+                chunks.append((chunk_text, chunk_start_line, snippet.line + i - 1))
+                current_chunk_lines = []
+                current_size = 0
+            
+            # Split the long line by characters
+            line_chunks = [line[j:j+effective_max] for j in range(0, len(line), effective_max)]
+            for lc in line_chunks:
+                chunks.append((lc, snippet.line + i, snippet.line + i))
+            chunk_start_line = snippet.line + i + 1
+            continue
+        
+        # Check if adding this line would exceed limit
+        if current_size + line_size > effective_max and current_chunk_lines:
+            # Save current chunk
+            chunk_text = '\n'.join(current_chunk_lines)
+            chunks.append((chunk_text, chunk_start_line, snippet.line + i - 1))
+            current_chunk_lines = []
+            current_size = 0
+            chunk_start_line = snippet.line + i
+        
+        current_chunk_lines.append(line)
+        current_size += line_size
+    
+    # Don't forget the last chunk
+    if current_chunk_lines:
+        chunk_text = '\n'.join(current_chunk_lines)
+        chunks.append((chunk_text, chunk_start_line, snippet.end_line))
+    
+    # Convert to CodeSnippet objects
+    total_chunks = len(chunks)
+    result = []
+    for idx, (chunk_text, start, end) in enumerate(chunks):
+        result.append(CodeSnippet(
+            id=f"{snippet.id}:chunk{idx}",
+            text=chunk_text,
+            file=snippet.file,
+            line=start,
+            end_line=end,
+            type=snippet.type,
+            name=snippet.name,
+            language=snippet.language,
+            chunk_index=idx,
+            total_chunks=total_chunks,
+        ))
+    
+    return result
 
 
 @dataclass 
@@ -232,6 +330,11 @@ class CodeIndex:
                 if ext not in supported_extensions:
                     continue
                 
+                # Skip minified files (not useful for semantic search)
+                # Common patterns: .min.js, .min.css, -min.js, _min.js
+                if '.min.' in filename or '-min.' in filename or '_min.' in filename:
+                    continue
+                
                 file_path = Path(root) / filename
                 
                 if not file_path.is_file():
@@ -285,7 +388,7 @@ class CodeIndex:
                         
                         snippet_id = f"{rel_path}:{defn.name}:{defn.line}"
                         
-                        snippets.append(CodeSnippet(
+                        snippet = CodeSnippet(
                             id=snippet_id,
                             text=text,
                             file=rel_path,
@@ -294,7 +397,12 @@ class CodeIndex:
                             type=defn.kind,  # Definition uses 'kind', not 'type'
                             name=defn.name,
                             language=language,
-                        ))
+                        )
+                        
+                        # Chunk large snippets to fit embedding model limits
+                        # text-embedding-3-small has 8191 token limit (~24K chars)
+                        chunked = _chunk_snippet(snippet, self.config.max_snippet_chars)
+                        snippets.extend(chunked)
                         
                 except Exception as e:
                     logger.debug("Failed to index %s: %s", file_path, e)
