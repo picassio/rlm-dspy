@@ -92,6 +92,17 @@ Or with uv:
 uv pip install rlm-dspy
 ```
 
+**Optional: Install code analysis tools:**
+```bash
+# For tree-sitter based tools (find_definitions, find_imports, etc.)
+pip install rlm-dspy[tools]
+
+# For ripgrep tools (fast regex search)
+# macOS: brew install ripgrep
+# Ubuntu: sudo apt install ripgrep
+# Or: cargo install ripgrep
+```
+
 ## Quick Start
 
 ### 1. Setup (One-Time)
@@ -498,6 +509,71 @@ The interpreter must implement the CodeInterpreter protocol:
 - `start()` - initialize environment  
 - `execute(code, variables)` - run code
 - `shutdown()` - cleanup
+
+### Code Analysis Tools
+
+Enable powerful code analysis tools that run on the host (not in sandbox):
+
+```bash
+# CLI: Enable tools with --tools flag
+rlm-dspy ask "Find all functions that call 'execute'" src/ --tools
+
+# The LLM can now use ripgrep, tree-sitter, etc.
+rlm-dspy ask "Use ripgrep to find TODO comments" src/ --tools
+```
+
+```python
+from rlm_dspy import RLM
+
+# Enable built-in tools
+rlm = RLM(config=config, use_tools=True)
+
+# Or enable all tools including shell (requires RLM_ALLOW_SHELL=1)
+rlm = RLM(config=config, use_tools="all")
+
+result = rlm.query(
+    "Use find_definitions to list all functions, then use ripgrep to find TODOs",
+    context
+)
+```
+
+**Available tools:**
+
+| Tool | Description |
+|------|-------------|
+| `ripgrep(pattern, path, flags)` | Fast regex search via `rg` |
+| `grep_context(pattern, path, lines)` | Search with surrounding context |
+| `find_files(pattern, path, type)` | Find files by glob pattern |
+| `read_file(path, start, end)` | Read file with line numbers |
+| `file_stats(path)` | Get file/directory statistics (JSON) |
+| `ast_query(code, node_types)` | Tree-sitter AST node search |
+| `find_definitions(path, name)` | Find function/class definitions |
+| `find_imports(path)` | Find all import statements |
+| `find_calls(path, func_name)` | Find function/method call sites |
+| `shell(cmd, timeout)` | Run shell commands (disabled by default) |
+
+**Prerequisites for tools:**
+
+```bash
+# ripgrep (required for ripgrep, grep_context, find_files)
+# macOS
+brew install ripgrep
+# Ubuntu/Debian
+sudo apt install ripgrep
+# Or via cargo
+cargo install ripgrep
+
+# tree-sitter (required for AST tools)
+pip install rlm-dspy[tools]
+# Or manually:
+pip install tree-sitter tree-sitter-python
+```
+
+**How it works:**
+1. Tools are documented in the LLM's prompt automatically
+2. LLM decides when to use them based on the query
+3. Tools run on the host and return results to the LLM
+4. LLM combines tool outputs with semantic analysis
 
 ## Documentation
 

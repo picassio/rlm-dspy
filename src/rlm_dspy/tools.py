@@ -194,7 +194,7 @@ def file_stats(path: str) -> str:
                 extensions[ext] = extensions.get(ext, 0) + 1
                 try:
                     total_lines += len(f.read_text(errors="replace").splitlines())
-                except:
+                except Exception:
                     pass
         
         return json.dumps({
@@ -326,7 +326,7 @@ def find_definitions(path: str, name: str | None = None) -> str:
                     line = node.start_point[0] + 1
                     kind = "function" if node.type == "function_definition" else "class"
                     results.append(f"{f}:{line}: {kind} {def_name}")
-            except:
+            except Exception:
                 continue
         
         if not results:
@@ -372,7 +372,7 @@ def find_imports(path: str) -> str:
                     line = node.start_point[0] + 1
                     text = code[node.start_byte:node.end_byte].split("\n")[0]
                     results.append(f"{f}:{line}: {text}")
-            except:
+            except Exception:
                 continue
         
         if not results:
@@ -450,7 +450,7 @@ def find_calls(path: str, function_name: str) -> str:
                         call_text = call_text[:77] + "..."
                     call_text = call_text.replace("\n", " ")
                     results.append(f"{f}:{line}: {call_text}")
-            except:
+            except Exception:
                 continue
         
         if not results:
