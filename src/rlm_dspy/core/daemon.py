@@ -186,7 +186,9 @@ class IndexWorker(threading.Thread):
                 # Exponential backoff: 1s, 2s, 4s, ..., max 60s
                 backoff = min(2 ** (consecutive_errors - 1), max_backoff)
                 logger.error("Worker error (backoff %.1fs): %s", backoff, e)
-                time.sleep(backoff)
+                # Use wait() instead of sleep() to respond to stop signal
+                if self._stop_event.wait(timeout=backoff):
+                    break  # Stop signal received during backoff
     
     def _index_project(self, project_name: str) -> None:
         """Re-index a project."""
@@ -620,6 +622,12 @@ class IndexDaemon:
             # Store fd so lock is held and can be closed on shutdown
             self._pid_fd = fd
         except OSError as e:
+            # Close fd if write failed (fd was opened but not yet stored in self._pid_fd)
+            if 'fd' in locals() and fd is not None:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
             raise RuntimeError(f"Failed to write PID file: {e}")
     
     def _auto_watch_projects(self) -> None:

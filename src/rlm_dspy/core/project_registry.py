@@ -87,9 +87,11 @@ def _file_lock(lock_path: Path, timeout: float = 10.0) -> Generator[None, None, 
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     
     start = time.time()
-    lock_fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT)
+    lock_fd = None
     
     try:
+        lock_fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT)
+        
         while True:
             try:
                 fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -101,8 +103,12 @@ def _file_lock(lock_path: Path, timeout: float = 10.0) -> Generator[None, None, 
         
         yield
     finally:
-        fcntl.flock(lock_fd, fcntl.LOCK_UN)
-        os.close(lock_fd)
+        if lock_fd is not None:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            os.close(lock_fd)
 
 
 class ProjectRegistry:
@@ -162,17 +168,19 @@ class ProjectRegistry:
                     logger.warning("Failed to load project registry: %s", e)
     
     def _reload_if_stale(self) -> None:
-        """Reload registry if file was modified by another process."""
+        """Reload registry if file was modified by another process (thread-safe)."""
         if not self.config.registry_file.exists():
             return
         
-        try:
-            file_mtime = self.config.registry_file.stat().st_mtime
-            if not hasattr(self, '_last_load_time') or file_mtime > self._last_load_time:
-                self._load()
-                self._last_load_time = file_mtime
-        except OSError:
-            pass
+        with self._lock:  # Protect mtime check and reload
+            try:
+                file_mtime = self.config.registry_file.stat().st_mtime
+                if not hasattr(self, '_last_load_time') or file_mtime > self._last_load_time:
+                    # Note: _load() also acquires _lock, but RLock is reentrant
+                    self._load()
+                    self._last_load_time = file_mtime
+            except OSError:
+                pass
     
     def _save(self) -> None:
         """Save registry to disk atomically with cross-process locking."""
