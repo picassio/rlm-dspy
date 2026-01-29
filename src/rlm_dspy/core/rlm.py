@@ -45,6 +45,28 @@ _SECRET_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 # Cache resolved secret values (lazy initialization)
 _cached_env_secrets: list[str] | None = None
 
+# Cache compiled regex patterns for secret masking
+# Key: frozenset of secrets, Value: compiled regex
+_secret_pattern_cache: dict[frozenset, re.Pattern] = {}
+
+
+def _get_secret_pattern(secrets: list[str]) -> re.Pattern | None:
+    """Get or create cached regex pattern for secrets."""
+    if not secrets:
+        return None
+    
+    # Create hashable key
+    cache_key = frozenset(secrets)
+    
+    if cache_key not in _secret_pattern_cache:
+        # Sort by length descending to match longer secrets first
+        sorted_secrets = sorted(secrets, key=len, reverse=True)
+        _secret_pattern_cache[cache_key] = re.compile(
+            "|".join(re.escape(s) for s in sorted_secrets)
+        )
+    
+    return _secret_pattern_cache[cache_key]
+
 
 def _get_env_secrets() -> list[str]:
     """Get secret values from environment (cached for performance)."""
@@ -85,13 +107,11 @@ def _sanitize_secrets(text: str, extra_secrets: list[str] | None = None) -> str:
     # Add environment secrets (cached)
     secrets_to_mask.extend(_get_env_secrets())
     
-    # Single-pass replacement for all literal secrets
+    # Single-pass replacement using cached regex pattern
     if secrets_to_mask:
-        # Sort by length descending to match longer secrets first
-        secrets_to_mask.sort(key=len, reverse=True)
-        # Build single regex pattern
-        pattern = re.compile("|".join(re.escape(s) for s in secrets_to_mask))
-        result = pattern.sub("[REDACTED]", result)
+        pattern = _get_secret_pattern(secrets_to_mask)
+        if pattern:
+            result = pattern.sub("[REDACTED]", result)
     
     # Apply pre-compiled regex patterns for secret formats
     for pattern, replacement in _SECRET_PATTERNS:
