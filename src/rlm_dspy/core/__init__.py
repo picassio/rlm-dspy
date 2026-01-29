@@ -1,7 +1,16 @@
 """Core RLM-DSPy modules."""
 
 # Core RLM (uses dspy.RLM for REPL-based exploration)
-from .rlm import RLM, RLMConfig, RLMResult
+from .rlm import RLM, RLMConfig, RLMResult, ProgressCallback
+
+# Embeddings
+from .embeddings import (
+    EmbeddingConfig,
+    clear_embedder_cache,
+    embed_texts,
+    get_embedder,
+    get_embedding_dim,
+)
 
 # Debug utilities
 from .debug import (
@@ -83,6 +92,13 @@ __all__ = [
     "RLM",
     "RLMConfig",
     "RLMResult",
+    "ProgressCallback",
+    # Embeddings
+    "EmbeddingConfig",
+    "get_embedder",
+    "embed_texts",
+    "get_embedding_dim",
+    "clear_embedder_cache",
     # Debug utilities
     "Verbosity",
     "get_verbosity",

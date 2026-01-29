@@ -36,6 +36,18 @@ DEFAULT_CONFIG = {
     "max_budget": 1.0,
     "max_timeout": 300,
     
+    # Embedding settings (for semantic search)
+    "embedding_model": "openai/text-embedding-3-small",
+    "local_embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
+    "embedding_batch_size": 100,
+    
+    # Vector index settings
+    "index_dir": "~/.rlm/indexes",
+    "use_faiss": True,
+    "faiss_threshold": 5000,
+    "auto_update_index": True,
+    "index_cache_ttl": 3600,
+    
     # API key location
     "env_file": None,
 }
@@ -55,6 +67,42 @@ model: {model}
 # Sub-model for llm_query() calls (defaults to main model if not set)
 # Tip: Use same model as main to reduce hallucinations
 sub_model: {sub_model}
+
+# ============================================================================
+# Embedding Settings (for semantic search)
+# ============================================================================
+# Embedding model (via litellm)
+# Options: openai/text-embedding-3-small, openai/text-embedding-3-large,
+#          cohere/embed-english-v3.0, voyage/voyage-3,
+#          together_ai/togethercomputer/m2-bert-80M-8k-retrieval
+#          or "local" to use sentence-transformers
+embedding_model: {embedding_model}
+
+# Local embedding model (used when embedding_model: local)
+# Requires: pip install sentence-transformers
+local_embedding_model: {local_embedding_model}
+
+# Embedding batch size (default: 100)
+embedding_batch_size: {embedding_batch_size}
+
+# ============================================================================
+# Vector Index Settings (for semantic search)
+# ============================================================================
+# Index storage directory
+index_dir: {index_dir}
+
+# Use FAISS for large indexes (requires: pip install faiss-cpu)
+# If false, uses brute-force numpy search (slower but no dependencies)
+use_faiss: {use_faiss}
+
+# Threshold for switching to FAISS (number of documents)
+faiss_threshold: {faiss_threshold}
+
+# Auto-update index when files change
+auto_update_index: {auto_update_index}
+
+# Index cache TTL in seconds (0 = no expiry)
+index_cache_ttl: {index_cache_ttl}
 
 # ============================================================================
 # Execution Limits
@@ -151,6 +199,17 @@ def save_config(config: dict[str, Any], use_template: bool = True) -> None:
         content = CONFIG_TEMPLATE.format(
             model=fmt(full_config.get("model")),
             sub_model=fmt(full_config.get("sub_model")),
+            # Embedding settings
+            embedding_model=fmt(full_config.get("embedding_model")),
+            local_embedding_model=fmt(full_config.get("local_embedding_model")),
+            embedding_batch_size=fmt(full_config.get("embedding_batch_size")),
+            # Vector index settings
+            index_dir=fmt(full_config.get("index_dir")),
+            use_faiss=fmt(full_config.get("use_faiss")),
+            faiss_threshold=fmt(full_config.get("faiss_threshold")),
+            auto_update_index=fmt(full_config.get("auto_update_index")),
+            index_cache_ttl=fmt(full_config.get("index_cache_ttl")),
+            # Execution limits
             max_iterations=fmt(full_config.get("max_iterations")),
             max_llm_calls=fmt(full_config.get("max_llm_calls")),
             max_output_chars=fmt(full_config.get("max_output_chars")),
