@@ -239,6 +239,13 @@ def _load_context(
             console.print("[red]Error: No content loaded from provided paths[/red]")
             raise typer.Exit(1)
         
+        # Set current project for semantic_search tool (auto-detect from first path)
+        from .tools import set_current_project
+        first_path = paths[0].resolve()
+        if first_path.is_file():
+            first_path = first_path.parent
+        set_current_project(str(first_path))
+        
         if verbose and max_tokens:
             from .core.fileutils import estimate_tokens
             actual_tokens = estimate_tokens(context)

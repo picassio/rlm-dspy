@@ -631,26 +631,20 @@ class RLM:
         
         tool_instructions = """IMPORTANT: You have access to powerful code analysis tools. USE THEM FIRST before writing custom code:
 
-WORKSPACE DISCOVERY (call first for unfamiliar codebases):
-- `get_workspace_info()` - Get current directory and all indexed projects
-- `list_projects()` - List indexed projects with paths and snippet counts
-
 STRUCTURAL SEARCH (100% accurate, use for exact matches):
 - `index_code(path, kind, name)` - Find classes/functions/methods with EXACT line numbers
 - `find_classes()`, `find_functions()`, `find_methods()` - Quick structural queries
 - `find_calls(path, function_name)` - Find where functions are called
 - `ripgrep(pattern, path)` - Fast text/regex pattern search
 
-SEMANTIC SEARCH (conceptual similarity, use for exploratory queries):
-- `semantic_search(query, path)` - Search specific project by concept
-- `search_all_projects(query)` - Search ALL indexed projects at once
+SEMANTIC SEARCH (conceptual similarity, finds related code):
+- `semantic_search(query)` - Search current project by concept (no path needed)
 
 FILE OPERATIONS:
 - `read_file(path, start_line, end_line)` - Read specific file sections
 - `find_files(pattern, path)` - Find files by name pattern
 
-WORKFLOW: Start with `get_workspace_info()` to understand available projects,
-then use appropriate search tools based on your needs.
+Use structural tools for exact lookups, semantic search for exploratory queries.
 
 """
         if isinstance(signature, str):
