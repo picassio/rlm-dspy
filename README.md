@@ -666,7 +666,14 @@ result = rlm.query(
 | `find_methods(path, name)` | Find methods (shows parent class) |
 | `find_imports(path)` | Find all import statements |
 | `find_calls(path, func_name)` | Find function/method call sites |
-| `shell(cmd, timeout)` | Run shell commands (disabled by default) |
+| `shell(cmd, timeout)` | Run shell commands (disabled by default, see security note) |
+
+**Shell Security:**
+- Disabled by default - requires `RLM_ALLOW_SHELL=1` environment variable
+- Only allowlisted commands: `ls`, `cat`, `grep`, `find`, `git`, `python`, etc.
+- Dangerous patterns blocked: `rm -rf`, `curl | sh`, `eval`, backticks, etc.
+- Uses `shell=False` with parsed arguments (no shell injection)
+- **Note:** `python` and `git` in the allowlist can execute arbitrary code via flags. Only enable shell in trusted environments.
 
 **Supported languages for AST tools:** Python, JavaScript, TypeScript, Go, Rust, Java, C, C++, Ruby, C#
 
@@ -737,7 +744,26 @@ embedding_batch_size: 100
 index_dir: ~/.rlm/indexes
 use_faiss: true
 faiss_threshold: 5000
-auto_update_index: true
+auto_update_index: true  # See note below
+```
+
+**Index Auto-Update Behavior:**
+
+When `auto_update_index: true` (default):
+- On each search, RLM checks file modification times against the index manifest
+- Changed/new files are incrementally re-embedded (only changed files, not full rebuild)
+- Deleted files are removed from the index
+- This ensures search results are always up-to-date
+
+When `auto_update_index: false`:
+- The index is built once and cached
+- Faster searches (no file mtime checks)
+- **Stale results possible** if files changed since last indexing
+- Useful for: read-only codebases, CI environments, or when you explicitly rebuild with `rlm-dspy index build`
+
+To force a fresh index regardless of setting:
+```bash
+rlm-dspy index build src/ --force
 ```
 
 ### Cited Analysis
