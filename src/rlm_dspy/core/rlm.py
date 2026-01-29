@@ -540,6 +540,9 @@ class RLM:
                 if name not in self._tools:
                     self._tools[name] = func
         
+        # Validate all tools
+        self._validate_tools(self._tools)
+        
         # Track if we have a custom signature with structured output
         self._is_structured = not isinstance(signature, str)
         
@@ -897,10 +900,46 @@ These tools provide 100% accurate results. Only fall back to manual parsing if t
 
             rlm.add_tool("search_web", search_web)
             ```
+        
+        Raises:
+            ValueError: If name is not a valid Python identifier
+            TypeError: If func is not callable
         """
+        self._validate_tools({name: func})
         self._tools[name] = func
         # Recreate RLM with updated tools
         self._rlm = self._create_rlm()
+    
+    def _validate_tools(self, tools: dict[str, Callable]) -> None:
+        """Validate tool names and types.
+        
+        Args:
+            tools: Dict of tool name -> function
+            
+        Raises:
+            ValueError: If name is not a valid Python identifier or conflicts with builtins
+            TypeError: If tool is not callable
+        """
+        # Reserved names that conflict with sandbox builtins
+        RESERVED_NAMES = {
+            'print', 'len', 'range', 'enumerate', 'zip', 'map', 'filter',
+            'sorted', 'reversed', 'sum', 'min', 'max', 'abs', 'round',
+            'str', 'int', 'float', 'bool', 'list', 'dict', 'set', 'tuple',
+            'SUBMIT', 'FINAL',  # RLM special functions
+        }
+        
+        for name, func in tools.items():
+            # Check valid identifier
+            if not name.isidentifier():
+                raise ValueError(f"Invalid tool name '{name}': must be a valid Python identifier")
+            
+            # Check not reserved
+            if name in RESERVED_NAMES:
+                raise ValueError(f"Tool name '{name}' conflicts with built-in function")
+            
+            # Check callable
+            if not callable(func):
+                raise TypeError(f"Tool '{name}' must be callable, got {type(func).__name__}")
 
     def batch(
         self,
