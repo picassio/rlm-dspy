@@ -12,6 +12,16 @@ from .embeddings import (
     get_embedding_dim,
 )
 
+# Vector Index
+from .vector_index import (
+    CodeIndex,
+    CodeSnippet,
+    IndexConfig,
+    SearchResult,
+    get_index_manager,
+    semantic_search,
+)
+
 # Debug utilities
 from .debug import (
     Verbosity,
@@ -99,6 +109,13 @@ __all__ = [
     "embed_texts",
     "get_embedding_dim",
     "clear_embedder_cache",
+    # Vector Index
+    "IndexConfig",
+    "CodeSnippet",
+    "SearchResult",
+    "CodeIndex",
+    "get_index_manager",
+    "semantic_search",
     # Debug utilities
     "Verbosity",
     "get_verbosity",

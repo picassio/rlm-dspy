@@ -1288,5 +1288,181 @@ def example(
         console.print()
 
 
+# =============================================================================
+# Index Commands (for semantic search)
+# =============================================================================
+
+index_app = typer.Typer(
+    name="index",
+    help="Manage vector indexes for semantic search",
+    no_args_is_help=True,
+)
+app.add_typer(index_app, name="index")
+
+
+@index_app.command("build")
+def index_build(
+    paths: Annotated[
+        list[Path],
+        typer.Argument(help="Directories to index"),
+    ],
+    force: Annotated[
+        bool,
+        typer.Option("--force", "-f", help="Force full rebuild"),
+    ] = False,
+) -> None:
+    """Build or update vector index for semantic search.
+    
+    Examples:
+        rlm-dspy index build src/
+        rlm-dspy index build . --force
+    """
+    from .core.vector_index import get_index_manager
+    
+    manager = get_index_manager()
+    
+    for path in paths:
+        if not path.exists():
+            console.print(f"[red]Path not found: {path}[/red]")
+            continue
+        
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+            transient=True,
+        ) as progress:
+            progress.add_task(f"Indexing {path}...", total=None)
+            
+            try:
+                count = manager.build(path, force=force)
+                console.print(f"[green]✓[/green] Indexed {path}: {count} code snippets")
+            except Exception as e:
+                console.print(f"[red]✗[/red] Failed to index {path}: {e}")
+
+
+@index_app.command("status")
+def index_status(
+    paths: Annotated[
+        list[Path],
+        typer.Argument(help="Directories to check"),
+    ],
+) -> None:
+    """Show index status for directories.
+    
+    Examples:
+        rlm-dspy index status src/
+    """
+    from .core.vector_index import get_index_manager
+    
+    manager = get_index_manager()
+    
+    for path in paths:
+        status = manager.get_status(path)
+        
+        if not status["indexed"]:
+            console.print(f"[yellow]○[/yellow] {path}: Not indexed")
+            console.print("  [dim]Run: rlm-dspy index build {path}[/dim]")
+        else:
+            console.print(f"[green]●[/green] {path}: Indexed")
+            console.print(f"  Snippets: {status['snippet_count']}")
+            console.print(f"  Files: {status['file_count']}")
+            if status["needs_update"]:
+                console.print(f"  [yellow]Needs update: {status['new_or_modified']} changed, {status['deleted']} deleted[/yellow]")
+            else:
+                console.print(f"  [green]Up to date[/green]")
+
+
+@index_app.command("clear")
+def index_clear(
+    path: Annotated[
+        Optional[Path],
+        typer.Argument(help="Specific directory to clear (or all if not specified)"),
+    ] = None,
+    confirm: Annotated[
+        bool,
+        typer.Option("--yes", "-y", help="Skip confirmation"),
+    ] = False,
+) -> None:
+    """Clear vector indexes.
+    
+    Examples:
+        rlm-dspy index clear           # Clear all indexes
+        rlm-dspy index clear src/      # Clear specific index
+        rlm-dspy index clear -y        # Skip confirmation
+    """
+    from .core.vector_index import get_index_manager
+    
+    if not confirm:
+        if path:
+            msg = f"Clear index for {path}?"
+        else:
+            msg = "Clear ALL indexes?"
+        
+        if not typer.confirm(msg):
+            console.print("[dim]Cancelled[/dim]")
+            return
+    
+    manager = get_index_manager()
+    count = manager.clear(path)
+    
+    if count > 0:
+        console.print(f"[green]✓[/green] Cleared {count} index(es)")
+    else:
+        console.print("[dim]No indexes to clear[/dim]")
+
+
+@index_app.command("search")
+def index_search(
+    query: Annotated[
+        str,
+        typer.Argument(help="Search query"),
+    ],
+    path: Annotated[
+        Path,
+        typer.Option("--path", "-p", help="Directory to search"),
+    ] = Path("."),
+    k: Annotated[
+        int,
+        typer.Option("--results", "-k", help="Number of results"),
+    ] = 5,
+) -> None:
+    """Search code semantically.
+    
+    Examples:
+        rlm-dspy index search "authentication logic"
+        rlm-dspy index search "error handling" -p src/ -k 10
+    """
+    from .core.vector_index import get_index_manager
+    
+    manager = get_index_manager()
+    
+    # Build index if needed
+    status = manager.get_status(path)
+    if not status["indexed"]:
+        console.print(f"[dim]Building index for {path}...[/dim]")
+        manager.build(path)
+    
+    # Search
+    results = manager.search(path, query, k=k)
+    
+    if not results:
+        console.print(f"[yellow]No results found for: {query}[/yellow]")
+        return
+    
+    console.print(f"\n[bold]Results for:[/bold] {query}\n")
+    
+    for i, r in enumerate(results, 1):
+        console.print(f"[bold cyan]{i}. {r.snippet.file}:{r.snippet.line}[/bold cyan]")
+        console.print(f"   [dim]{r.snippet.type}[/dim] [green]{r.snippet.name}[/green]")
+        
+        # Show snippet preview
+        preview = r.snippet.text[:200].replace('\n', '\n   ')
+        if len(r.snippet.text) > 200:
+            preview += "..."
+        console.print(f"   {preview}")
+        console.print()
+
+
 if __name__ == "__main__":
     app()

@@ -432,6 +432,48 @@ def shell(command: str, timeout: int = 30) -> str:
         return f"(shell error: {e})"
 
 
+def semantic_search(query: str, path: str = ".", k: int = 5) -> str:
+    """Search code semantically using embeddings (finds conceptually similar code).
+    
+    Unlike ripgrep which matches text patterns, semantic search finds code
+    that is conceptually related to your query even without exact word matches.
+    
+    Best for queries like:
+    - "authentication logic"
+    - "error handling patterns"
+    - "database connection code"
+    
+    Args:
+        query: Natural language description of what you're looking for
+        path: Directory to search in (default: current directory)
+        k: Number of results to return (default: 5)
+        
+    Returns:
+        Formatted results with file locations and code snippets
+    """
+    try:
+        from .core.vector_index import get_index_manager
+        
+        manager = get_index_manager()
+        results = manager.search(path, query, k=k)
+        
+        if not results:
+            return f"No results found for: {query}"
+        
+        output = [f"Found {len(results)} semantically similar code snippets:\n"]
+        for i, r in enumerate(results, 1):
+            output.append(f"--- Result {i}: {r.snippet.file}:{r.snippet.line} ---")
+            output.append(f"Type: {r.snippet.type} | Name: {r.snippet.name}")
+            output.append(r.snippet.text[:500])
+            if len(r.snippet.text) > 500:
+                output.append("... (truncated)")
+            output.append("")
+        
+        return "\n".join(output)
+    except Exception as e:
+        return f"Semantic search error: {e}\nTip: Run 'rlm-dspy index build {path}' first."
+
+
 # Collection of all built-in tools
 BUILTIN_TOOLS: dict[str, Any] = {
     "ripgrep": ripgrep,
@@ -446,6 +488,7 @@ BUILTIN_TOOLS: dict[str, Any] = {
     "find_methods": find_methods,
     "find_imports": find_imports,
     "find_calls": find_calls,
+    "semantic_search": semantic_search,
     "shell": shell,
 }
 

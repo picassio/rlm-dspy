@@ -33,6 +33,7 @@ from .tools import (
     find_methods,
     find_imports,
     find_calls,
+    semantic_search,
     get_tool_descriptions,
 )
 
@@ -73,5 +74,6 @@ __all__ = [
     "find_methods",
     "find_imports",
     "find_calls",
+    "semantic_search",
     "get_tool_descriptions",
 ]
