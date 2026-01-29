@@ -74,9 +74,10 @@ def _sanitize_secrets(text: str, extra_secrets: list[str] | None = None) -> str:
     result = text
     
     # Check for additional secrets passed explicitly (e.g., from config)
+    # Note: minimum length of 4 to avoid false positives on common short strings
     if extra_secrets:
         for secret in extra_secrets:
-            if secret and len(secret) > 8 and secret in result:
+            if secret and len(secret) >= 4 and secret in result:
                 result = result.replace(secret, "[REDACTED]")
     
     # Check for actual secret values from environment (cached)
@@ -286,6 +287,24 @@ class RLMConfig:
             "RLM_MAX_WORKERS", _get_user_config_default("max_workers", 8)
         )
     )
+
+    def __post_init__(self) -> None:
+        """Validate configuration values."""
+        # Validate bounds to prevent resource exhaustion
+        if self.max_iterations < 1 or self.max_iterations > 100:
+            raise ValueError(f"max_iterations must be between 1 and 100, got {self.max_iterations}")
+        
+        if self.max_llm_calls < 1 or self.max_llm_calls > 500:
+            raise ValueError(f"max_llm_calls must be between 1 and 500, got {self.max_llm_calls}")
+        
+        if self.max_timeout < 0 or self.max_timeout > 3600:
+            raise ValueError(f"max_timeout must be between 0 and 3600, got {self.max_timeout}")
+        
+        if self.max_budget < 0 or self.max_budget > 100:
+            raise ValueError(f"max_budget must be between 0 and 100, got {self.max_budget}")
+        
+        if self.max_workers < 1 or self.max_workers > 32:
+            raise ValueError(f"max_workers must be between 1 and 32, got {self.max_workers}")
 
     def __repr__(self) -> str:
         key_display = "***" if self.api_key else None

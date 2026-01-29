@@ -239,7 +239,9 @@ class IndexDaemon:
         self.config.pid_file.parent.mkdir(parents=True, exist_ok=True)
         
         self._observer = Observer()
-        self._queue: Queue = Queue()
+        # Bounded queue to prevent memory exhaustion under high file churn
+        # maxsize=1000 allows ~1000 pending index requests before blocking
+        self._queue: Queue = Queue(maxsize=1000)
         self._worker: IndexWorker | None = None
         self._watches: dict[str, any] = {}  # project_name -> watch handle
         self._running = False

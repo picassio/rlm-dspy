@@ -177,6 +177,13 @@ class ProjectRegistry:
         Raises:
             ValueError: If name already exists or path doesn't exist
         """
+        # Validate project name (prevent path traversal)
+        if not name or '/' in name or '\\' in name or '..' in name:
+            raise ValueError(f"Invalid project name '{name}': must not contain path separators or '..'")
+        
+        if name.startswith('.'):
+            raise ValueError(f"Invalid project name '{name}': must not start with '.'")
+        
         path = Path(path).expanduser().resolve()
         
         if not path.exists():
@@ -228,14 +235,24 @@ class ProjectRegistry:
             project = self._projects[name]
             
             if delete_index:
-                index_path = self.config.index_dir / name
-                if index_path.exists():
+                # Validate index path is within index_dir (prevent traversal)
+                index_path = (self.config.index_dir / name).resolve()
+                index_dir_resolved = self.config.index_dir.resolve()
+                
+                # Security: ensure path is within index directory
+                try:
+                    index_path.relative_to(index_dir_resolved)
+                except ValueError:
+                    logger.error("Security: index path traversal blocked for '%s'", name)
+                    return False
+                
+                if index_path.exists() and index_path.is_dir():
                     shutil.rmtree(index_path)
                     logger.info("Deleted index for '%s'", name)
                 
-                # Also try legacy hash path
+                # Also try legacy hash path (hash is safe - no user input)
                 legacy_path = self.config.index_dir / project.path_hash
-                if legacy_path.exists():
+                if legacy_path.exists() and legacy_path.is_dir():
                     shutil.rmtree(legacy_path)
             
             del self._projects[name]
