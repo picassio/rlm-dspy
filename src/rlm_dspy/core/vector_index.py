@@ -34,7 +34,8 @@ class IndexConfig:
     """
     index_dir: Path = field(default_factory=lambda: Path.home() / ".rlm" / "indexes")
     use_faiss: bool = True
-    faiss_threshold: int = 5000
+    # Lower threshold for faster search - FAISS is much faster than brute-force even for small sets
+    faiss_threshold: int = 100
     auto_update: bool = True
     cache_ttl: int = 3600
     
@@ -756,13 +757,27 @@ class CodeIndex:
             # Convert int keys to strings for JSON
             idx_map = {str(k): v for k, v in corpus_idx_to_id.items()}
             (index_path / "corpus_idx_map.json").write_text(json.dumps(idx_map), encoding='utf-8')
+        
+        # Update in-memory cache
+        cache_key = str(index_path)
+        self._metadata[cache_key] = metadata
+        if corpus_idx_to_id is not None:
+            self._corpus_idx_map[cache_key] = corpus_idx_to_id
     
     def _load_metadata(self, index_path: Path) -> tuple[dict[str, CodeSnippet], dict[int, str]]:
         """Load snippet metadata and corpus index mapping.
         
+        Uses in-memory cache to avoid redundant disk reads.
+        
         Returns:
             (metadata dict, corpus_idx_to_id dict)
         """
+        cache_key = str(index_path)
+        
+        # Check in-memory cache first
+        if cache_key in self._metadata and cache_key in self._corpus_idx_map:
+            return self._metadata[cache_key], self._corpus_idx_map[cache_key]
+        
         metadata_path = index_path / "metadata.json"
         if not metadata_path.exists():
             return {}, {}
@@ -780,6 +795,10 @@ class CodeIndex:
             idx_data = json.loads(idx_map_path.read_text(encoding='utf-8'))
             # Convert string keys back to int
             corpus_idx_to_id = {int(k): v for k, v in idx_data.items()}
+        
+        # Cache for future calls
+        self._metadata[cache_key] = metadata
+        self._corpus_idx_map[cache_key] = corpus_idx_to_id
         
         return metadata, corpus_idx_to_id
     

@@ -15,7 +15,7 @@ class TestIndexConfig:
         config = IndexConfig()
         
         assert config.use_faiss is True
-        assert config.faiss_threshold == 5000
+        assert config.faiss_threshold == 100  # Lowered for faster search
         assert config.auto_update is True
         assert config.cache_ttl == 3600
 
