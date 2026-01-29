@@ -408,6 +408,8 @@ def atomic_write(
         with os.fdopen(fd, mode) as f:
             fd_closed = True  # fdopen takes ownership of fd
             f.write(content)
+            f.flush()
+            os.fsync(f.fileno())  # Ensure data is written to disk before rename
 
         # Retry loop for rename (helps with Windows file locking)
         last_error: Exception | None = None
