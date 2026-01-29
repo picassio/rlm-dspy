@@ -363,6 +363,7 @@ class CodeIndex:
         Returns:
             Number of snippets indexed
         """
+        import fcntl
         from dspy.retrievers import Embeddings
         
         repo_path = Path(repo_path).resolve()
@@ -370,6 +371,34 @@ class CodeIndex:
             raise ValueError(f"Path does not exist: {repo_path}")
         
         index_path = self._get_index_path(repo_path)
+        
+        # Cross-process lock to prevent concurrent builds on same project
+        lock_file = index_path.parent / f".{index_path.name}.lock"
+        lock_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        lock_fd = None
+        try:
+            lock_fd = os.open(str(lock_file), os.O_RDWR | os.O_CREAT)
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)  # Blocking lock
+            
+            return self._build_locked(repo_path, index_path, force)
+        finally:
+            if lock_fd is not None:
+                try:
+                    fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                except OSError:
+                    pass
+                os.close(lock_fd)
+    
+    def _build_locked(
+        self,
+        repo_path: Path,
+        index_path: Path,
+        force: bool,
+    ) -> int:
+        """Build index (caller must hold lock)."""
+        from dspy.retrievers import Embeddings
+        
         cache_key = str(repo_path)
         
         # Check if we can use cached index

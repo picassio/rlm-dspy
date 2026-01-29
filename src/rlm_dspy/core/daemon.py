@@ -14,7 +14,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from queue import Queue, Empty
+from queue import Queue, Empty, Full
 from typing import Callable
 
 from watchdog.observers import Observer
@@ -122,8 +122,14 @@ class IndexEventHandler(FileSystemEventHandler):
         if not self._should_watch(path):
             return
         
-        # Queue the project for re-indexing
-        self.queue.put((self.project_name, time.time()))
+        # Queue the project for re-indexing (non-blocking to avoid hanging observer)
+        try:
+            self.queue.put_nowait((self.project_name, time.time()))
+        except Full:
+            # Queue full - event will be dropped but project will be re-indexed
+            # when queue drains (debouncing means we don't need every event)
+            logger.debug("[%s] Queue full, dropping event for %s", 
+                        self.project_name, Path(path).name)
         logger.info("[%s] %s: %s", 
                    self.project_name, event.event_type.upper(), Path(path).name)
 

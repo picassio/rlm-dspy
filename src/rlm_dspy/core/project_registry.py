@@ -182,43 +182,72 @@ class ProjectRegistry:
             except OSError:
                 pass
     
+    @contextmanager
+    def _transaction(self) -> Generator[None, None, None]:
+        """Context manager for atomic read-modify-write operations.
+        
+        Holds both thread lock and file lock, reloads fresh data,
+        and saves on successful exit.
+        """
+        lock_file = self.config.registry_file.parent / ".registry.lock"
+        
+        with self._lock:  # Thread lock
+            with _file_lock(lock_file):  # Process lock  
+                # Reload fresh data while holding lock
+                if self.config.registry_file.exists():
+                    try:
+                        data = json.loads(self.config.registry_file.read_text(encoding='utf-8'))
+                        self._default_project = data.get("default_project")
+                        self._projects.clear()
+                        for name, proj_data in data.get("projects", {}).items():
+                            self._projects[name] = Project.from_dict(proj_data)
+                    except (json.JSONDecodeError, KeyError) as e:
+                        logger.warning("Failed to reload registry: %s", e)
+                
+                yield  # Caller modifies self._projects
+                
+                # Save while still holding lock
+                self._save_unlocked()
+    
+    def _save_unlocked(self) -> None:
+        """Save registry (caller must hold locks)."""
+        data = {
+            "default_project": self._default_project,
+            "projects": {
+                name: proj.to_dict() 
+                for name, proj in self._projects.items()
+            },
+            "updated_at": datetime.now().isoformat(),
+        }
+        
+        registry_dir = self.config.registry_file.parent
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode='w',
+                dir=registry_dir,
+                suffix='.tmp',
+                delete=False,
+                encoding='utf-8'
+            ) as f:
+                json.dump(data, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+                temp_path = Path(f.name)
+            
+            temp_path.replace(self.config.registry_file)
+            self._last_load_time = time.time()  # Update mtime tracker
+        except OSError as e:
+            logger.error("Failed to save registry: %s", e)
+            if 'temp_path' in locals() and temp_path.exists():
+                temp_path.unlink()
+    
     def _save(self) -> None:
         """Save registry to disk atomically with cross-process locking."""
         lock_file = self.config.registry_file.parent / ".registry.lock"
         
         with self._lock:  # Thread lock
             with _file_lock(lock_file):  # Process lock
-                data = {
-                    "default_project": self._default_project,
-                    "projects": {
-                        name: proj.to_dict() 
-                        for name, proj in self._projects.items()
-                    },
-                    "updated_at": datetime.now().isoformat(),
-                }
-                
-                # Atomic write: write to temp file then rename
-                registry_dir = self.config.registry_file.parent
-                try:
-                    with tempfile.NamedTemporaryFile(
-                        mode='w',
-                        dir=registry_dir,
-                        suffix='.tmp',
-                        delete=False,
-                        encoding='utf-8'
-                    ) as f:
-                        json.dump(data, f, indent=2)
-                        f.flush()
-                        os.fsync(f.fileno())
-                        temp_path = Path(f.name)
-                    
-                    # Atomic rename (on POSIX systems)
-                    temp_path.replace(self.config.registry_file)
-                except OSError as e:
-                    logger.error("Failed to save registry: %s", e)
-                    # Clean up temp file if it exists
-                    if 'temp_path' in locals() and temp_path.exists():
-                        temp_path.unlink()
+                self._save_unlocked()
     
     def add(
         self,
@@ -258,7 +287,7 @@ class ProjectRegistry:
         if not path.is_dir():
             raise ValueError(f"Path is not a directory: {path}")
         
-        with self._lock:
+        with self._transaction():  # Atomic read-modify-write
             if name in self._projects:
                 raise ValueError(f"Project '{name}' already exists. Use update() or remove() first.")
             
@@ -289,7 +318,7 @@ class ProjectRegistry:
             )
             
             self._projects[name] = project
-            self._save()
+            # _transaction() saves on exit
             
             logger.info("Registered project '%s' at %s", name, path)
             return project
