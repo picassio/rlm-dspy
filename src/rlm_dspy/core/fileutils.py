@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -17,6 +18,9 @@ if TYPE_CHECKING:
     import pathspec
 
 logger = logging.getLogger(__name__)
+
+# Pre-compiled regex for file marker extraction (used in smart_truncate_context)
+_FILE_MARKER_PATTERN = re.compile(r'(=== FILE: .+? ===\n.*?=== END FILE ===\n)', re.DOTALL)
 
 
 class PathTraversalError(Exception):
@@ -858,9 +862,8 @@ def smart_truncate_context(
     if estimated_tokens <= max_tokens:
         return context, False
 
-    # Split by file markers
-    file_pattern = re.compile(r'(=== FILE: .+? ===\n.*?=== END FILE ===\n)', re.DOTALL)
-    files = file_pattern.findall(context)
+    # Split by file markers (pattern cached at module level)
+    files = _FILE_MARKER_PATTERN.findall(context)
 
     if not files:
         # No file markers, use simple truncation

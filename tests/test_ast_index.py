@@ -11,6 +11,8 @@ from rlm_dspy.core.ast_index import (
     index_file,
     index_files,
     clear_index_cache,
+    clear_parser_cache,
+    get_cache_stats,
 )
 
 
@@ -415,7 +417,7 @@ class TestIndexFiles:
 class TestCacheManagement:
     """Tests for cache management."""
 
-    def test_clear_cache(self):
+    def test_clear_index_cache(self):
         """Can clear the index cache."""
         code = "def func(): pass"
 
@@ -432,3 +434,48 @@ class TestCacheManagement:
             # Should be a new object
             idx2 = index_file(f.name, use_cache=True)
             assert idx1 is not idx2
+
+    def test_parser_cache_populated(self):
+        """Parser cache is populated after indexing."""
+        code = "def func(): pass"
+
+        with tempfile.NamedTemporaryFile(suffix='.py', mode='w', delete=False) as f:
+            f.write(code)
+            f.flush()
+
+            clear_parser_cache()
+            clear_index_cache()
+
+            # Index a Python file
+            index_file(f.name, use_cache=False)
+
+            # Parser cache should have python parser
+            stats = get_cache_stats()
+            assert stats["parser_cache_size"] >= 1
+
+    def test_clear_parser_cache(self):
+        """Can clear the parser cache."""
+        code = "def func(): pass"
+
+        with tempfile.NamedTemporaryFile(suffix='.py', mode='w', delete=False) as f:
+            f.write(code)
+            f.flush()
+
+            # Populate parser cache
+            index_file(f.name, use_cache=False)
+
+            # Clear parser cache
+            count = clear_parser_cache()
+            assert count >= 1
+
+            # Cache should be empty
+            stats = get_cache_stats()
+            assert stats["parser_cache_size"] == 0
+
+    def test_get_cache_stats(self):
+        """get_cache_stats returns valid stats."""
+        stats = get_cache_stats()
+        assert "index_cache_size" in stats
+        assert "parser_cache_size" in stats
+        assert "max_index_cache_size" in stats
+        assert stats["max_index_cache_size"] > 0

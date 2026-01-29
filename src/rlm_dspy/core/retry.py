@@ -49,6 +49,13 @@ RETRYABLE_STATUS_CODES = {
     524,  # Cloudflare: A Timeout Occurred
 }
 
+# Pre-compiled regex for status code detection (compiled once at module load)
+_retryable_codes_pattern = "|".join(str(c) for c in RETRYABLE_STATUS_CODES)
+_STATUS_CODE_PATTERN = re.compile(
+    rf'\b(?:http\s*)?(?:status\s*)?(?:code\s*)?(?:error\s*)?({_retryable_codes_pattern})\b',
+    re.IGNORECASE
+)
+
 
 def is_retryable_error(error: Exception) -> bool:
     """
@@ -97,10 +104,8 @@ def is_retryable_error(error: Exception) -> bool:
 
     # Check for HTTP status codes with word boundaries (avoid matching IDs like "user 503")
     # Match patterns like "503", "HTTP 503", "status 503", "error 503", "(503)"
-    # Include all codes from RETRYABLE_STATUS_CODES
-    retryable_codes = "|".join(str(c) for c in RETRYABLE_STATUS_CODES)
-    status_pattern = rf'\b(?:http\s*)?(?:status\s*)?(?:code\s*)?(?:error\s*)?({retryable_codes})\b'
-    if re.search(status_pattern, error_str, re.IGNORECASE):
+    # Uses pre-compiled pattern for performance
+    if _STATUS_CODE_PATTERN.search(error_str):
         return True
 
     # Default: don't retry unknown errors (safer)

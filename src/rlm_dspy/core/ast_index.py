@@ -14,6 +14,9 @@ from typing import Literal
 
 logger = logging.getLogger(__name__)
 
+# Parser cache - parsers are expensive to create, reuse them
+_parser_cache: dict[str, object] = {}
+
 # Language mappings (extension -> tree-sitter language name)
 LANGUAGE_MAP = {
     # Core languages
@@ -150,58 +153,89 @@ class ASTIndex:
 
 
 def _get_parser(language: str):
-    """Get tree-sitter parser for a language."""
+    """Get tree-sitter parser for a language (cached for performance)."""
+    # Check cache first - parser creation is expensive
+    if language in _parser_cache:
+        return _parser_cache[language]
+
     try:
         from tree_sitter import Language, Parser
+
+        parser = None
 
         # Core languages
         if language == "python":
             import tree_sitter_python as ts_lang
+            lang = Language(ts_lang.language())
+            parser = Parser(lang)
         elif language == "javascript":
             import tree_sitter_javascript as ts_lang
+            lang = Language(ts_lang.language())
+            parser = Parser(lang)
         elif language == "typescript":
             import tree_sitter_typescript as ts_mod
             ts_lang = ts_mod.language_typescript()
             lang = Language(ts_lang)
             parser = Parser(lang)
-            return parser
         elif language == "go":
             import tree_sitter_go as ts_lang
+            lang = Language(ts_lang.language())
+            parser = Parser(lang)
         elif language == "rust":
             import tree_sitter_rust as ts_lang
+            lang = Language(ts_lang.language())
+            parser = Parser(lang)
         elif language == "java":
             import tree_sitter_java as ts_lang
+            lang = Language(ts_lang.language())
+            parser = Parser(lang)
         elif language == "c":
             import tree_sitter_c as ts_lang
+            lang = Language(ts_lang.language())
+            parser = Parser(lang)
         elif language == "cpp":
             import tree_sitter_cpp as ts_lang
+            lang = Language(ts_lang.language())
+            parser = Parser(lang)
         elif language == "ruby":
             import tree_sitter_ruby as ts_lang
+            lang = Language(ts_lang.language())
+            parser = Parser(lang)
         elif language == "c_sharp":
             import tree_sitter_c_sharp as ts_lang
+            lang = Language(ts_lang.language())
+            parser = Parser(lang)
         # Additional languages
         elif language == "kotlin":
             import tree_sitter_kotlin as ts_lang
+            lang = Language(ts_lang.language())
+            parser = Parser(lang)
         elif language == "scala":
             import tree_sitter_scala as ts_lang
+            lang = Language(ts_lang.language())
+            parser = Parser(lang)
         elif language == "php":
             import tree_sitter_php as ts_mod
-            # PHP has separate language for PHP code
             ts_lang = ts_mod.language_php()
             lang = Language(ts_lang)
             parser = Parser(lang)
-            return parser
         elif language == "lua":
             import tree_sitter_lua as ts_lang
+            lang = Language(ts_lang.language())
+            parser = Parser(lang)
         elif language == "bash":
             import tree_sitter_bash as ts_lang
+            lang = Language(ts_lang.language())
+            parser = Parser(lang)
         elif language == "haskell":
             import tree_sitter_haskell as ts_lang
-        else:
-            return None
+            lang = Language(ts_lang.language())
+            parser = Parser(lang)
 
-        lang = Language(ts_lang.language())
-        parser = Parser(lang)
+        # Cache the parser
+        if parser is not None:
+            _parser_cache[language] = parser
+
         return parser
     except ImportError:
         return None
@@ -384,13 +418,28 @@ def clear_index_cache() -> int:
     return count
 
 
+def clear_parser_cache() -> int:
+    """Clear the parser cache.
+
+    Parsers are cached for performance - only clear if memory is a concern.
+
+    Returns:
+        Number of entries cleared
+    """
+    global _parser_cache
+    count = len(_parser_cache)
+    _parser_cache = {}
+    return count
+
+
 def get_cache_stats() -> dict[str, int]:
     """Get cache statistics.
 
     Returns:
-        Dict with cache size and max size
+        Dict with index cache size, parser cache size, and max index cache size
     """
     return {
-        "size": len(_index_cache),
-        "max_size": _MAX_CACHE_SIZE,
+        "index_cache_size": len(_index_cache),
+        "parser_cache_size": len(_parser_cache),
+        "max_index_cache_size": _MAX_CACHE_SIZE,
     }

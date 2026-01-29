@@ -57,7 +57,8 @@ class Project:
             return True
         if self.alias and self.alias.lower() == query:
             return True
-        if query in [t.lower() for t in self.tags]:
+        # Use generator instead of list comprehension (lazy evaluation, short-circuit)
+        if any(t.lower() == query for t in self.tags):
             return True
         return False
 
