@@ -582,11 +582,14 @@ def semantic_search(query: str, path: str = ".", k: int = 5) -> str:
         return f"Semantic search error: {e}\nTip: Run 'rlm-dspy index build {path}' first."
 
 
-def list_projects() -> str:
+def list_projects(include_empty: bool = False) -> str:
     """List all indexed projects available for semantic search.
     
     Use this to discover what codebases are indexed and their paths.
     Then use semantic_search with the project path to search that specific project.
+    
+    Args:
+        include_empty: Include projects with 0 snippets (default: False)
     
     Returns:
         Formatted list of projects with names, paths, and snippet counts
@@ -602,25 +605,39 @@ def list_projects() -> str:
             return "No projects indexed. Use 'rlm-dspy index build <path>' to index a project."
         
         manager = get_index_manager()
-        output = [f"Found {len(projects)} indexed projects:\n"]
+        default_project = registry.get_default()
+        default_name = default_project.name if default_project else None
         
+        # Collect projects with their snippet counts
+        project_data = []
         for p in projects:
-            # Get snippet count from index
-            index_path = manager.config.index_dir / p.name
-            manifest_path = index_path / "manifest.json"
-            snippet_count = 0
-            if manifest_path.exists():
-                try:
-                    import json
-                    manifest = json.loads(manifest_path.read_text())
-                    snippet_count = manifest.get("snippet_count", 0)
-                except Exception:
-                    pass
+            # Use snippet_count from Project if available, else check manifest
+            snippet_count = p.snippet_count
+            if not snippet_count:
+                index_path = manager.config.index_dir / p.name
+                manifest_path = index_path / "manifest.json"
+                if manifest_path.exists():
+                    try:
+                        import json
+                        manifest = json.loads(manifest_path.read_text())
+                        snippet_count = manifest.get("snippet_count", 0)
+                    except Exception:
+                        pass
             
+            # Filter empty projects unless requested
+            if snippet_count > 0 or include_empty:
+                project_data.append((p, snippet_count))
+        
+        if not project_data:
+            return "No indexed projects with code found. Use 'rlm-dspy index build <path>' to index."
+        
+        output = [f"Found {len(project_data)} indexed projects:\n"]
+        
+        for p, snippet_count in project_data:
             output.append(f"  • {p.name}")
             output.append(f"    Path: {p.path}")
             output.append(f"    Snippets: {snippet_count}")
-            if p.is_default:
+            if p.name == default_name:
                 output.append("    [DEFAULT]")
             output.append("")
         
@@ -654,10 +671,27 @@ def search_all_projects(query: str, k: int = 3) -> str:
         
         manager = get_index_manager()
         all_results = []
+        searched_projects = 0
         
         for p in projects:
+            # Skip projects with no snippets
+            if p.snippet_count == 0:
+                index_path = manager.config.index_dir / p.name
+                manifest_path = index_path / "manifest.json"
+                if manifest_path.exists():
+                    try:
+                        import json
+                        manifest = json.loads(manifest_path.read_text())
+                        if manifest.get("snippet_count", 0) == 0:
+                            continue
+                    except Exception:
+                        continue
+                else:
+                    continue
+            
             try:
                 results = manager.search(p.path, query, k=k)
+                searched_projects += 1
                 for r in results:
                     all_results.append((p.name, r))
             except Exception as e:
@@ -673,7 +707,7 @@ def search_all_projects(query: str, k: int = 3) -> str:
         # Take top results
         top_results = all_results[:k * 2]  # Return more since it's cross-project
         
-        output = [f"Found {len(top_results)} results across {len(projects)} projects:\n"]
+        output = [f"Found {len(top_results)} results across {searched_projects} projects:\n"]
         for i, (project_name, r) in enumerate(top_results, 1):
             output.append(f"--- Result {i}: [{project_name}] {r.snippet.file}:{r.snippet.line} ---")
             output.append(f"Type: {r.snippet.type} | Name: {r.snippet.name} | Score: {r.score:.3f}")
