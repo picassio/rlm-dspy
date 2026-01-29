@@ -115,6 +115,7 @@ def _get_config(
     budget: float | None = None,
     timeout: float | None = None,
     max_iterations: int | None = None,
+    max_workers: int | None = None,
     verbose: bool = False,
 ) -> RLMConfig:
     """Build config from CLI args and environment.
@@ -139,6 +140,9 @@ def _get_config(
     if max_iterations is not None and max_iterations <= 0:
         console.print("[red]Error: --max-iterations must be positive[/red]")
         raise typer.Exit(1)
+    if max_workers is not None and max_workers <= 0:
+        console.print("[red]Error: --max-workers must be positive[/red]")
+        raise typer.Exit(1)
     
     # RLMConfig reads from env by default, only override if CLI args provided
     config = RLMConfig()
@@ -156,6 +160,8 @@ def _get_config(
         config.max_timeout = timeout
     if max_iterations:
         config.max_iterations = max_iterations
+    if max_workers:
+        config.max_workers = max_workers
     if verbose:
         config.verbose = verbose
 
@@ -171,6 +177,8 @@ def _load_context(
     paths: list[Path] | None,
     stdin: bool,
     verbose: bool,
+    max_tokens: int | None = None,
+    use_cache: bool = True,
 ) -> str:
     """Load context from stdin or file paths.
     
@@ -179,6 +187,8 @@ def _load_context(
         paths: List of file/directory paths
         stdin: Whether to read from stdin
         verbose: Show progress
+        max_tokens: Optional token limit for context
+        use_cache: Whether to use context caching
         
     Returns:
         Loaded context string
@@ -215,12 +225,25 @@ def _load_context(
             console=console,
             transient=True,
         ) as progress:
-            progress.add_task("Loading files...", total=None)
-            context = rlm.load_context([str(p) for p in paths])
+            task_desc = "Loading files..."
+            if max_tokens:
+                task_desc = f"Loading files (max {max_tokens:,} tokens)..."
+            progress.add_task(task_desc, total=None)
+            context = rlm.load_context(
+                [str(p) for p in paths],
+                max_tokens=max_tokens,
+                use_cache=use_cache,
+            )
         
         if not context.strip():
             console.print("[red]Error: No content loaded from provided paths[/red]")
             raise typer.Exit(1)
+        
+        if verbose and max_tokens:
+            from .core.fileutils import estimate_tokens
+            actual_tokens = estimate_tokens(context)
+            console.print(f"[dim]Context: ~{actual_tokens:,} tokens (limit: {max_tokens:,})[/dim]")
+        
         return context
     
     console.print("[red]Error: Provide paths or use --stdin[/red]")
@@ -475,6 +498,18 @@ def ask(
         bool,
         typer.Option("--no-tools", help="Disable code analysis tools (ripgrep, tree-sitter)"),
     ] = False,
+    max_tokens: Annotated[
+        Optional[int],
+        typer.Option("--max-tokens", "-T", help="Truncate context to fit token limit"),
+    ] = None,
+    max_workers: Annotated[
+        Optional[int],
+        typer.Option("--max-workers", "-w", help="Max parallel workers for batch ops"),
+    ] = None,
+    no_cache: Annotated[
+        bool,
+        typer.Option("--no-cache", help="Disable context caching"),
+    ] = False,
 ) -> None:
     """
     Ask a question about files or piped content.
@@ -514,6 +549,9 @@ def ask(
         rlm-dspy ask "Analyze" src/ -o report.md    # write to file
         rlm-dspy ask "Analyze" src/ -j -o data.json # JSON output to file
         rlm-dspy ask "Simple query" src/ --no-tools # disable tools
+        rlm-dspy ask "Analyze" src/ -T 50000        # limit to 50K tokens
+        rlm-dspy ask "Query" src/ --no-cache        # disable context caching
+        rlm-dspy ask "Batch" src/ -w 8              # 8 parallel workers
     """
     import os
 
@@ -531,7 +569,7 @@ def ask(
     if verbose or debug:
         setup_logging()
 
-    config = _get_config(model, sub_model, budget, timeout, max_iterations, verbose or debug)
+    config = _get_config(model, sub_model, budget, timeout, max_iterations, max_workers, verbose or debug)
     
     # Resolve signature
     sig = "context, query -> answer"  # default
@@ -548,23 +586,34 @@ def ask(
 
     # Show debug info
     if is_debug():
+        debug_info = [
+            f"[bold]Model:[/bold] {config.model}",
+            f"[bold]Sub Model:[/bold] {config.sub_model}",
+            f"[bold]Max Iterations:[/bold] {config.max_iterations}",
+            f"[bold]Max Workers:[/bold] {config.max_workers}",
+        ]
+        if max_tokens:
+            debug_info.append(f"[bold]Max Tokens:[/bold] {max_tokens:,}")
+        if no_cache:
+            debug_info.append("[bold]Cache:[/bold] disabled")
         console.print(
             Panel(
-                f"[bold]Model:[/bold] {config.model}\n"
-                f"[bold]Sub Model:[/bold] {config.sub_model}\n"
-                f"[bold]Max Iterations:[/bold] {config.max_iterations}\n"
-                f"[bold]Max LLM Calls:[/bold] {config.max_llm_calls}",
+                "\n".join(debug_info),
                 title="[bold blue]Debug Mode (RLM)[/bold blue]",
                 border_style="blue",
             )
         )
 
     # Load context from stdin or paths
-    context = _load_context(rlm, paths, stdin, verbose or debug)
+    context = _load_context(
+        rlm, paths, stdin, verbose or debug,
+        max_tokens=max_tokens, use_cache=not no_cache
+    )
     
     if verbose or debug:
         src = f"{len(paths or [])} path(s)" if paths else "stdin"
-        console.print(f"\n[dim]Context: {len(context):,} chars from {src}[/dim]")
+        cache_status = "" if not no_cache else " (no cache)"
+        console.print(f"\n[dim]Context: {len(context):,} chars from {src}{cache_status}[/dim]")
 
     # Dry run - validate and exit
     if dry_run:
