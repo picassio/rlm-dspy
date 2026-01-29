@@ -165,7 +165,7 @@ class CodeIndex:
         manifest_path = self._get_manifest_path(index_path)
         if manifest_path.exists():
             try:
-                return json.loads(manifest_path.read_text())
+                return json.loads(manifest_path.read_text(encoding='utf-8'))
             except json.JSONDecodeError:
                 logger.warning("Corrupt manifest at %s", manifest_path)
         return {"files": {}, "created": 0, "updated": 0, "snippet_count": 0}
@@ -173,7 +173,7 @@ class CodeIndex:
     def _save_manifest(self, index_path: Path, manifest: dict) -> None:
         """Save manifest file."""
         manifest_path = self._get_manifest_path(index_path)
-        manifest_path.write_text(json.dumps(manifest, indent=2))
+        manifest_path.write_text(json.dumps(manifest, indent=2), encoding='utf-8')
     
     def _extract_snippets(self, repo_path: Path) -> list[CodeSnippet]:
         """Extract code snippets from repository using AST parsing."""
@@ -577,7 +577,7 @@ class CodeIndex:
             "corpus": corpus,
             "has_faiss_index": len(corpus) >= self.config.faiss_threshold if self.config.use_faiss else False,
         }
-        config_path.write_text(json.dumps(config))
+        config_path.write_text(json.dumps(config), encoding='utf-8')
         
         # Load index from saved files (uses pre-computed embeddings)
         index = Embeddings.from_saved(str(index_path), self.embedder)
@@ -714,13 +714,13 @@ class CodeIndex:
             }
             for id_, s in metadata.items()
         }
-        (index_path / "metadata.json").write_text(json.dumps(data, indent=2))
+        (index_path / "metadata.json").write_text(json.dumps(data, indent=2), encoding='utf-8')
         
         # Save corpus index mapping for fast search lookup
         if corpus_idx_to_id is not None:
             # Convert int keys to strings for JSON
             idx_map = {str(k): v for k, v in corpus_idx_to_id.items()}
-            (index_path / "corpus_idx_map.json").write_text(json.dumps(idx_map))
+            (index_path / "corpus_idx_map.json").write_text(json.dumps(idx_map), encoding='utf-8')
     
     def _load_metadata(self, index_path: Path) -> tuple[dict[str, CodeSnippet], dict[int, str]]:
         """Load snippet metadata and corpus index mapping.
@@ -732,7 +732,7 @@ class CodeIndex:
         if not metadata_path.exists():
             return {}, {}
         
-        data = json.loads(metadata_path.read_text())
+        data = json.loads(metadata_path.read_text(encoding='utf-8'))
         metadata = {
             id_: CodeSnippet(**info)
             for id_, info in data.items()
@@ -742,7 +742,7 @@ class CodeIndex:
         idx_map_path = index_path / "corpus_idx_map.json"
         corpus_idx_to_id = {}
         if idx_map_path.exists():
-            idx_data = json.loads(idx_map_path.read_text())
+            idx_data = json.loads(idx_map_path.read_text(encoding='utf-8'))
             # Convert string keys back to int
             corpus_idx_to_id = {int(k): v for k, v in idx_data.items()}
         

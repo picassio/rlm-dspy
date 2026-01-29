@@ -430,6 +430,12 @@ class IndexDaemon:
         if self._worker and not self._worker.is_alive():
             logger.warning("Worker thread died, restarting...")
             
+            # Clean up dead thread (non-blocking join)
+            try:
+                self._worker.join(timeout=0.1)
+            except Exception:
+                pass
+            
             # Create new worker
             self._worker = IndexWorker(
                 self._queue,
@@ -442,6 +448,14 @@ class IndexDaemon:
     def _setup_logging(self) -> None:
         """Setup logging to file and configure daemon loggers."""
         self.config.log_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Close existing handler if any (prevents file descriptor leak)
+        if hasattr(self, '_log_handler') and self._log_handler:
+            self._log_handler.close()
+            # Remove from loggers
+            for logger_name in ['rlm_dspy.core.daemon', 'rlm_dspy.core.vector_index']:
+                log = logging.getLogger(logger_name)
+                log.removeHandler(self._log_handler)
         
         # Create file handler
         file_handler = logging.FileHandler(self.config.log_file, mode='a')
@@ -463,7 +477,7 @@ class IndexDaemon:
         index_logger.addHandler(file_handler)
         index_logger.propagate = False
         
-        # Store reference
+        # Store reference for cleanup
         self._log_handler = file_handler
         
         # Write startup marker

@@ -109,7 +109,7 @@ class ProjectRegistry:
             return
         
         try:
-            data = json.loads(self.config.registry_file.read_text())
+            data = json.loads(self.config.registry_file.read_text(encoding='utf-8'))
             self._default_project = data.get("default_project")
             
             for name, proj_data in data.get("projects", {}).items():
@@ -127,7 +127,7 @@ class ProjectRegistry:
             },
             "updated_at": datetime.now().isoformat(),
         }
-        self.config.registry_file.write_text(json.dumps(data, indent=2))
+        self.config.registry_file.write_text(json.dumps(data, indent=2), encoding='utf-8')
     
     def add(
         self,
@@ -388,7 +388,7 @@ class ProjectRegistry:
                 continue
             
             try:
-                manifest = json.loads(manifest_path.read_text())
+                manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
                 repo_path = manifest.get("repo_path", "")
                 
                 if not repo_path:

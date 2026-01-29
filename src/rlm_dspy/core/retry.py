@@ -123,29 +123,39 @@ def parse_retry_after(response: httpx.Response | None) -> float | None:
     if response is None:
         return None
 
+    # Maximum retry delay (1 hour) to prevent unbounded waits
+    MAX_RETRY_DELAY = 3600.0
+    
     retry_after = response.headers.get("retry-after") or response.headers.get("Retry-After")
     if not retry_after:
         return None
 
+    delay = None
+    
     # Try as integer seconds
     try:
-        return float(retry_after)
+        delay = float(retry_after)
     except ValueError:
         pass
 
     # Try as HTTP date
-    try:
-        dt = parsedate_to_datetime(retry_after)
-        delay = dt.timestamp() - time.time()
-        return max(0, delay)
-    except (ValueError, TypeError) as e:
-        logger.debug("Failed to parse retry-after as HTTP date '%s': %s", retry_after, e)
+    if delay is None:
+        try:
+            dt = parsedate_to_datetime(retry_after)
+            delay = dt.timestamp() - time.time()
+        except (ValueError, TypeError) as e:
+            logger.debug("Failed to parse retry-after as HTTP date '%s': %s", retry_after, e)
 
     # Try to extract number from error message (some APIs include it)
-    match = re.search(r"(\d+)\s*(?:seconds?|s)", retry_after, re.IGNORECASE)
-    if match:
-        return float(match.group(1))
+    if delay is None:
+        match = re.search(r"(\d+)\s*(?:seconds?|s)", retry_after, re.IGNORECASE)
+        if match:
+            delay = float(match.group(1))
 
+    # Apply bounds: must be positive and capped at MAX_RETRY_DELAY
+    if delay is not None:
+        return max(0.0, min(delay, MAX_RETRY_DELAY))
+    
     return None
 
 
