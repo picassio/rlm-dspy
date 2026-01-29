@@ -427,20 +427,39 @@ class IndexDaemon:
         if not self._running:
             self.start()
         
+        consecutive_errors = 0
+        max_consecutive_errors = 10
+        
         try:
             while self._running:
-                time.sleep(1.0)
-                
-                # Check worker health and restart if needed
-                self._check_worker_health()
-                
-                # Check idle timeout
-                if self.config.idle_timeout > 0:
-                    if self._last_activity:
-                        idle_time = time.time() - self._last_activity
-                        if idle_time > self.config.idle_timeout:
-                            logger.info("Idle timeout reached, stopping daemon")
-                            break
+                try:
+                    time.sleep(1.0)
+                    
+                    # Check worker health and restart if needed
+                    self._check_worker_health()
+                    
+                    # Check idle timeout
+                    if self.config.idle_timeout > 0:
+                        if self._last_activity:
+                            idle_time = time.time() - self._last_activity
+                            if idle_time > self.config.idle_timeout:
+                                logger.info("Idle timeout reached, stopping daemon")
+                                break
+                    
+                    # Reset error count on successful iteration
+                    consecutive_errors = 0
+                    
+                except Exception as e:
+                    consecutive_errors += 1
+                    logger.error("Daemon loop error (%d/%d): %s", 
+                                consecutive_errors, max_consecutive_errors, e)
+                    
+                    if consecutive_errors >= max_consecutive_errors:
+                        logger.critical("Too many consecutive errors, stopping daemon")
+                        break
+                    
+                    # Brief backoff before retry
+                    time.sleep(min(consecutive_errors, 5))
                             
         except KeyboardInterrupt:
             logger.info("Received interrupt signal")
@@ -531,11 +550,18 @@ class IndexDaemon:
         sys.stdout.flush()
         sys.stderr.flush()
         
-        with open('/dev/null', 'r') as devnull:
-            os.dup2(devnull.fileno(), sys.stdin.fileno())
-        with open(str(self.config.log_file), 'a') as log:
-            os.dup2(log.fileno(), sys.stdout.fileno())
-            os.dup2(log.fileno(), sys.stderr.fileno())
+        # Open files and keep them open for the daemon's lifetime
+        # Using os.open to avoid Python file object lifecycle issues
+        devnull_fd = os.open('/dev/null', os.O_RDONLY)
+        log_fd = os.open(str(self.config.log_file), os.O_WRONLY | os.O_CREAT | os.O_APPEND)
+        
+        os.dup2(devnull_fd, sys.stdin.fileno())
+        os.dup2(log_fd, sys.stdout.fileno())
+        os.dup2(log_fd, sys.stderr.fileno())
+        
+        # Close original fds (duplicates remain open)
+        os.close(devnull_fd)
+        os.close(log_fd)
     
     def _setup_signal_handlers(self) -> None:
         """Setup signal handlers for graceful shutdown."""

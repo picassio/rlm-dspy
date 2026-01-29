@@ -128,7 +128,8 @@ def ripgrep(pattern: str, path: str = ".", flags: str = "") -> str:
                 return f"(security: flag '{flag}' not allowed)"
             
             cmd.extend(flags.split())
-        cmd.extend([pattern, path])
+        # Use -- to separate flags from pattern (prevents pattern injection)
+        cmd.extend(["--", pattern, path])
         
         result = subprocess.run(
             cmd,
