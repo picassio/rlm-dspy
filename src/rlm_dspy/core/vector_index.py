@@ -216,6 +216,9 @@ class CodeIndex:
                 except UnicodeDecodeError:
                     continue
                 
+                # Use relative path for consistent storage
+                rel_path = str(file_path.relative_to(repo_path))
+                
                 for defn in ast_index.definitions:
                     # Extract text for the definition
                     start_line = defn.line - 1  # 0-indexed
@@ -228,12 +231,12 @@ class CodeIndex:
                     else:
                         text = ""
                     
-                    snippet_id = f"{file_path}:{defn.name}:{defn.line}"
+                    snippet_id = f"{rel_path}:{defn.name}:{defn.line}"
                     
                     snippets.append(CodeSnippet(
                         id=snippet_id,
                         text=text,
-                        file=str(file_path),
+                        file=rel_path,
                         line=defn.line,
                         end_line=end_line,
                         type=defn.kind,  # Definition uses 'kind', not 'type'
@@ -346,9 +349,22 @@ class CodeIndex:
                         return len(metadata)
                     except Exception as e:
                         logger.warning("Failed to load index, rebuilding: %s", e)
+                
+                # Incremental update: only re-index changed files
+                elif new_files or deleted:
+                    try:
+                        count = self._incremental_update(
+                            repo_path, index_path, cache_key, 
+                            new_files, deleted, manifest
+                        )
+                        if count > 0:
+                            return count
+                        # Fall through to full rebuild if incremental failed
+                    except Exception as e:
+                        logger.warning("Incremental update failed, doing full rebuild: %s", e)
         
-        # Build new index
-        logger.info("Building index for %s...", repo_path)
+        # Build new index (full rebuild)
+        logger.info("Building full index for %s...", repo_path)
         snippets = self._extract_snippets(repo_path)
         
         if not snippets:
@@ -383,6 +399,8 @@ class CodeIndex:
         # Save index
         index_path.mkdir(parents=True, exist_ok=True)
         index.save(str(index_path))
+        
+        # Note: DSPy Embeddings.save() already saves embeddings as corpus_embeddings.npy
         
         # Save manifest
         from .ast_index import LANGUAGE_MAP
@@ -428,6 +446,253 @@ class CodeIndex:
                    len(snippets), len(file_mtimes))
         
         return len(snippets)
+    
+    def _incremental_update(
+        self,
+        repo_path: Path,
+        index_path: Path,
+        cache_key: str,
+        new_or_modified: list[Path],
+        deleted: list[str],
+        manifest: dict,
+    ) -> int:
+        """Incrementally update index with only changed files.
+        
+        This is much faster than full rebuild as it only embeds new/modified files.
+        
+        Args:
+            repo_path: Path to repository
+            index_path: Path to index directory
+            cache_key: Cache key for this index
+            new_or_modified: List of new or modified files
+            deleted: List of deleted file paths
+            manifest: Current manifest
+            
+        Returns:
+            Number of snippets in updated index, or 0 if incremental failed
+        """
+        from dspy.retrievers import Embeddings
+        import numpy as np
+        
+        logger.info(
+            "Incremental update: %d new/modified, %d deleted", 
+            len(new_or_modified), len(deleted)
+        )
+        
+        # Load existing metadata and embeddings
+        old_metadata, old_corpus_idx_map = self._load_metadata(index_path)
+        
+        # Load embeddings saved by DSPy (corpus_embeddings.npy)
+        embeddings_path = index_path / "corpus_embeddings.npy"
+        if not embeddings_path.exists():
+            logger.debug("No cached embeddings, falling back to full rebuild")
+            return 0
+        
+        old_embeddings = np.load(embeddings_path)
+        
+        # Build set of files that were deleted or modified
+        # Note: new_or_modified contains absolute paths, deleted contains absolute paths from manifest
+        # But snippets store RELATIVE paths, so we need to convert
+        changed_files_abs = set(str(f) for f in new_or_modified) | set(deleted)
+        changed_files_rel = set()
+        for f in new_or_modified:
+            try:
+                rel = str(f.relative_to(repo_path))
+                changed_files_rel.add(rel)
+            except ValueError:
+                pass
+        for d in deleted:
+            try:
+                rel = str(Path(d).relative_to(repo_path))
+                changed_files_rel.add(rel)
+            except ValueError:
+                pass
+        
+        # Keep snippets from unchanged files
+        kept_snippets = []
+        kept_embeddings = []
+        kept_indices = []
+        
+        for corpus_idx, snippet_id in old_corpus_idx_map.items():
+            snippet = old_metadata.get(snippet_id)
+            if snippet:
+                # Check both relative and absolute paths
+                if snippet.file not in changed_files_abs and snippet.file not in changed_files_rel:
+                    kept_snippets.append(snippet)
+                    kept_indices.append(corpus_idx)
+        
+        if kept_indices:
+            kept_embeddings = old_embeddings[kept_indices]
+        
+        logger.debug("Kept %d snippets from unchanged files", len(kept_snippets))
+        
+        # Extract snippets from new/modified files only
+        new_snippets = []
+        for file_path in new_or_modified:
+            if file_path.exists():
+                file_snippets = self._extract_snippets_from_file(file_path, repo_path)
+                new_snippets.extend(file_snippets)
+        
+        logger.debug("Extracted %d snippets from changed files", len(new_snippets))
+        
+        if not new_snippets and not kept_snippets:
+            logger.warning("No snippets after incremental update")
+            return 0
+        
+        # Embed only new snippets
+        new_embeddings = None
+        if new_snippets:
+            new_corpus = [s.to_document() for s in new_snippets]
+            logger.info("Embedding %d new snippets...", len(new_snippets))
+            new_embeddings = self.embedder(new_corpus)
+            new_embeddings = np.array(new_embeddings)
+        
+        # Combine old and new
+        all_snippets = kept_snippets + new_snippets
+        
+        if len(kept_embeddings) > 0 and new_embeddings is not None:
+            all_embeddings = np.vstack([kept_embeddings, new_embeddings])
+        elif new_embeddings is not None:
+            all_embeddings = new_embeddings
+        else:
+            all_embeddings = np.array(kept_embeddings) if len(kept_embeddings) > 0 else np.array([])
+        
+        if len(all_snippets) == 0:
+            return 0
+        
+        # Build new metadata and corpus mapping
+        metadata = {s.id: s for s in all_snippets}
+        corpus_idx_to_id = {i: s.id for i, s in enumerate(all_snippets)}
+        corpus = [s.to_document() for s in all_snippets]
+        
+        # Save combined embeddings first
+        np.save(embeddings_path, all_embeddings)
+        
+        # Save corpus to config.json (DSPy format)
+        import json
+        config_path = index_path / "config.json"
+        config = {
+            "k": 10,
+            "normalize": True,
+            "corpus": corpus,
+            "has_faiss_index": len(corpus) >= self.config.faiss_threshold if self.config.use_faiss else False,
+        }
+        config_path.write_text(json.dumps(config))
+        
+        # Load index from saved files (uses pre-computed embeddings)
+        index = Embeddings.from_saved(str(index_path), self.embedder)
+        
+        # Update manifest
+        from .ast_index import LANGUAGE_MAP
+        supported_extensions = set(LANGUAGE_MAP.keys())
+        
+        file_mtimes = {}
+        for f in repo_path.rglob("*"):
+            if f.is_file() and f.suffix in supported_extensions:
+                if not any(part.startswith('.') for part in f.parts):
+                    if not any(ignore in f.parts for ignore in 
+                               ['__pycache__', 'node_modules', '.venv', 'venv']):
+                        try:
+                            file_mtimes[str(f)] = f.stat().st_mtime
+                        except OSError:
+                            pass
+        
+        manifest = {
+            "repo_path": str(repo_path),
+            "files": file_mtimes,
+            "created": manifest.get("created", time.time()),
+            "updated": time.time(),
+            "snippet_count": len(all_snippets),
+        }
+        self._save_manifest(index_path, manifest)
+        self._save_metadata(index_path, metadata, corpus_idx_to_id)
+        
+        # Cache
+        self._indexes[cache_key] = (index, time.time())
+        self._metadata[cache_key] = metadata
+        self._corpus_idx_map[cache_key] = corpus_idx_to_id
+        
+        # Update project registry
+        from .project_registry import get_project_registry
+        registry = get_project_registry()
+        for project in registry.list():
+            if project.path == str(repo_path):
+                registry.update_stats(project.name, len(all_snippets), len(file_mtimes))
+                break
+        
+        logger.info(
+            "Incremental update complete: %d total snippets (kept %d, added %d)", 
+            len(all_snippets), len(kept_snippets), len(new_snippets)
+        )
+        
+        return len(all_snippets)
+    
+    def _extract_snippets_from_file(
+        self, 
+        file_path: Path, 
+        repo_path: Path
+    ) -> list[CodeSnippet]:
+        """Extract code snippets from a single file.
+        
+        Args:
+            file_path: Path to source file
+            repo_path: Root repository path (for relative paths)
+            
+        Returns:
+            List of CodeSnippet objects
+        """
+        from .ast_index import LANGUAGE_MAP, index_file
+        
+        snippets = []
+        
+        if file_path.suffix not in LANGUAGE_MAP:
+            return snippets
+        
+        language = LANGUAGE_MAP.get(file_path.suffix)
+        if not language:
+            return snippets
+        
+        try:
+            rel_path = str(file_path.relative_to(repo_path))
+            
+            # Read file content
+            content = file_path.read_text(encoding='utf-8')
+            lines = content.splitlines()
+            
+            # Index the file using AST
+            ast_index = index_file(str(file_path))
+            
+            for defn in ast_index.definitions:
+                # Extract text for the definition
+                start_line = defn.line - 1  # 0-indexed
+                end_line = defn.end_line
+                
+                if start_line < len(lines):
+                    text_lines = lines[start_line:min(end_line, len(lines))]
+                    text = '\n'.join(text_lines)
+                    
+                    # Limit text size
+                    if len(text) > 2000:
+                        text = text[:2000] + "\n... (truncated)"
+                    
+                    snippet = CodeSnippet(
+                        id=f"{rel_path}:{defn.line}:{defn.name}",
+                        file=rel_path,
+                        line=defn.line,
+                        end_line=defn.end_line,
+                        type=defn.kind,
+                        name=defn.name,
+                        text=text,
+                        language=language,
+                    )
+                    snippets.append(snippet)
+                    
+        except UnicodeDecodeError:
+            logger.debug("Skipping non-text file: %s", file_path)
+        except Exception as e:
+            logger.warning("Failed to extract from %s: %s", file_path, e)
+        
+        return snippets
     
     def _save_metadata(
         self, 
