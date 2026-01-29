@@ -6,17 +6,20 @@ with support for cross-project search and project metadata.
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import logging
+import os
 import shutil
 import tempfile
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Generator
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +73,38 @@ class RegistryConfig:
     cleanup_orphaned_days: int = 30
 
 
+@contextmanager
+def _file_lock(lock_path: Path, timeout: float = 10.0) -> Generator[None, None, None]:
+    """Cross-process file lock using flock.
+    
+    Args:
+        lock_path: Path to lock file
+        timeout: Max seconds to wait for lock
+        
+    Raises:
+        TimeoutError: If lock cannot be acquired within timeout
+    """
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    start = time.time()
+    lock_fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT)
+    
+    try:
+        while True:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.time() - start > timeout:
+                    raise TimeoutError(f"Could not acquire lock on {lock_path} within {timeout}s")
+                time.sleep(0.1)
+        
+        yield
+    finally:
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        os.close(lock_fd)
+
+
 class ProjectRegistry:
     """Manages registered projects and their indexes.
     
@@ -79,6 +114,7 @@ class ProjectRegistry:
     - Project tagging and aliasing
     - Orphaned index cleanup
     - Migration from legacy hash-based indexes
+    - Cross-process safe via file locking
     
     Example:
         ```python
@@ -122,37 +158,42 @@ class ProjectRegistry:
                 logger.warning("Failed to load project registry: %s", e)
     
     def _save(self) -> None:
-        """Save registry to disk atomically."""
-        with self._lock:
-            data = {
-                "default_project": self._default_project,
-                "projects": {
-                    name: proj.to_dict() 
-                    for name, proj in self._projects.items()
-                },
-                "updated_at": datetime.now().isoformat(),
-            }
-            
-            # Atomic write: write to temp file then rename
-            registry_dir = self.config.registry_file.parent
-            try:
-                with tempfile.NamedTemporaryFile(
-                    mode='w',
-                    dir=registry_dir,
-                    suffix='.tmp',
-                    delete=False,
-                    encoding='utf-8'
-                ) as f:
-                    json.dump(data, f, indent=2)
-                    temp_path = Path(f.name)
+        """Save registry to disk atomically with cross-process locking."""
+        lock_file = self.config.registry_file.parent / ".registry.lock"
+        
+        with self._lock:  # Thread lock
+            with _file_lock(lock_file):  # Process lock
+                data = {
+                    "default_project": self._default_project,
+                    "projects": {
+                        name: proj.to_dict() 
+                        for name, proj in self._projects.items()
+                    },
+                    "updated_at": datetime.now().isoformat(),
+                }
                 
-                # Atomic rename (on POSIX systems)
-                temp_path.replace(self.config.registry_file)
-            except OSError as e:
-                logger.error("Failed to save registry: %s", e)
-                # Clean up temp file if it exists
-                if 'temp_path' in locals() and temp_path.exists():
-                    temp_path.unlink()
+                # Atomic write: write to temp file then rename
+                registry_dir = self.config.registry_file.parent
+                try:
+                    with tempfile.NamedTemporaryFile(
+                        mode='w',
+                        dir=registry_dir,
+                        suffix='.tmp',
+                        delete=False,
+                        encoding='utf-8'
+                    ) as f:
+                        json.dump(data, f, indent=2)
+                        f.flush()
+                        os.fsync(f.fileno())
+                        temp_path = Path(f.name)
+                    
+                    # Atomic rename (on POSIX systems)
+                    temp_path.replace(self.config.registry_file)
+                except OSError as e:
+                    logger.error("Failed to save registry: %s", e)
+                    # Clean up temp file if it exists
+                    if 'temp_path' in locals() and temp_path.exists():
+                        temp_path.unlink()
     
     def add(
         self,

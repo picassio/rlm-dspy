@@ -154,9 +154,10 @@ class TestDaemonHelpers:
         config = DaemonConfig(pid_file=pid_file)
         monkeypatch.setattr("rlm_dspy.core.daemon.DaemonConfig.from_user_config", lambda: config)
         
-        # Should return None and clean up stale file
+        # Should return None (stale file is NOT deleted to avoid race with daemon lock)
         assert get_daemon_pid() is None
-        assert not pid_file.exists()
+        # File still exists - cleanup happens during daemon startup via file locking
+        assert pid_file.exists()
 
 
 class TestIndexWorker:

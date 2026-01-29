@@ -394,15 +394,16 @@ class IndexDaemon:
                 return False
             
             watch = self._watches.pop(project_name)
-        
-        self._observer.unschedule(watch)
-        
-        # Update project auto_watch flag
-        registry = get_project_registry()
-        project = registry.get(project_name)
-        if project:
-            project.auto_watch = False
-            registry._save()
+            
+            # Unschedule while holding lock to prevent race
+            self._observer.unschedule(watch)
+            
+            # Update project auto_watch flag (registry has its own lock)
+            registry = get_project_registry()
+            project = registry.get(project_name)
+            if project:
+                project.auto_watch = False
+                registry._save()
         
         logger.info("Stopped watching project: %s", project_name)
         return True
@@ -651,8 +652,10 @@ def get_daemon_pid() -> int | None:
             os.kill(pid, 0)
             return pid
         except OSError:
-            # Process not running, remove stale PID file
-            config.pid_file.unlink()
+            # Process not running - PID file is stale
+            # Don't unlink here to avoid race with daemon's file lock
+            # The daemon startup will handle cleanup via file locking
+            logger.debug("Stale PID file found (process %d not running)", pid)
             return None
             
     except (ValueError, IOError):
