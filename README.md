@@ -692,6 +692,107 @@ result = rlm.query(
 - For semantic analysis: Uses llm_query() on relevant sections
 - The LLM decides the best approach based on the query
 
+### Semantic Search
+
+Find code by conceptual similarity using embeddings:
+
+```bash
+# CLI commands
+rlm-dspy index build src/                    # Build vector index
+rlm-dspy index status src/                   # Check index status
+rlm-dspy index search "auth logic" -p src/   # Search semantically
+rlm-dspy index clear                         # Clear all indexes
+```
+
+```python
+from rlm_dspy import semantic_search
+from rlm_dspy.core import CodeIndex, get_index_manager
+
+# Quick search (auto-builds index if needed)
+results = semantic_search("authentication logic", path="src/", k=5)
+for r in results:
+    print(f"{r['file']}:{r['line']} - {r['name']}")
+
+# Full control
+index = CodeIndex()
+index.build("src/")                          # Build index
+results = index.search("src/", "error handling", k=10)
+```
+
+**Features:**
+- **Incremental updates**: Only re-indexes changed files
+- **Auto-skip**: Ignores .venv, node_modules, __pycache__
+- **Multi-language**: Python, JS, TS, Go, Rust, Java, C/C++, Ruby
+- **Fast**: FAISS for large codebases (>5000 snippets)
+- **Cached**: TTL-based in-memory + persistent disk storage
+
+**Configuration** (`~/.rlm/config.yaml`):
+```yaml
+# Embedding settings
+embedding_model: openai/text-embedding-3-small  # or local
+local_embedding_model: sentence-transformers/all-MiniLM-L6-v2
+embedding_batch_size: 100
+
+# Index settings
+index_dir: ~/.rlm/indexes
+use_faiss: true
+faiss_threshold: 5000
+auto_update_index: true
+```
+
+### Cited Analysis
+
+Get analysis with precise file:line source references:
+
+```bash
+# Use cited signatures for grounded analysis
+rlm-dspy ask "audit security" src/ -S cited-security -j
+rlm-dspy ask "find bugs" src/ -S cited-bugs -j
+rlm-dspy ask "review code" src/ -S cited-review -j
+```
+
+```python
+from rlm_dspy import RLM, CitedSecurityAudit
+
+# Use cited signature
+rlm = RLM(signature=CitedSecurityAudit)
+result = rlm.query("audit", context)
+
+# Access citations
+for vuln in result.vulnerabilities:
+    print(vuln)  # "[CRITICAL] SQL injection - db.py:45"
+for loc in result.locations:
+    print(loc)   # "db.py:45"
+```
+
+**Cited Signatures:**
+
+| Signature | Alias | Output Fields |
+|-----------|-------|---------------|
+| `CitedAnalysis` | `cited` | summary, findings, locations |
+| `CitedSecurityAudit` | `cited-security` | vulnerabilities, risk_level, locations, remediation |
+| `CitedBugFinder` | `cited-bugs` | bugs, severity, locations, fixes |
+| `CitedCodeReview` | `cited-review` | issues, quality_score, locations, improvements |
+
+**Citation Utilities:**
+```python
+from rlm_dspy import (
+    code_to_document,       # Add line numbers for citation
+    files_to_documents,     # Batch convert files
+    citations_to_locations, # Extract file:line from text
+    parse_findings_from_text, # Auto-extract findings
+)
+
+# Convert code to document with line numbers
+doc = code_to_document("src/api.py")
+# "   1 | def hello():\n   2 |     pass"
+
+# Parse findings from analysis text
+findings = parse_findings_from_text(analysis_text, documents)
+for f in findings:
+    print(f.format())  # "[CRITICAL:security] SQL injection → db.py:45"
+```
+
 ## Documentation
 
 - **[Provider Guide](docs/PROVIDERS.md)** - Supported LLM providers

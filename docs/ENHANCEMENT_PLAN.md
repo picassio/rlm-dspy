@@ -539,33 +539,33 @@ rlm-dspy ask "query" src/ --embedding-model openai/text-embedding-3-large
 
 ## 4. Implementation Phases
 
-### Phase 1: Configuration & Embeddings (2-3 days)
-- [ ] Update user_config.py with new settings
-- [ ] Update config template with all options
-- [ ] Create embeddings.py with EmbeddingConfig
-- [ ] Create get_embedder() function
-- [ ] Add tests for embedding config
+### Phase 1: Configuration & Embeddings ✅ COMPLETE
+- [x] Update user_config.py with new settings
+- [x] Update config template with all options
+- [x] Create embeddings.py with EmbeddingConfig
+- [x] Create get_embedder() function
+- [x] Add tests for embedding config (15 tests)
 
-### Phase 2: Vector Index (3-4 days)
-- [ ] Create vector_index.py with CodeIndex class
-- [ ] Implement incremental updates
-- [ ] Add manifest tracking for file changes
-- [ ] Add semantic_search tool
-- [ ] Add index CLI commands
-- [ ] Add tests for indexing
+### Phase 2: Vector Index ✅ COMPLETE
+- [x] Create vector_index.py with CodeIndex class
+- [x] Implement incremental updates
+- [x] Add manifest tracking for file changes
+- [x] Add semantic_search tool
+- [x] Add index CLI commands (build, status, clear, search)
+- [x] Add tests for indexing (13 tests)
 
-### Phase 3: Citations (2-3 days)
-- [ ] Add CitedAnalysis signature
-- [ ] Implement citations_to_locations()
-- [ ] Add Document packaging for code files
-- [ ] Add --signature cited support
-- [ ] Add tests for citations
+### Phase 3: Citations ✅ COMPLETE
+- [x] Add CitedAnalysis signature
+- [x] Implement citations_to_locations()
+- [x] Add Document packaging for code files
+- [x] Add --signature cited support
+- [x] Add tests for citations (28 tests)
 
-### Phase 4: Integration (2 days)
-- [ ] Integrate semantic search into default tools
-- [ ] Add auto-indexing on first use
-- [ ] Update documentation
-- [ ] End-to-end testing
+### Phase 4: Integration ✅ COMPLETE
+- [x] Integrate semantic search into default tools
+- [x] Add auto-indexing on first use
+- [x] Update documentation (README.md)
+- [x] End-to-end testing
 
 ---
 
