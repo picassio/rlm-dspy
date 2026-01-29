@@ -123,6 +123,7 @@ class CodeIndex:
         self._embedder = None
         self._indexes: dict[str, tuple["Embeddings", float]] = {}  # path -> (index, timestamp)
         self._metadata: dict[str, dict[str, CodeSnippet]] = {}  # path -> {id -> snippet}
+        self._corpus_idx_map: dict[str, dict[int, str]] = {}  # path -> {corpus_idx -> snippet_id}
     
     @property
     def embedder(self):
@@ -315,10 +316,11 @@ class CodeIndex:
                     # Load existing index
                     try:
                         index = Embeddings.from_saved(str(index_path), self.embedder)
-                        metadata = self._load_metadata(index_path)
+                        metadata, corpus_idx_to_id = self._load_metadata(index_path)
                         
                         self._indexes[cache_key] = (index, time.time())
                         self._metadata[cache_key] = metadata
+                        self._corpus_idx_map[cache_key] = corpus_idx_to_id
                         
                         logger.info("Loaded existing index for %s (%d snippets)", 
                                    repo_path, len(metadata))
@@ -337,8 +339,11 @@ class CodeIndex:
         logger.info("Found %d code snippets", len(snippets))
         
         # Create corpus for embedding
+        # Keep order so we can map idx -> snippet
         corpus = [s.to_document() for s in snippets]
         metadata = {s.id: s for s in snippets}
+        # Map corpus index to snippet ID for fast lookup during search
+        corpus_idx_to_id = {i: s.id for i, s in enumerate(snippets)}
         
         # Determine if we should use FAISS
         brute_force_threshold = (
@@ -384,20 +389,26 @@ class CodeIndex:
         }
         self._save_manifest(index_path, manifest)
         
-        # Save metadata
-        self._save_metadata(index_path, metadata)
+        # Save metadata and corpus index mapping
+        self._save_metadata(index_path, metadata, corpus_idx_to_id)
         
         # Cache
         self._indexes[cache_key] = (index, time.time())
         self._metadata[cache_key] = metadata
+        self._corpus_idx_map[cache_key] = corpus_idx_to_id
         
         logger.info("Index built: %d snippets from %d files", 
                    len(snippets), len(file_mtimes))
         
         return len(snippets)
     
-    def _save_metadata(self, index_path: Path, metadata: dict[str, CodeSnippet]) -> None:
-        """Save snippet metadata."""
+    def _save_metadata(
+        self, 
+        index_path: Path, 
+        metadata: dict[str, CodeSnippet],
+        corpus_idx_to_id: dict[int, str] | None = None,
+    ) -> None:
+        """Save snippet metadata and corpus index mapping."""
         data = {
             id_: {
                 "id": s.id,
@@ -412,18 +423,38 @@ class CodeIndex:
             for id_, s in metadata.items()
         }
         (index_path / "metadata.json").write_text(json.dumps(data, indent=2))
+        
+        # Save corpus index mapping for fast search lookup
+        if corpus_idx_to_id is not None:
+            # Convert int keys to strings for JSON
+            idx_map = {str(k): v for k, v in corpus_idx_to_id.items()}
+            (index_path / "corpus_idx_map.json").write_text(json.dumps(idx_map))
     
-    def _load_metadata(self, index_path: Path) -> dict[str, CodeSnippet]:
-        """Load snippet metadata."""
+    def _load_metadata(self, index_path: Path) -> tuple[dict[str, CodeSnippet], dict[int, str]]:
+        """Load snippet metadata and corpus index mapping.
+        
+        Returns:
+            (metadata dict, corpus_idx_to_id dict)
+        """
         metadata_path = index_path / "metadata.json"
         if not metadata_path.exists():
-            return {}
+            return {}, {}
         
         data = json.loads(metadata_path.read_text())
-        return {
+        metadata = {
             id_: CodeSnippet(**info)
             for id_, info in data.items()
         }
+        
+        # Load corpus index mapping
+        idx_map_path = index_path / "corpus_idx_map.json"
+        corpus_idx_to_id = {}
+        if idx_map_path.exists():
+            idx_data = json.loads(idx_map_path.read_text())
+            # Convert string keys back to int
+            corpus_idx_to_id = {int(k): v for k, v in idx_data.items()}
+        
+        return metadata, corpus_idx_to_id
     
     def search(
         self,
@@ -453,21 +484,46 @@ class CodeIndex:
         
         index, _ = self._indexes[cache_key]
         metadata = self._metadata.get(cache_key, {})
+        corpus_idx_map = self._corpus_idx_map.get(cache_key, {})
         
         # Search
         result = index(query)
         
         results = []
         for passage, idx in zip(result.passages, result.indices):
-            # Find the snippet by matching passage
             snippet = None
-            for s in metadata.values():
-                if s.to_document() == passage:
-                    snippet = s
-                    break
+            
+            # Fast lookup using corpus index mapping
+            if idx in corpus_idx_map:
+                snippet_id = corpus_idx_map[idx]
+                snippet = metadata.get(snippet_id)
+            
+            # Fallback: try to parse from passage header
+            if snippet is None:
+                # Parse the document format: "# type: name\n# File: path:line\n\ntext"
+                import re
+                header_match = re.match(
+                    r'# (\w+): (.+)\n# File: (.+):(\d+)',
+                    passage
+                )
+                if header_match:
+                    type_, name, file_, line = header_match.groups()
+                    # Extract text after headers
+                    text_start = passage.find('\n\n')
+                    text = passage[text_start+2:] if text_start > 0 else passage
+                    
+                    snippet = CodeSnippet(
+                        id=f"{file_}:{name}:{line}",
+                        text=text,
+                        file=file_,
+                        line=int(line),
+                        end_line=int(line) + text.count('\n'),
+                        type=type_,
+                        name=name,
+                    )
             
             if snippet is None:
-                # Fallback: create from passage
+                # Last resort fallback
                 snippet = CodeSnippet(
                     id=f"unknown:{idx}",
                     text=passage,
@@ -529,6 +585,7 @@ class CodeIndex:
             # Remove from memory cache
             self._indexes.pop(cache_key, None)
             self._metadata.pop(cache_key, None)
+            self._corpus_idx_map.pop(cache_key, None)
             
             # Remove from disk
             if index_path.exists():
@@ -541,6 +598,7 @@ class CodeIndex:
             count = len(self._indexes)
             self._indexes.clear()
             self._metadata.clear()
+            self._corpus_idx_map.clear()
             
             # Clear disk indexes
             if self.config.index_dir.exists():
