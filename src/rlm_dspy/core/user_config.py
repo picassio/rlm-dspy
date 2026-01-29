@@ -24,31 +24,31 @@ DEFAULT_CONFIG = {
     # Model settings
     "model": "openai/gpt-4o-mini",
     "sub_model": None,  # Defaults to model if not set
-    
+
     # Execution limits
     "max_iterations": 20,
     "max_llm_calls": 50,
     "max_output_chars": 100_000,
-    
+
     # Parallelism
     "max_workers": 8,
-    
+
     # Budget/safety limits
     "max_budget": 1.0,
     "max_timeout": 300,
-    
+
     # Embedding settings (for semantic search)
     "embedding_model": "openai/text-embedding-3-small",
     "local_embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
     "embedding_batch_size": 100,
-    
+
     # Vector index settings
     "index_dir": "~/.rlm/indexes",
     "use_faiss": True,
     "faiss_threshold": 5000,
     "auto_update_index": True,
     "index_cache_ttl": 3600,
-    
+
     # API key location
     "env_file": None,
 }
@@ -174,7 +174,7 @@ def load_config() -> dict[str, Any]:
 
 def save_config(config: dict[str, Any], use_template: bool = True) -> None:
     """Save configuration to file.
-    
+
     Args:
         config: Configuration dictionary
         use_template: If True, saves with full template and comments
@@ -185,7 +185,7 @@ def save_config(config: dict[str, Any], use_template: bool = True) -> None:
         # Merge with defaults to ensure all fields are present
         full_config = DEFAULT_CONFIG.copy()
         full_config.update(config)
-        
+
         # Format values for YAML
         def fmt(val):
             if val is None:
@@ -196,7 +196,7 @@ def save_config(config: dict[str, Any], use_template: bool = True) -> None:
                 return val
             else:
                 return str(val)
-        
+
         content = CONFIG_TEMPLATE.format(
             model=fmt(full_config.get("model")),
             sub_model=fmt(full_config.get("sub_model")),
@@ -219,7 +219,7 @@ def save_config(config: dict[str, Any], use_template: bool = True) -> None:
             max_timeout=fmt(full_config.get("max_timeout")),
             env_file=fmt(full_config.get("env_file")),
         )
-        
+
         _atomic_write(CONFIG_FILE, content)
     else:
         # Simple mode: only save non-default values
@@ -238,7 +238,7 @@ def _atomic_write(path: Path, content: str) -> None:
     """Write content to file atomically using temp file + rename."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     temp_path = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -250,7 +250,7 @@ def _atomic_write(path: Path, content: str) -> None:
         ) as f:
             f.write(content)
             temp_path = Path(f.name)
-        
+
         temp_path.replace(path)
     except Exception:
         if temp_path and temp_path.exists():

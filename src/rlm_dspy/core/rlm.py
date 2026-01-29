@@ -54,17 +54,17 @@ def _get_secret_pattern(secrets: list[str]) -> re.Pattern | None:
     """Get or create cached regex pattern for secrets."""
     if not secrets:
         return None
-    
+
     # Create hashable key
     cache_key = frozenset(secrets)
-    
+
     if cache_key not in _secret_pattern_cache:
         # Sort by length descending to match longer secrets first
         sorted_secrets = sorted(secrets, key=len, reverse=True)
         _secret_pattern_cache[cache_key] = re.compile(
             "|".join(re.escape(s) for s in sorted_secrets)
         )
-    
+
     return _secret_pattern_cache[cache_key]
 
 
@@ -82,41 +82,41 @@ def _get_env_secrets() -> list[str]:
 
 def _sanitize_secrets(text: str, extra_secrets: list[str] | None = None) -> str:
     """Remove any leaked secrets from output text.
-    
+
     Scans for common secret patterns and replaces them with masks.
     This prevents API keys from appearing in logs, trajectory, or answers.
-    
+
     Uses single-pass regex for O(N) performance instead of O(S*N).
-    
+
     Args:
         text: Text to sanitize
         extra_secrets: Additional secret values to mask (e.g., config.api_key)
     """
     if not text:
         return text
-    
+
     result = text
-    
+
     # Collect all literal secrets to mask
     secrets_to_mask = []
-    
+
     # Add extra secrets (min length 4 to avoid false positives)
     if extra_secrets:
         secrets_to_mask.extend(s for s in extra_secrets if s and len(s) >= 4)
-    
+
     # Add environment secrets (cached)
     secrets_to_mask.extend(_get_env_secrets())
-    
+
     # Single-pass replacement using cached regex pattern
     if secrets_to_mask:
         pattern = _get_secret_pattern(secrets_to_mask)
         if pattern:
             result = pattern.sub("[REDACTED]", result)
-    
+
     # Apply pre-compiled regex patterns for secret formats
     for pattern, replacement in _SECRET_PATTERNS:
         result = pattern.sub(replacement, result)
-    
+
     return result
 
 
@@ -124,7 +124,7 @@ def _sanitize_trajectory(trajectory: list, extra_secrets: list[str] | None = Non
     """Sanitize all strings in a trajectory list."""
     if not trajectory:
         return trajectory
-    
+
     sanitized = []
     for item in trajectory:
         if isinstance(item, str):
@@ -144,25 +144,25 @@ T = TypeVar("T", int, float, bool, str)
 
 def _env_get(key: str, default: T, cast: type[T] | None = None) -> T:
     """Get environment variable with type casting and default.
-    
+
     Args:
         key: Environment variable name
         default: Default value (also determines type if cast not specified)
         cast: Type to cast to (int, float, bool, str). If None, inferred from default.
-        
+
     Returns:
         The environment variable value cast to the appropriate type, or default.
     """
     val = os.environ.get(key)
     if val is None:
         return default
-    
+
     target_type = cast or type(default)
-    
+
     # Special handling for bool
     if target_type is bool:
         return val.lower() in ("true", "1", "yes", "on")  # type: ignore[return-value]
-    
+
     try:
         return target_type(val)  # type: ignore[return-value]
     except ValueError:
@@ -266,7 +266,7 @@ class RLMConfig:
     )
     sub_model: str = field(
         default_factory=lambda: _env(
-            "RLM_SUB_MODEL", 
+            "RLM_SUB_MODEL",
             _get_user_config_default(
                 "sub_model",
                 _env("RLM_MODEL", _get_user_config_default("model", "openai/gpt-4o-mini"))
@@ -308,7 +308,7 @@ class RLMConfig:
             "RLM_MAX_TIMEOUT", _get_user_config_default("max_timeout", 300.0)
         )
     )
-    
+
     # Parallelism settings
     max_workers: int = field(
         default_factory=lambda: _env_get(
@@ -321,16 +321,16 @@ class RLMConfig:
         # Validate bounds to prevent resource exhaustion
         if self.max_iterations < 1 or self.max_iterations > 100:
             raise ValueError(f"max_iterations must be between 1 and 100, got {self.max_iterations}")
-        
+
         if self.max_llm_calls < 1 or self.max_llm_calls > 500:
             raise ValueError(f"max_llm_calls must be between 1 and 500, got {self.max_llm_calls}")
-        
+
         if self.max_timeout < 0 or self.max_timeout > 3600:
             raise ValueError(f"max_timeout must be between 0 and 3600, got {self.max_timeout}")
-        
+
         if self.max_budget < 0 or self.max_budget > 100:
             raise ValueError(f"max_budget must be between 0 and 100, got {self.max_budget}")
-        
+
         if self.max_workers < 1 or self.max_workers > 32:
             raise ValueError(f"max_workers must be between 1 and 32, got {self.max_workers}")
 
@@ -349,7 +349,7 @@ class RLMConfig:
 @dataclass
 class RLMResult:
     """Result from RLM execution.
-    
+
     For standard signatures (context, query -> answer), access result.answer.
     For custom signatures with structured output, access fields via:
     - result.outputs dict: result.outputs["bugs"], result.outputs["score"]
@@ -374,13 +374,13 @@ class RLMResult:
 
     # Token stats (for compatibility)
     token_stats: Any = None
-    
+
     # Structured output fields (for custom signatures)
     outputs: dict[str, Any] = field(default_factory=dict)
-    
+
     def __getattr__(self, name: str) -> Any:
         """Allow accessing output fields as attributes.
-        
+
         Example:
             result.bugs  # same as result.outputs["bugs"]
         """
@@ -402,47 +402,47 @@ class RLMResult:
 
 class ProgressCallback:
     """Callback for RLM progress updates.
-    
+
     Subclass this to receive progress updates during RLM execution.
-    
+
     Example:
         ```python
         class MyCallback(ProgressCallback):
             def on_iteration(self, iteration, max_iterations):
                 print(f"Iteration {iteration}/{max_iterations}")
-            
+
             def on_lm_call(self, call_type, inputs):
                 print(f"LLM call: {call_type}")
-        
+
         rlm = RLM(config=config, progress_callback=MyCallback())
         ```
     """
-    
+
     def on_start(self, query: str, context_tokens: int) -> None:
         """Called when RLM execution starts."""
         pass
-    
+
     def on_iteration(self, iteration: int, max_iterations: int) -> None:
         """Called at the start of each REPL iteration."""
         pass
-    
+
     def on_lm_call(self, call_type: str, inputs: dict | None = None) -> None:
         """Called when an LLM call is made.
-        
+
         Args:
             call_type: Type of call ("main", "sub", "tool")
             inputs: Optional input data
         """
         pass
-    
+
     def on_tool_use(self, tool_name: str, args: dict | None = None) -> None:
         """Called when a tool is invoked."""
         pass
-    
+
     def on_complete(self, result: "RLMResult") -> None:
         """Called when RLM execution completes."""
         pass
-    
+
     def on_error(self, error: Exception) -> None:
         """Called when an error occurs."""
         pass
@@ -450,18 +450,18 @@ class ProgressCallback:
 
 class DspyProgressCallback:
     """DSPy-compatible callback that wraps our ProgressCallback.
-    
+
     This bridges our callback interface with dspy's BaseCallback.
     """
-    
+
     def __init__(self, progress_callback: ProgressCallback):
         self.progress = progress_callback
         self._call_count = 0
-    
+
     def on_lm_start(self, call_id: str, instance: Any, inputs: dict[str, Any]):
         self._call_count += 1
         self.progress.on_lm_call("main", inputs)
-    
+
     def on_lm_end(self, call_id: str, outputs: dict[str, Any] | None, exception: Exception | None = None):
         pass
 
@@ -532,7 +532,7 @@ class RLM:
                       - False: No extra tools
             progress_callback: Optional callback for progress updates.
                       Receives on_start, on_iteration, on_lm_call, on_complete events.
-                      
+
         Available tools when enabled:
             - ripgrep(pattern, path, flags): Fast regex search
             - grep_context(pattern, path, context_lines): Search with context
@@ -544,18 +544,18 @@ class RLM:
             - find_imports(path): Find all imports
             - find_calls(path, function_name): Find function call sites
             - shell(command, timeout): Run shell commands (disabled by default)
-                      
+
         Example with structured output:
             ```python
             from rlm_dspy.signatures import BugFinder
-            
+
             rlm = RLM(config=config, signature=BugFinder)
             result = rlm.query("Find all bugs", context)
-            
+
             print(result.bugs)          # list[str]
             print(result.has_critical)  # bool
             ```
-            
+
         Example with tools:
             ```python
             rlm = RLM(config=config, use_tools=True)
@@ -565,18 +565,18 @@ class RLM:
             )
             # LLM can now use ripgrep, find_calls, etc. to explore the codebase
             ```
-            
+
         Example with custom interpreter:
             ```python
             from e2b_code_interpreter import CodeInterpreter
-            
+
             rlm = RLM(config=config, interpreter=CodeInterpreter())
             ```
         """
         self.config = config or RLMConfig()
         self._interpreter = interpreter
         self._progress_callback = progress_callback
-        
+
         # Initialize tools
         self._tools = tools.copy() if tools else {}
         if use_tools:
@@ -586,13 +586,13 @@ class RLM:
             for name, func in builtin.items():
                 if name not in self._tools:
                     self._tools[name] = func
-        
+
         # Validate all tools
         self._validate_tools(self._tools)
-        
+
         # Track if we have a custom signature with structured output
         self._is_structured = not isinstance(signature, str)
-        
+
         # Wrap signature with tool-first instructions if tools are enabled
         self._signature = self._wrap_signature_with_tool_instructions(signature, use_tools)
 
@@ -616,19 +616,19 @@ class RLM:
         self._start_time: float | None = None
 
     def _wrap_signature_with_tool_instructions(
-        self, 
-        signature: str | type, 
+        self,
+        signature: str | type,
         use_tools: bool | str
     ) -> str | type:
         """Wrap signature with instructions to prioritize tool usage.
-        
+
         When tools are enabled, this adds instructions telling the LLM to
         use the provided tools (index_code, ripgrep, etc.) FIRST before
         writing custom code. This improves accuracy for code analysis tasks.
         """
         if not use_tools or not self._tools:
             return signature
-        
+
         tool_instructions = """IMPORTANT: You have access to powerful code analysis tools. USE THEM FIRST before writing custom code:
 
 STRUCTURAL SEARCH (100% accurate, use for exact matches):
@@ -651,20 +651,20 @@ Use structural tools for exact lookups, semantic search for exploratory queries.
             # Convert string signature to class with tool instructions
             # Parse "context, query -> answer" format
             base_sig = dspy.Signature(signature)
-            
+
             class ToolFirstSignature(base_sig):
                 pass
-            
+
             ToolFirstSignature.__doc__ = tool_instructions
             return ToolFirstSignature
         else:
             # For class-based signatures, prepend to the docstring
             original_doc = signature.__doc__ or ""
-            
+
             # Create a new signature class with updated docstring
             class WrappedSignature(signature):
                 pass
-            
+
             WrappedSignature.__doc__ = tool_instructions + original_doc
             WrappedSignature.__name__ = signature.__name__
             WrappedSignature.__qualname__ = signature.__qualname__
@@ -672,7 +672,7 @@ Use structural tools for exact lookups, semantic search for exploratory queries.
 
     def _setup_dspy(self) -> None:
         """Configure DSPy with the primary model (thread-safe).
-        
+
         Note: We do NOT call dspy.configure() here to avoid global state pollution.
         Instead, we use dspy.settings.context(lm=self._lm) in query() for thread-safety.
         """
@@ -685,7 +685,7 @@ Use structural tools for exact lookups, semantic search for exploratory queries.
 
         # Store LM instance for thread-local configuration in query()
         self._lm = dspy.LM(**lm_kwargs)
-        
+
         # Configure parallelism settings (affects batch operations)
         dspy.settings.configure(
             async_max_workers=self.config.max_workers,
@@ -718,11 +718,11 @@ Use structural tools for exact lookups, semantic search for exploratory queries.
             "tools": self._tools,
             "sub_lm": self._create_sub_lm(),
         }
-        
+
         # Add custom interpreter if provided
         if self._interpreter is not None:
             kwargs["interpreter"] = self._interpreter
-        
+
         return dspy.RLM(**kwargs)
 
     def load_context(
@@ -745,18 +745,18 @@ Use structural tools for exact lookups, semantic search for exploratory queries.
             Combined context string with file markers
         """
         from .fileutils import (
-            load_context_from_paths, 
+            load_context_from_paths,
             load_context_from_paths_cached,
             smart_truncate_context,
         )
-        
+
         loader = load_context_from_paths_cached if use_cache else load_context_from_paths
         context = loader(
             paths=[Path(p) for p in paths],
             gitignore=gitignore,
             add_line_numbers=True,
         )
-        
+
         # Optionally truncate to fit token limit
         if max_tokens is not None:
             context, was_truncated = smart_truncate_context(context, max_tokens)
@@ -764,7 +764,7 @@ Use structural tools for exact lookups, semantic search for exploratory queries.
                 _logger.warning(
                     "Context truncated to fit %d token limit", max_tokens
                 )
-        
+
         return context
 
     def _build_result(self, prediction: Any, elapsed: float) -> RLMResult:
@@ -772,22 +772,22 @@ Use structural tools for exact lookups, semantic search for exploratory queries.
         raw_trajectory = getattr(prediction, "trajectory", [])
         raw_reasoning = getattr(prediction, "final_reasoning", "")
         extra_secrets = [self.config.api_key] if self.config.api_key else None
-        
+
         # Extract structured outputs if using custom signature
         outputs: dict[str, Any] = {}
         answer = ""
-        
+
         if self._is_structured:
             # Get all output fields from the signature class
             sig = self._signature
             output_field_names = []
-            
+
             # dspy.Signature classes have output_fields as a dict property
             if hasattr(sig, "output_fields"):
                 fields = sig.output_fields
                 if isinstance(fields, dict):
                     output_field_names = list(fields.keys())
-            
+
             # Extract values from prediction
             for field_name in output_field_names:
                 value = getattr(prediction, field_name, None)
@@ -801,7 +801,7 @@ Use structural tools for exact lookups, semantic search for exploratory queries.
                             for v in value
                         ]
                     outputs[field_name] = value
-            
+
             # Use first output field as "answer" for compatibility
             if outputs:
                 first_key = next(iter(outputs))
@@ -815,7 +815,7 @@ Use structural tools for exact lookups, semantic search for exploratory queries.
         else:
             # Standard signature: just get answer
             answer = _sanitize_secrets(getattr(prediction, "answer", ""), extra_secrets)
-        
+
         return RLMResult(
             answer=answer,
             success=True,
@@ -844,26 +844,26 @@ Use structural tools for exact lookups, semantic search for exploratory queries.
         Returns:
             RLMResult with answer, trajectory, and metadata.
             For custom signatures, structured outputs available via result.outputs dict.
-            
+
         Raises:
             ValueError: If query or context is empty/None
         """
         import concurrent.futures
         from .fileutils import estimate_tokens
-        
+
         # Validate inputs
         if not query or not query.strip():
             raise ValueError("Query cannot be empty")
         if not context or not context.strip():
             raise ValueError("Context cannot be empty")
-        
+
         # Rebuild RLM if tools were added (lazy rebuild)
         if self._rlm_dirty:
             self._rlm = self._create_rlm()
             self._rlm_dirty = False
 
         self._start_time = time.time()
-        
+
         # Notify callback of start
         if self._progress_callback:
             context_tokens = estimate_tokens(context)
@@ -893,11 +893,11 @@ Use structural tools for exact lookups, semantic search for exploratory queries.
 
             # Build result from prediction
             result = self._build_result(prediction, elapsed)
-            
+
             # Notify callback of completion
             if self._progress_callback:
                 self._progress_callback.on_complete(result)
-            
+
             return result
 
         except TimeoutExceededError:
@@ -970,7 +970,7 @@ Use structural tools for exact lookups, semantic search for exploratory queries.
 
             rlm.add_tool("search_web", search_web)
             ```
-        
+
         Raises:
             ValueError: If name is not a valid Python identifier
             TypeError: If func is not callable
@@ -979,13 +979,13 @@ Use structural tools for exact lookups, semantic search for exploratory queries.
         self._tools[name] = func
         # Mark RLM as needing rebuild (lazy - only rebuild when query() is called)
         self._rlm_dirty = True
-    
+
     def _validate_tools(self, tools: dict[str, Callable]) -> None:
         """Validate tool names and types.
-        
+
         Args:
             tools: Dict of tool name -> function
-            
+
         Raises:
             ValueError: If name is not a valid Python identifier or conflicts with builtins
             TypeError: If tool is not callable
@@ -997,16 +997,16 @@ Use structural tools for exact lookups, semantic search for exploratory queries.
             'str', 'int', 'float', 'bool', 'list', 'dict', 'set', 'tuple',
             'SUBMIT', 'FINAL',  # RLM special functions
         }
-        
+
         for name, func in tools.items():
             # Check valid identifier
             if not name.isidentifier():
                 raise ValueError(f"Invalid tool name '{name}': must be a valid Python identifier")
-            
+
             # Check not reserved
             if name in RESERVED_NAMES:
                 raise ValueError(f"Tool name '{name}' conflicts with built-in function")
-            
+
             # Check callable
             if not callable(func):
                 raise TypeError(f"Tool '{name}' must be callable, got {type(func).__name__}")
@@ -1091,7 +1091,7 @@ Use structural tools for exact lookups, semantic search for exploratory queries.
         # Convert to RLMResult list
         # Note: batch() returns results in order, with None for failed ones
         results: list[RLMResult] = []
-        
+
         # Create a map of failed example indices
         failed_indices = set()
         failed_map: dict[int, Exception] = {}
@@ -1121,12 +1121,12 @@ Use structural tools for exact lookups, semantic search for exploratory queries.
                 if result_idx < len(raw_results):
                     pred = raw_results[result_idx]
                     result_idx += 1
-                    
+
                     # Sanitize output
                     extra_secrets = [self.config.api_key] if self.config.api_key else None
                     raw_trajectory = getattr(pred, "trajectory", [])
                     raw_reasoning = getattr(pred, "final_reasoning", "")
-                    
+
                     results.append(RLMResult(
                         answer=_sanitize_secrets(pred.answer, extra_secrets),
                         success=True,

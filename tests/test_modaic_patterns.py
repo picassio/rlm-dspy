@@ -217,7 +217,7 @@ class TestFileCollection:
     def test_skip_dirs_contains_common_patterns(self):
         """Test SKIP_DIRS contains common ignore patterns."""
         from rlm_dspy.core.fileutils import SKIP_DIRS
-        
+
         assert ".git" in SKIP_DIRS
         assert "__pycache__" in SKIP_DIRS
         assert "node_modules" in SKIP_DIRS
@@ -226,11 +226,11 @@ class TestFileCollection:
     def test_load_gitignore_patterns(self, tmp_path):
         """Test loading gitignore patterns."""
         from rlm_dspy.core.fileutils import load_gitignore_patterns
-        
+
         # Create .gitignore
         gitignore = tmp_path / ".gitignore"
         gitignore.write_text("*.pyc\n__pycache__/\n")
-        
+
         patterns = load_gitignore_patterns([tmp_path])
         assert "*.pyc" in patterns
         assert "__pycache__/" in patterns
@@ -238,17 +238,17 @@ class TestFileCollection:
     def test_collect_files_basic(self, tmp_path):
         """Test basic file collection."""
         from rlm_dspy.core.fileutils import collect_files
-        
+
         # Create test files
         (tmp_path / "a.py").write_text("# a")
         (tmp_path / "b.py").write_text("# b")
         subdir = tmp_path / "sub"
         subdir.mkdir()
         (subdir / "c.py").write_text("# c")
-        
+
         files = collect_files([tmp_path])
         names = {f.name for f in files}
-        
+
         assert "a.py" in names
         assert "b.py" in names
         assert "c.py" in names
@@ -256,28 +256,28 @@ class TestFileCollection:
     def test_collect_files_skips_pycache(self, tmp_path):
         """Test that __pycache__ is skipped."""
         from rlm_dspy.core.fileutils import collect_files
-        
+
         # Create test files
         (tmp_path / "main.py").write_text("# main")
         pycache = tmp_path / "__pycache__"
         pycache.mkdir()
         (pycache / "main.cpython-312.pyc").write_text("binary")
-        
+
         files = collect_files([tmp_path])
         names = {f.name for f in files}
-        
+
         assert "main.py" in names
         assert "main.cpython-312.pyc" not in names
 
     def test_format_file_context(self, tmp_path):
         """Test file context formatting."""
         from rlm_dspy.core.fileutils import format_file_context
-        
+
         f = tmp_path / "test.py"
         f.write_text("line 1\nline 2\n")
-        
+
         context, skipped = format_file_context([f])
-        
+
         assert "=== FILE:" in context
         assert "test.py" in context
         assert "line 1" in context
@@ -287,38 +287,38 @@ class TestFileCollection:
     def test_format_file_context_with_line_numbers(self, tmp_path):
         """Test that line numbers are added."""
         from rlm_dspy.core.fileutils import format_file_context
-        
+
         f = tmp_path / "test.py"
         f.write_text("first\nsecond\n")
-        
+
         context, _ = format_file_context([f], add_line_numbers=True)
-        
+
         assert "1 |" in context or "1|" in context
         assert "2 |" in context or "2|" in context
 
     def test_format_file_context_skips_binary(self, tmp_path):
         """Test that binary files are skipped."""
         from rlm_dspy.core.fileutils import format_file_context
-        
+
         f = tmp_path / "binary.bin"
         f.write_bytes(b"\x00\x01\x02\xff\xfe")
-        
+
         context, skipped = format_file_context([f])
-        
+
         assert len(skipped) == 1
         assert skipped[0][0] == f
 
     def test_load_context_from_paths(self, tmp_path):
         """Test the main load_context_from_paths function."""
         from rlm_dspy.core.fileutils import load_context_from_paths
-        
+
         # Create test structure
         (tmp_path / "main.py").write_text("def main(): pass\n")
         (tmp_path / ".gitignore").write_text("*.log\n")
         (tmp_path / "debug.log").write_text("logs")
-        
+
         context = load_context_from_paths([tmp_path], gitignore=True)
-        
+
         assert "main.py" in context
         assert "def main()" in context
         # .log files should be ignored
@@ -335,23 +335,23 @@ class TestContextCaching:
             load_context_from_paths_cached,
             clear_context_cache,
         )
-        
+
         # Clear cache first
         clear_context_cache()
-        
+
         # Create test file
         f = tmp_path / "test.py"
         f.write_text("def hello(): pass\n")
-        
+
         # Load without cache
         context1 = load_context_from_paths([tmp_path])
-        
+
         # Load with cache (first time - cache miss)
         context2 = load_context_from_paths_cached([tmp_path])
-        
+
         # Load with cache again (cache hit)
         context3 = load_context_from_paths_cached([tmp_path])
-        
+
         assert context1 == context2 == context3
 
     def test_cache_invalidation_on_file_change(self, tmp_path):
@@ -361,32 +361,32 @@ class TestContextCaching:
             clear_context_cache,
         )
         import time
-        
+
         # Clear cache first
         clear_context_cache()
-        
+
         # Create test file
         f = tmp_path / "test.py"
         f.write_text("version 1\n")
-        
+
         # Load (cache miss)
         context1 = load_context_from_paths_cached([tmp_path])
         assert "version 1" in context1
-        
+
         # Modify file (need to ensure mtime changes)
         time.sleep(0.1)
         f.write_text("version 2\n")
-        
+
         # Load again (should be cache miss due to mtime change)
         context2 = load_context_from_paths_cached([tmp_path])
         assert "version 2" in context2
-        
+
         assert context1 != context2
 
     def test_cache_stats(self):
         """Test cache stats function."""
         from rlm_dspy.core.fileutils import get_context_cache_stats
-        
+
         stats = get_context_cache_stats()
         assert "entries" in stats
         assert "max_size" in stats
@@ -399,15 +399,15 @@ class TestContextCaching:
             clear_context_cache,
             get_context_cache_stats,
         )
-        
+
         # Create and load
         f = tmp_path / "test.py"
         f.write_text("content\n")
         load_context_from_paths_cached([tmp_path])
-        
+
         # Clear cache
         clear_context_cache()
-        
+
         stats = get_context_cache_stats()
         assert stats["entries"] == 0
 
@@ -418,7 +418,7 @@ class TestContextTruncation:
     def test_estimate_tokens(self):
         """Test token estimation."""
         from rlm_dspy.core.fileutils import estimate_tokens
-        
+
         # Default 4 chars per token
         assert estimate_tokens("1234") == 1
         assert estimate_tokens("12345678") == 2
@@ -427,20 +427,20 @@ class TestContextTruncation:
     def test_truncate_context_no_truncation_needed(self):
         """Test that short context is not truncated."""
         from rlm_dspy.core.fileutils import truncate_context
-        
+
         context = "short context"
         result, was_truncated = truncate_context(context, max_tokens=1000)
-        
+
         assert result == context
         assert was_truncated is False
 
     def test_truncate_context_tail_strategy(self):
         """Test tail truncation strategy."""
         from rlm_dspy.core.fileutils import truncate_context
-        
+
         context = "A" * 1000 + "B" * 1000  # 2000 chars = ~500 tokens
         result, was_truncated = truncate_context(context, max_tokens=100, strategy="tail")
-        
+
         assert was_truncated is True
         assert "[TRUNCATED]" in result
         assert result.endswith("B" * 100)  # Should keep end
@@ -448,10 +448,10 @@ class TestContextTruncation:
     def test_truncate_context_head_strategy(self):
         """Test head truncation strategy."""
         from rlm_dspy.core.fileutils import truncate_context
-        
+
         context = "A" * 1000 + "B" * 1000
         result, was_truncated = truncate_context(context, max_tokens=100, strategy="head")
-        
+
         assert was_truncated is True
         assert "[TRUNCATED]" in result
         assert result.startswith("A" * 100)  # Should keep start
@@ -459,37 +459,37 @@ class TestContextTruncation:
     def test_smart_truncate_preserves_file_markers(self):
         """Test smart truncation preserves file boundaries."""
         from rlm_dspy.core.fileutils import smart_truncate_context
-        
+
         # Create context with file markers
         files = []
         for i in range(10):
             files.append(f"=== FILE: file{i}.py ===\ncontent {i}\n=== END FILE ===\n")
         context = "".join(files)
-        
+
         # Truncate to fit ~2 files
         result, was_truncated = smart_truncate_context(
-            context, 
+            context,
             max_tokens=50,  # Very small to force truncation
             chars_per_token=4.0
         )
-        
+
         assert was_truncated is True
         assert "[TRUNCATED" in result
 
     def test_rlm_load_context_with_max_tokens(self, tmp_path):
         """Test RLM.load_context with max_tokens parameter."""
         from rlm_dspy.core.rlm import RLM, RLMConfig
-        
+
         # Create large test file
         large_file = tmp_path / "large.py"
         large_file.write_text("x" * 10000)  # ~2500 tokens
-        
+
         config = RLMConfig(model="test/model")
         rlm = RLM(config=config)
-        
+
         # Load with small limit
         context = rlm.load_context([tmp_path], max_tokens=100)
-        
+
         # Should be truncated
         assert len(context) < 10000
         assert "[TRUNCATED" in context

@@ -6,7 +6,7 @@ to the LLM via the `tools` parameter of dspy.RLM.
 Usage:
     from rlm_dspy import RLM
     from rlm_dspy.tools import BUILTIN_TOOLS
-    
+
     rlm = RLM(tools=BUILTIN_TOOLS)
     result = rlm.query("Find all TODO comments", context)
 """
@@ -31,12 +31,12 @@ _RESTRICTED_PATHS = {
 
 def _is_safe_path(path: str, base_dir: str | None = None) -> tuple[bool, str]:
     """Check if a path is safe to access.
-    
+
     Args:
         path: Path to check
         base_dir: Optional base directory to restrict access to.
                   If provided, path must resolve to within base_dir.
-    
+
     Returns:
         (is_safe, error_message)
     """
@@ -44,19 +44,19 @@ def _is_safe_path(path: str, base_dir: str | None = None) -> tuple[bool, str]:
         # Resolve to absolute path (resolves symlinks and ..)
         resolved = Path(path).expanduser().resolve()
         resolved_str = str(resolved)
-        
+
         # Check for restricted system paths
         for restricted in _RESTRICTED_PATHS:
             restricted_resolved = str(Path(restricted).expanduser().resolve())
             if resolved_str.startswith(restricted_resolved):
                 return False, f"Access to {restricted} is restricted"
-        
+
         # Additional system path restrictions
         system_paths = ['/etc', '/var', '/usr', '/bin', '/sbin', '/boot', '/root', '/proc', '/sys']
         for sys_path in system_paths:
             if resolved_str.startswith(sys_path):
                 return False, f"Access to system path {sys_path} is restricted"
-        
+
         # If base_dir provided, ensure path is within it
         if base_dir:
             base_resolved = Path(base_dir).expanduser().resolve()
@@ -64,9 +64,9 @@ def _is_safe_path(path: str, base_dir: str | None = None) -> tuple[bool, str]:
                 resolved.relative_to(base_resolved)
             except ValueError:
                 return False, f"Path must be within {base_dir}"
-        
+
         return True, ""
-        
+
     except (OSError, ValueError) as e:
         return False, f"Invalid path: {e}"
 
@@ -74,15 +74,15 @@ def _is_safe_path(path: str, base_dir: str | None = None) -> tuple[bool, str]:
 def ripgrep(pattern: str, path: str = ".", flags: str = "") -> str:
     """
     Search for pattern using ripgrep (rg).
-    
+
     Args:
         pattern: Regex pattern to search for
         path: Path to search in (file or directory, relative to current project)
         flags: Additional rg flags like "-i" for case-insensitive, "-l" for files-only
-        
+
     Returns:
         Search results as text, or error message
-        
+
     Example:
         ripgrep("TODO|FIXME", "src/", "-i")  # Case-insensitive search for TODOs
         ripgrep("def\\s+\\w+", ".", "-l")    # List files with function definitions
@@ -90,12 +90,12 @@ def ripgrep(pattern: str, path: str = ".", flags: str = "") -> str:
     try:
         # Resolve path relative to current project
         path = _resolve_project_path(path)
-        
+
         # Safety check on path
         is_safe, error = _is_safe_path(path)
         if not is_safe:
             return f"(security: {error})"
-        
+
         # Validate flags - only allow safe ripgrep flags (strict matching)
         # Short flags that take optional numeric args
         SHORT_FLAGS_WITH_NUM = {'-A', '-B', '-C', '-m'}
@@ -103,44 +103,44 @@ def ripgrep(pattern: str, path: str = ".", flags: str = "") -> str:
         SHORT_FLAGS = {'-i', '-l', '-c', '-n', '-w', '-v', '-F', '-s', '-S'}
         # Long flags (exact match or with =value)
         LONG_FLAGS = {'--glob', '--type', '-t', '-g'}
-        
+
         cmd = ["rg", "--color=never", "--line-number"]
         if flags:
             for flag in flags.split():
                 if not flag.startswith('-'):
                     # Not a flag, skip validation
                     continue
-                
+
                 # Check if it's a known short flag with numeric arg (e.g., -C5, -A3)
                 if len(flag) >= 2 and flag[:2] in SHORT_FLAGS_WITH_NUM:
                     # Verify rest is numeric
                     if flag[2:] and not flag[2:].isdigit():
                         return f"(security: invalid flag '{flag}')"
                     continue
-                
+
                 # Check exact short flag match
                 if flag in SHORT_FLAGS or flag in SHORT_FLAGS_WITH_NUM:
                     continue
-                
+
                 # Check long flags (exact or with =)
                 flag_name = flag.split('=')[0]
                 if flag_name in LONG_FLAGS:
                     continue
-                
+
                 # Not in allowlist
                 return f"(security: flag '{flag}' not allowed)"
-            
+
             cmd.extend(flags.split())
         # Use -- to separate flags from pattern (prevents pattern injection)
         cmd.extend(["--", pattern, path])
-        
+
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             timeout=30,
         )
-        
+
         if result.returncode == 0:
             return result.stdout[:50000]  # Limit output size
         elif result.returncode == 1:
@@ -158,12 +158,12 @@ def ripgrep(pattern: str, path: str = ".", flags: str = "") -> str:
 def grep_context(pattern: str, path: str = ".", context_lines: int = 3) -> str:
     """
     Search with context lines around matches.
-    
+
     Args:
         pattern: Regex pattern to search for
         path: Path to search in
         context_lines: Number of lines before/after each match
-        
+
     Returns:
         Matches with surrounding context
     """
@@ -173,24 +173,24 @@ def grep_context(pattern: str, path: str = ".", context_lines: int = 3) -> str:
 def find_files(pattern: str, path: str = ".", file_type: str = "") -> str:
     """
     Find files matching a glob pattern.
-    
+
     Args:
         pattern: Glob pattern (e.g., "*.py", "test_*.py")
         path: Directory to search (relative to current project)
         file_type: Filter by extension (e.g., "py", "js")
-        
+
     Returns:
         List of matching file paths
     """
     try:
         # Resolve path relative to current project
         path = _resolve_project_path(path)
-        
+
         # Safety check on path
         is_safe, error = _is_safe_path(path)
         if not is_safe:
             return f"(security: {error})"
-        
+
         cmd = ["rg", "--files", "--color=never"]
         if file_type:
             # Sanitize file_type to prevent injection
@@ -200,14 +200,14 @@ def find_files(pattern: str, path: str = ".", file_type: str = "") -> str:
             # Pattern is passed to -g, which is a glob, relatively safe
             cmd.extend(["-g", pattern])
         cmd.append(path)
-        
+
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             timeout=30,
         )
-        
+
         if result.returncode == 0:
             files = result.stdout.strip().split("\n")
             return "\n".join(files[:500])  # Limit to 500 files
@@ -222,43 +222,43 @@ def find_files(pattern: str, path: str = ".", file_type: str = "") -> str:
 def read_file(path: str, start_line: int = 1, end_line: int | None = None) -> str:
     """
     Read a file or portion of a file.
-    
+
     Args:
         path: Path to the file (relative to current project)
         start_line: First line to read (1-indexed)
         end_line: Last line to read (None for end of file)
-        
+
     Returns:
         File contents with line numbers
     """
     try:
         # Resolve path relative to current project
         path = _resolve_project_path(path)
-        
+
         # Safety check
         is_safe, error = _is_safe_path(path)
         if not is_safe:
             return f"(security: {error})"
-        
+
         p = Path(path)
         if not p.exists():
             return f"(file not found: {path})"
         if not p.is_file():
             return f"(not a file: {path})"
-        
+
         lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
-        
+
         # Adjust indices (1-indexed to 0-indexed)
         start_idx = max(0, start_line - 1)
         end_idx = end_line if end_line else len(lines)
-        
+
         selected = lines[start_idx:end_idx]
-        
+
         # Format with line numbers
         numbered = []
         for i, line in enumerate(selected, start=start_idx + 1):
             numbered.append(f"{i:4d} | {line}")
-        
+
         return "\n".join(numbered[:2000])  # Limit to 2000 lines
     except Exception as e:
         return f"(read_file error: {e})"
@@ -267,26 +267,26 @@ def read_file(path: str, start_line: int = 1, end_line: int | None = None) -> st
 def file_stats(path: str) -> str:
     """
     Get statistics about a file or directory.
-    
+
     Args:
         path: Path to analyze (relative to current project)
-        
+
     Returns:
         JSON with file count, line count, size info
     """
     try:
         # Resolve path relative to current project
         path = _resolve_project_path(path)
-        
+
         # Safety check
         is_safe, error = _is_safe_path(path)
         if not is_safe:
             return f"(security: {error})"
-        
+
         p = Path(path)
         if not p.exists():
             return f"(path not found: {path})"
-        
+
         if p.is_file():
             content = p.read_text(encoding="utf-8", errors="replace")
             return json.dumps({
@@ -296,11 +296,11 @@ def file_stats(path: str) -> str:
                 "line_count": len(content.splitlines()),
                 "char_count": len(content),
             })
-        
+
         # Directory stats
         files = list(p.rglob("*"))
         file_count = sum(1 for f in files if f.is_file())
-        
+
         # Count by extension
         extensions: dict[str, int] = {}
         total_lines = 0
@@ -314,7 +314,7 @@ def file_stats(path: str) -> str:
                 except (OSError, UnicodeDecodeError):
                     # Skip binary files and unreadable files
                     skipped_files += 1
-        
+
         return json.dumps({
             "type": "directory",
             "path": str(p),
@@ -329,18 +329,18 @@ def file_stats(path: str) -> str:
 def index_code(path: str, kind: str | None = None, name: str | None = None) -> str:
     """
     Index code to find classes, functions, and methods with EXACT line numbers.
-    
+
     Uses tree-sitter for 100% accurate structural analysis - NO hallucination.
     Supports: Python, JavaScript, TypeScript, Go, Rust, Java, C, C++, Ruby, C#
-    
+
     Args:
         path: File or directory to index (relative to current project)
         kind: Filter by type: "class", "function", "method", or None for all
         name: Filter by name (case-insensitive substring match)
-        
+
     Returns:
         List of definitions with file:line and type
-        
+
     Examples:
         index_code("src/")                    # All definitions
         index_code("src/", kind="class")      # Only classes
@@ -350,14 +350,14 @@ def index_code(path: str, kind: str | None = None, name: str | None = None) -> s
     try:
         # Resolve path relative to current project
         path = _resolve_project_path(path)
-        
+
         # Safety check
         is_safe, error = _is_safe_path(path)
         if not is_safe:
             return f"(security: {error})"
-        
+
         from .core.ast_index import index_file, index_files, LANGUAGE_MAP
-        
+
         p = Path(path)
         if p.is_file():
             idx = index_file(p)
@@ -368,18 +368,18 @@ def index_code(path: str, kind: str | None = None, name: str | None = None) -> s
                 files.extend(p.rglob(f"*{ext}"))
             files = files[:200]  # Limit
             idx = index_files(files)
-        
+
         # Apply filters
         defs = idx.find(name=name, kind=kind)
-        
+
         if not defs:
             return "(no definitions found)"
-        
+
         results = []
         for d in defs[:500]:
             parent_info = f" (in {d.parent})" if d.parent else ""
             results.append(f"{d.file}:{d.line}-{d.end_line}: {d.kind} {d.name}{parent_info}")
-        
+
         return "\n".join(results)
     except ImportError as e:
         return f"(tree-sitter not installed: {e})"
@@ -390,13 +390,13 @@ def index_code(path: str, kind: str | None = None, name: str | None = None) -> s
 def find_definitions(path: str, name: str | None = None) -> str:
     """
     Find function and class definitions (wrapper for index_code).
-    
+
     Supports: Python, JavaScript, TypeScript, Go, Rust, Java, C, C++, Ruby, C#
-    
+
     Args:
         path: File or directory to search
         name: Optional name filter (case-insensitive)
-        
+
     Returns:
         List of definitions with file:line
     """
@@ -406,11 +406,11 @@ def find_definitions(path: str, name: str | None = None) -> str:
 def find_classes(path: str, name: str | None = None) -> str:
     """
     Find all class definitions.
-    
+
     Args:
-        path: File or directory to search  
+        path: File or directory to search
         name: Optional name filter
-        
+
     Returns:
         List of classes with file:line
     """
@@ -420,11 +420,11 @@ def find_classes(path: str, name: str | None = None) -> str:
 def find_functions(path: str, name: str | None = None) -> str:
     """
     Find all function definitions (not methods).
-    
+
     Args:
         path: File or directory to search
         name: Optional name filter
-        
+
     Returns:
         List of functions with file:line
     """
@@ -434,11 +434,11 @@ def find_functions(path: str, name: str | None = None) -> str:
 def find_methods(path: str, name: str | None = None) -> str:
     """
     Find all method definitions (functions inside classes).
-    
+
     Args:
         path: File or directory to search
         name: Optional name filter
-        
+
     Returns:
         List of methods with file:line and parent class
     """
@@ -448,10 +448,10 @@ def find_methods(path: str, name: str | None = None) -> str:
 def find_imports(path: str) -> str:
     """
     Find all imports in source files using ripgrep.
-    
+
     Args:
         path: File or directory to analyze
-        
+
     Returns:
         List of imports with locations
     """
@@ -462,14 +462,14 @@ def find_imports(path: str) -> str:
 def find_calls(path: str, function_name: str) -> str:
     """
     Find all calls to a specific function or method using ripgrep.
-    
+
     Args:
         path: File or directory to search
         function_name: Name of function/method to find calls to
-        
+
     Returns:
         List of call sites with locations
-        
+
     Examples:
         find_calls("src/", "print")     # Find print() calls
         find_calls("src/", "query")     # Find query() calls
@@ -482,14 +482,14 @@ def find_calls(path: str, function_name: str) -> str:
 def shell(command: str, timeout: int = 30) -> str:
     """
     Run a shell command (use with caution).
-    
+
     Args:
         command: Shell command to execute
         timeout: Maximum execution time in seconds
-        
+
     Returns:
         Command output (stdout + stderr)
-        
+
     Security:
         - Disabled by default (requires RLM_ALLOW_SHELL=1)
         - Allowlist of safe commands enforced
@@ -498,10 +498,10 @@ def shell(command: str, timeout: int = 30) -> str:
     """
     import os
     import shlex
-    
+
     if not os.environ.get("RLM_ALLOW_SHELL"):
         return "(shell disabled - set RLM_ALLOW_SHELL=1 to enable)"
-    
+
     # Allowlist of safe base commands
     ALLOWED_COMMANDS = {
         'ls', 'cat', 'head', 'tail', 'grep', 'find', 'wc', 'sort', 'uniq',
@@ -509,7 +509,7 @@ def shell(command: str, timeout: int = 30) -> str:
         'diff', 'tree', 'du', 'df', 'uname', 'hostname', 'ps', 'top',
         'git', 'python', 'python3', 'pip', 'node', 'npm', 'cargo', 'go',
     }
-    
+
     # Parse command to get base command
     try:
         parts = shlex.split(command)
@@ -518,11 +518,11 @@ def shell(command: str, timeout: int = 30) -> str:
         base_cmd = Path(parts[0]).name  # Get basename (e.g., /usr/bin/ls -> ls)
     except ValueError as e:
         return f"(invalid command syntax: {e})"
-    
+
     # Check if command is allowed
     if base_cmd not in ALLOWED_COMMANDS:
         return f"(command '{base_cmd}' not in allowlist. Allowed: {', '.join(sorted(ALLOWED_COMMANDS)[:10])}...)"
-    
+
     # Block dangerous patterns
     dangerous_patterns = [
         "rm -rf /", "rm -rf ~", "rm -rf .", "mkfs", "> /dev/", "dd if=",
@@ -533,10 +533,10 @@ def shell(command: str, timeout: int = 30) -> str:
     for pattern in dangerous_patterns:
         if pattern in cmd_lower:
             return f"(blocked dangerous pattern: {pattern})"
-    
+
     # Log command for audit
     logger.warning("Shell command executed: %s", command[:200])
-    
+
     try:
         # Use shell=False with parsed arguments for safety
         result = subprocess.run(
@@ -557,35 +557,35 @@ def shell(command: str, timeout: int = 30) -> str:
 
 def semantic_search(query: str, path: str | None = None, k: int = 5) -> str:
     """Search code semantically using embeddings (finds conceptually similar code).
-    
+
     Unlike ripgrep which matches text patterns, semantic search finds code
     that is conceptually related to your query even without exact word matches.
-    
+
     Best for queries like:
     - "authentication logic"
     - "error handling patterns"
     - "database connection code"
-    
+
     Args:
         query: Natural language description of what you're looking for
         path: Directory to search in (default: current project, relative paths resolved to project)
         k: Number of results to return (default: 5)
-        
+
     Returns:
         Formatted results with file locations and code snippets
     """
     try:
         from .core.vector_index import get_index_manager
-        
+
         # Resolve path relative to current project
         search_path = _resolve_project_path(path)
-        
+
         manager = get_index_manager()
         results = manager.search(search_path, query, k=k)
-        
+
         if not results:
             return f"No results found for: {query}"
-        
+
         output = [f"Found {len(results)} semantically similar code snippets:\n"]
         for i, r in enumerate(results, 1):
             output.append(f"--- Result {i}: {r.snippet.file}:{r.snippet.line} ---")
@@ -594,7 +594,7 @@ def semantic_search(query: str, path: str | None = None, k: int = 5) -> str:
             if len(r.snippet.text) > 500:
                 output.append("... (truncated)")
             output.append("")
-        
+
         return "\n".join(output)
     except Exception as e:
         return f"Semantic search error: {e}\nTip: Run 'rlm-dspy index build {path}' first."
@@ -617,20 +617,20 @@ def get_current_project() -> str | None:
 
 def _resolve_project_path(path: str | None) -> str:
     """Resolve a path relative to the current project.
-    
+
     When the LLM specifies a path like "." or "./src", it should resolve
     relative to the project being analyzed, not the CWD.
-    
+
     Args:
         path: Path from tool argument (may be None, ".", or relative)
-        
+
     Returns:
         Resolved absolute path
     """
     # Use current project if no path or "." specified
     if not path or path == ".":
         return _current_project_path or "."
-    
+
     # If path is relative and we have a project path, resolve relative to project
     if _current_project_path and not Path(path).is_absolute():
         project_path = Path(_current_project_path)
@@ -642,36 +642,36 @@ def _resolve_project_path(path: str | None) -> str:
         except ValueError:
             # Path escapes project - use as-is (will be caught by safety check)
             pass
-    
+
     return path
 
 
 def list_projects(include_empty: bool = False) -> str:
     """List all indexed projects available for semantic search.
-    
+
     Use this to discover what codebases are indexed and their paths.
     Then use semantic_search with the project path to search that specific project.
-    
+
     Args:
         include_empty: Include projects with 0 snippets (default: False)
-    
+
     Returns:
         Formatted list of projects with names, paths, and snippet counts
     """
     try:
         from .core.project_registry import get_project_registry
         from .core.vector_index import get_index_manager
-        
+
         registry = get_project_registry()
         projects = registry.list()
-        
+
         if not projects:
             return "No projects indexed. Use 'rlm-dspy index build <path>' to index a project."
-        
+
         manager = get_index_manager()
         default_project = registry.get_default()
         default_name = default_project.name if default_project else None
-        
+
         # Collect projects with their snippet counts
         project_data = []
         for p in projects:
@@ -687,16 +687,16 @@ def list_projects(include_empty: bool = False) -> str:
                         snippet_count = manifest.get("snippet_count", 0)
                     except Exception:
                         pass
-            
+
             # Filter empty projects unless requested
             if snippet_count > 0 or include_empty:
                 project_data.append((p, snippet_count))
-        
+
         if not project_data:
             return "No indexed projects with code found. Use 'rlm-dspy index build <path>' to index."
-        
+
         output = [f"Found {len(project_data)} indexed projects:\n"]
-        
+
         for p, snippet_count in project_data:
             output.append(f"  • {p.name}")
             output.append(f"    Path: {p.path}")
@@ -704,7 +704,7 @@ def list_projects(include_empty: bool = False) -> str:
             if p.name == default_name:
                 output.append("    [DEFAULT]")
             output.append("")
-        
+
         return "\n".join(output)
     except Exception as e:
         return f"Error listing projects: {e}"
@@ -712,17 +712,17 @@ def list_projects(include_empty: bool = False) -> str:
 
 def search_all_projects(query: str, k: int = 3) -> str:
     """Search semantically across ALL indexed projects (without duplicates).
-    
+
     Unlike semantic_search which searches one project, this searches
     all registered projects and returns the best matches from each.
-    
+
     Automatically skips overlapping projects to avoid duplicate results
     (e.g., if /project and /project/src are both indexed, only searches /project).
-    
+
     Args:
         query: Natural language description of what you're looking for
         k: Number of results per project (default: 3)
-        
+
     Returns:
         Aggregated results from all projects, sorted by relevance
     """
@@ -730,18 +730,18 @@ def search_all_projects(query: str, k: int = 3) -> str:
         from .core.project_registry import get_project_registry
         from .core.vector_index import get_index_manager
         from pathlib import Path
-        
+
         registry = get_project_registry()
         projects = registry.list()
-        
+
         if not projects:
             return "No projects indexed. Use 'rlm-dspy index build <path>' first."
-        
+
         # Filter out child projects that overlap with parent projects
         # Keep only the most specific (deepest) non-overlapping projects
         overlaps = registry.find_overlaps()
         projects_to_skip = set()
-        
+
         for project_name, overlap_list in overlaps.items():
             project_path = Path(registry.get(project_name).path)
             for overlap in overlap_list:
@@ -753,17 +753,17 @@ def search_all_projects(query: str, k: int = 3) -> str:
                     projects_to_skip.add(overlap.name)
                 except ValueError:
                     pass
-        
+
         manager = get_index_manager()
         all_results = []
         searched_projects = 0
-        
+
         for p in projects:
             # Skip overlapping child projects
             if p.name in projects_to_skip:
                 logger.debug(f"Skipping '{p.name}' - overlaps with parent project")
                 continue
-            
+
             # Skip projects with no snippets
             if p.snippet_count == 0:
                 index_path = manager.config.index_dir / p.name
@@ -778,7 +778,7 @@ def search_all_projects(query: str, k: int = 3) -> str:
                         continue
                 else:
                     continue
-            
+
             try:
                 results = manager.search(p.path, query, k=k)
                 searched_projects += 1
@@ -787,16 +787,16 @@ def search_all_projects(query: str, k: int = 3) -> str:
             except Exception as e:
                 logger.debug(f"Search failed for {p.name}: {e}")
                 continue
-        
+
         if not all_results:
             return f"No results found for: {query}"
-        
+
         # Sort by score descending
         all_results.sort(key=lambda x: x[1].score, reverse=True)
-        
+
         # Take top results
         top_results = all_results[:k * 2]  # Return more since it's cross-project
-        
+
         output = [f"Found {len(top_results)} results across {searched_projects} projects:\n"]
         for i, (project_name, r) in enumerate(top_results, 1):
             output.append(f"--- Result {i}: [{project_name}] {r.snippet.file}:{r.snippet.line} ---")
@@ -805,7 +805,7 @@ def search_all_projects(query: str, k: int = 3) -> str:
             if len(r.snippet.text) > 400:
                 output.append("... (truncated)")
             output.append("")
-        
+
         return "\n".join(output)
     except Exception as e:
         return f"Cross-project search error: {e}"
@@ -817,37 +817,37 @@ def search_all_projects(query: str, k: int = 3) -> str:
 
 def find_references(file_path: str, line: int, column: int = 0) -> str:
     """Find all references to the symbol at the given position using LSP.
-    
+
     More precise than ripgrep - finds actual usages, not just text matches.
     Requires a language server for the file's language.
-    
+
     Args:
         file_path: Path to the file (relative to current project)
         line: Line number (1-indexed)
         column: Column number (0-indexed, default 0 = first non-whitespace)
-        
+
     Returns:
         List of references with file:line locations
-        
+
     Example:
         find_references("src/auth.py", 25, 10)  # References to symbol at line 25, col 10
     """
     try:
         from .core.lsp import get_lsp_manager
-        
+
         # Resolve path relative to current project
         file_path = _resolve_project_path(file_path)
-        
+
         manager = get_lsp_manager()
         refs = manager.find_references(file_path, line, column)
-        
+
         if not refs:
             return f"No references found at {file_path}:{line}:{column}"
-        
+
         output = [f"Found {len(refs)} references:\n"]
         for ref in refs:
             output.append(f"  {ref['file']}:{ref['line']}:{ref['column']}")
-        
+
         return "\n".join(output)
     except ImportError:
         return "(LSP not available - install solidlsp for this feature)"
@@ -857,32 +857,32 @@ def find_references(file_path: str, line: int, column: int = 0) -> str:
 
 def go_to_definition(file_path: str, line: int, column: int = 0) -> str:
     """Jump to the definition of the symbol at the given position using LSP.
-    
+
     More precise than text search - follows actual code references.
-    
+
     Args:
         file_path: Path to the file (relative to current project)
         line: Line number (1-indexed)
         column: Column number (0-indexed)
-        
+
     Returns:
         Definition location with file:line
-        
+
     Example:
         go_to_definition("src/main.py", 10, 15)  # Definition of symbol at line 10
     """
     try:
         from .core.lsp import get_lsp_manager
-        
+
         # Resolve path relative to current project
         file_path = _resolve_project_path(file_path)
-        
+
         manager = get_lsp_manager()
         defn = manager.go_to_definition(file_path, line, column)
-        
+
         if not defn:
             return f"No definition found at {file_path}:{line}:{column}"
-        
+
         return f"Definition: {defn['file']}:{defn['line']}:{defn['column']}"
     except ImportError:
         return "(LSP not available - install solidlsp for this feature)"
@@ -892,32 +892,32 @@ def go_to_definition(file_path: str, line: int, column: int = 0) -> str:
 
 def get_type_info(file_path: str, line: int, column: int = 0) -> str:
     """Get type signature and documentation for symbol at position using LSP.
-    
+
     Shows type information, function signatures, docstrings - like IDE hover.
-    
+
     Args:
         file_path: Path to the file (relative to current project)
         line: Line number (1-indexed)
         column: Column number (0-indexed)
-        
+
     Returns:
         Type signature and documentation
-        
+
     Example:
         get_type_info("src/utils.py", 42, 8)  # Type info for symbol at line 42
     """
     try:
         from .core.lsp import get_lsp_manager
-        
+
         # Resolve path relative to current project
         file_path = _resolve_project_path(file_path)
-        
+
         manager = get_lsp_manager()
         info = manager.get_hover_info(file_path, line, column)
-        
+
         if not info:
             return f"No type info found at {file_path}:{line}:{column}"
-        
+
         return info
     except ImportError:
         return "(LSP not available - install solidlsp for this feature)"
@@ -927,30 +927,30 @@ def get_type_info(file_path: str, line: int, column: int = 0) -> str:
 
 def get_symbol_hierarchy(file_path: str) -> str:
     """Get the symbol tree for a file (classes, methods, functions) using LSP.
-    
+
     Shows the structural hierarchy of a file - more detailed than index_code.
-    
+
     Args:
         file_path: Path to the file (relative to current project)
-        
+
     Returns:
         Symbol hierarchy with types and line numbers
-        
+
     Example:
         get_symbol_hierarchy("src/models.py")  # All symbols in models.py
     """
     try:
         from .core.lsp import get_lsp_manager
-        
+
         # Resolve path relative to current project
         file_path = _resolve_project_path(file_path)
-        
+
         manager = get_lsp_manager()
         symbols = manager.get_document_symbols(file_path)
-        
+
         if not symbols:
             return f"No symbols found in {file_path}"
-        
+
         output = [f"Symbols in {file_path}:\n"]
         for sym in symbols:
             indent = "  " if sym.get('parent') else ""
@@ -959,7 +959,7 @@ def get_symbol_hierarchy(file_path: str) -> str:
                 f"{indent}{sym['kind']}: {sym['name']} "
                 f"[lines {sym['line']}-{sym['end_line']}]{parent_info}"
             )
-        
+
         return "\n".join(output)
     except ImportError:
         return "(LSP not available - install solidlsp for this feature)"

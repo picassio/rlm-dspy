@@ -90,11 +90,11 @@ def mask_value(value: Any, reveal_prefix: bool = False) -> str:
     s = str(value)
     if len(s) == 0:
         return "[empty]"
-    
+
     # Full masking by default for security
     if not reveal_prefix:
         return SECRET_MASK
-    
+
     # Optional prefix reveal (use only when necessary for debugging)
     if len(s) <= 8:
         return SECRET_MASK

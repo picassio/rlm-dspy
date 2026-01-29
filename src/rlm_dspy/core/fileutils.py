@@ -11,6 +11,10 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import pathspec
 
 logger = logging.getLogger(__name__)
 
@@ -23,26 +27,26 @@ class PathTraversalError(Exception):
 def validate_path_safety(path: Path, base_dir: Path | None = None) -> Path:
     """
     Validate that a path is safe (no traversal attacks).
-    
+
     Args:
         path: The path to validate
         base_dir: Optional base directory - path must be within this directory
-        
+
     Returns:
         The resolved (absolute) path
-        
+
     Raises:
         PathTraversalError: If path contains traversal sequences or escapes base_dir
     """
     # Resolve to absolute path
     resolved = path.resolve()
-    
+
     # Check for traversal patterns in the original path string
     path_str = str(path)
     if ".." in path_str:
         logger.warning("Path traversal attempt detected: %s", path_str)
         raise PathTraversalError(f"Path contains traversal sequence: {path_str}")
-    
+
     # If base_dir specified, ensure path is within it
     if base_dir is not None:
         base_resolved = base_dir.resolve()
@@ -50,13 +54,13 @@ def validate_path_safety(path: Path, base_dir: Path | None = None) -> Path:
             resolved.relative_to(base_resolved)
         except ValueError:
             logger.warning(
-                "Path escapes base directory: %s not in %s", 
+                "Path escapes base directory: %s not in %s",
                 resolved, base_resolved
             )
             raise PathTraversalError(
                 f"Path {resolved} is outside base directory {base_resolved}"
             )
-        
+
         # Additional symlink-aware check using commonpath
         try:
             common = os.path.commonpath([str(base_resolved), str(resolved)])
@@ -69,7 +73,7 @@ def validate_path_safety(path: Path, base_dir: Path | None = None) -> Path:
             raise PathTraversalError(
                 f"Path {resolved} is on different drive than {base_resolved}"
             )
-    
+
     return resolved
 
 
@@ -123,7 +127,7 @@ def smart_link(source: Path, target: Path, force: bool = False) -> None:
         source: Source path (must exist)
         target: Target path to create
         force: Remove existing target if it exists
-        
+
     Raises:
         PathTraversalError: If paths contain traversal sequences
         FileNotFoundError: If source does not exist
@@ -132,7 +136,7 @@ def smart_link(source: Path, target: Path, force: bool = False) -> None:
     # Validate paths for traversal attacks
     source = validate_path_safety(source)
     target = validate_path_safety(target)
-    
+
     if not source.exists():
         raise FileNotFoundError(f"Source does not exist: {source}")
 
@@ -192,13 +196,13 @@ def smart_rmtree(path: Path, aggressive: bool = False) -> bool:
 
     Returns:
         True if successful
-        
+
     Raises:
         PathTraversalError: If path contains traversal sequences
     """
     # Validate path for traversal attacks
     path = validate_path_safety(path)
-    
+
     if not path.exists():
         return True
 
@@ -270,7 +274,7 @@ def sync_directory(
     Synchronize directories using platform-appropriate tools.
 
     Learned from modaic: rsync on Unix, robocopy on Windows.
-    
+
     SECURITY: delete_extra defaults to False to prevent accidental data loss.
     When True, files in target not in source will be PERMANENTLY DELETED.
 
@@ -282,7 +286,7 @@ def sync_directory(
 
     Returns:
         True if successful
-        
+
     Raises:
         PathTraversalError: If paths contain traversal sequences
         ValueError: If target is a protected system directory
@@ -290,7 +294,7 @@ def sync_directory(
     # Validate paths for traversal attacks
     source = validate_path_safety(source)
     target = validate_path_safety(target)
-    
+
     # Prevent syncing to dangerous system directories
     dangerous_paths = {
         Path.home(),
@@ -309,7 +313,7 @@ def sync_directory(
                 raise ValueError(f"Cannot sync to protected directory: {target}")
         except (OSError, RuntimeError) as e:
             logger.debug("Could not resolve protected path %s: %s", dangerous, e)
-    
+
     target.mkdir(parents=True, exist_ok=True)
 
     if is_windows():
@@ -387,7 +391,7 @@ def atomic_write(
         mode: File mode ('w' for text, 'wb' for binary)
         retries: Number of retry attempts for rename (Windows)
         retry_delay: Delay between retries in seconds
-        
+
     Raises:
         PathTraversalError: If path contains traversal sequences
     """
@@ -396,7 +400,7 @@ def atomic_write(
 
     # Validate path for traversal attacks
     path = validate_path_safety(path)
-    
+
     path.parent.mkdir(parents=True, exist_ok=True)
 
     # Write to temp file in same directory (for atomic rename)
@@ -460,7 +464,7 @@ def atomic_write(
 
 # Common directories to always skip (performance optimization)
 SKIP_DIRS = frozenset({
-    '.git', '__pycache__', 'node_modules', '.venv', 'venv', 
+    '.git', '__pycache__', 'node_modules', '.venv', 'venv',
     '.tox', 'dist', 'build', '.eggs', '*.egg-info', '.mypy_cache',
     '.pytest_cache', '.ruff_cache', '.coverage', 'htmlcov',
 })
@@ -468,10 +472,10 @@ SKIP_DIRS = frozenset({
 
 def load_gitignore_patterns(paths: list[Path]) -> list[str]:
     """Load .gitignore patterns from paths.
-    
+
     Args:
         paths: List of file or directory paths
-        
+
     Returns:
         List of gitignore pattern strings
     """
@@ -495,21 +499,21 @@ def should_skip_entry(
     is_dir: bool = False,
 ) -> bool:
     """Check if an entry should be skipped based on gitignore and common patterns.
-    
+
     Args:
         entry_name: Name of the file/directory
         entry_path: Full path to the entry
         root_path: Root path for relative path calculation
         spec: Optional pathspec for gitignore matching
         is_dir: Whether the entry is a directory
-        
+
     Returns:
         True if entry should be skipped
     """
     # Skip common ignored directories
     if is_dir and entry_name in SKIP_DIRS:
         return True
-    
+
     # Check gitignore patterns
     if spec:
         try:
@@ -518,7 +522,7 @@ def should_skip_entry(
             rel_path = entry_path
         if spec.match_file(str(rel_path)):
             return True
-    
+
     return False
 
 
@@ -527,20 +531,20 @@ def collect_files(
     spec: "pathspec.PathSpec | None" = None,
 ) -> list[Path]:
     """Collect files from paths, respecting gitignore patterns.
-    
+
     Uses iterative traversal to avoid RecursionError on deep trees.
-    
+
     Args:
         paths: List of file or directory paths
         spec: Optional pathspec for gitignore matching
-        
+
     Returns:
         List of file paths
     """
     from collections import deque
-    
+
     files: list[Path] = []
-    
+
     for path in paths:
         p = Path(path)
         if p.is_file():
@@ -549,28 +553,28 @@ def collect_files(
             # Iterative directory traversal
             dirs_to_process: deque[Path] = deque([p])
             root_path = p
-            
+
             while dirs_to_process:
                 current_path = dirs_to_process.popleft()
-                
+
                 try:
                     entries = list(os.scandir(current_path))
                 except PermissionError:
                     logger.debug("Permission denied: %s", current_path)
                     continue
-                
+
                 for entry in entries:
                     entry_path = Path(entry.path)
                     is_dir = entry.is_dir(follow_symlinks=False)
-                    
+
                     if should_skip_entry(entry.name, entry_path, root_path, spec, is_dir):
                         continue
-                    
+
                     if entry.is_file(follow_symlinks=False):
                         files.append(entry_path)
                     elif is_dir:
                         dirs_to_process.append(entry_path)
-    
+
     return sorted(files)
 
 
@@ -579,21 +583,21 @@ def format_file_context(
     add_line_numbers: bool = True,
 ) -> tuple[str, list[tuple[Path, str]]]:
     """Format files into a context string for LLM consumption.
-    
+
     Args:
         files: List of file paths to read
         add_line_numbers: Whether to add line numbers (helps LLM report locations)
-        
+
     Returns:
         Tuple of (context_string, list of (skipped_file, reason) tuples)
     """
     context_parts = []
     skipped_files = []
-    
+
     for f in files:
         try:
             content = f.read_text(encoding="utf-8")
-            
+
             if add_line_numbers:
                 numbered_lines = [
                     f"{i+1:4d} | {line}"
@@ -602,7 +606,7 @@ def format_file_context(
                 formatted_content = "\n".join(numbered_lines)
             else:
                 formatted_content = content
-            
+
             context_parts.append(
                 f"=== FILE: {f} ===\n{formatted_content}\n=== END FILE ===\n"
             )
@@ -612,7 +616,7 @@ def format_file_context(
             skipped_files.append((f, "permission denied"))
         except OSError as e:
             skipped_files.append((f, str(e)))
-    
+
     return "\n".join(context_parts), skipped_files
 
 
@@ -622,39 +626,39 @@ def load_context_from_paths(
     add_line_numbers: bool = True,
 ) -> str:
     """Load and format context from file/directory paths.
-    
+
     This is the main entry point for loading context for LLM analysis.
-    
+
     Args:
         paths: List of file or directory paths
         gitignore: Whether to respect .gitignore patterns
         add_line_numbers: Whether to add line numbers
-        
+
     Returns:
         Formatted context string
     """
     import pathspec
-    
+
     # Load gitignore patterns
     spec = None
     if gitignore:
         patterns = load_gitignore_patterns([Path(p) for p in paths])
         if patterns:
             spec = pathspec.PathSpec.from_lines("gitignore", patterns)
-    
+
     # Collect files
     files = collect_files(paths, spec)
-    
+
     # Format context
     context, skipped = format_file_context(files, add_line_numbers)
-    
+
     if skipped:
         logger.warning(
             "Skipped %d files: %s",
             len(skipped),
             ", ".join(f"{f.name} ({reason})" for f, reason in skipped[:5]),
         )
-    
+
     return context
 
 
@@ -666,14 +670,14 @@ _CONTEXT_CACHE_MAX_AGE = 300  # Max age in seconds
 
 def _get_cache_key(paths: list[Path], files: list[Path]) -> tuple:
     """Generate a cache key based on input paths and collected file mtimes.
-    
+
     Args:
         paths: Original input paths (for identity)
         files: Collected files (for mtime checking)
     """
     # Include input paths for identity
     key_parts = [("input", tuple(str(p.resolve()) for p in sorted(paths)))]
-    
+
     # Include file mtimes for invalidation
     for f in sorted(files):
         try:
@@ -681,7 +685,7 @@ def _get_cache_key(paths: list[Path], files: list[Path]) -> tuple:
             key_parts.append((str(f), mtime))
         except OSError:
             key_parts.append((str(f), 0))
-    
+
     return tuple(key_parts)
 
 
@@ -691,38 +695,38 @@ def load_context_from_paths_cached(
     add_line_numbers: bool = True,
 ) -> str:
     """Load context with caching based on file paths and mtimes.
-    
+
     This is a cached version of load_context_from_paths that avoids
     re-reading files that haven't changed.
-    
+
     Args:
         paths: List of file or directory paths
         gitignore: Whether to respect .gitignore patterns
         add_line_numbers: Whether to add line numbers
-        
+
     Returns:
         Formatted context string (from cache if available and valid)
     """
     import pathspec
     import time
-    
+
     global _context_cache
-    
+
     # Convert to Path objects
     path_objs = [Path(p) for p in paths]
-    
+
     # Load gitignore patterns and collect files
     spec = None
     if gitignore:
         patterns = load_gitignore_patterns(path_objs)
         if patterns:
             spec = pathspec.PathSpec.from_lines("gitignore", patterns)
-    
+
     files = collect_files(path_objs, spec)
-    
+
     # Generate cache key using collected files
     cache_key = _get_cache_key(path_objs, files)
-    
+
     # Check cache
     now = time.time()
     if cache_key in _context_cache:
@@ -730,28 +734,28 @@ def load_context_from_paths_cached(
         if now - cached_time < _CONTEXT_CACHE_MAX_AGE:
             logger.debug("Context cache hit for %d paths (%d files)", len(paths), len(files))
             return cached_context
-    
+
     # Cache miss - format context (files already collected)
     context, skipped = format_file_context(files, add_line_numbers)
-    
+
     if skipped:
         logger.warning(
             "Skipped %d files: %s",
             len(skipped),
             ", ".join(f"{f.name} ({reason})" for f, reason in skipped[:5]),
         )
-    
+
     # Evict old entries if cache is full
     if len(_context_cache) >= _CONTEXT_CACHE_MAX_SIZE:
         # Remove oldest entries
         sorted_keys = sorted(_context_cache.keys(), key=lambda k: _context_cache[k][1])
         for key in sorted_keys[:len(_context_cache) - _CONTEXT_CACHE_MAX_SIZE + 1]:
             del _context_cache[key]
-    
+
     # Store in cache
     _context_cache[cache_key] = (context, now)
     logger.debug("Context cached for %d paths (%d files, %d chars)", len(paths), len(files), len(context))
-    
+
     return context
 
 
@@ -773,14 +777,14 @@ def get_context_cache_stats() -> dict:
 
 def estimate_tokens(text: str, chars_per_token: float = 4.0) -> int:
     """Estimate token count for text.
-    
+
     Uses a simple heuristic (4 chars per token on average for code).
     For more accurate counts, use tiktoken directly.
-    
+
     Args:
         text: Text to estimate
         chars_per_token: Average characters per token (default 4.0 for code)
-        
+
     Returns:
         Estimated token count
     """
@@ -794,7 +798,7 @@ def truncate_context(
     chars_per_token: float = 4.0,
 ) -> tuple[str, bool]:
     """Truncate context to fit within token limit.
-    
+
     Args:
         context: Context string to truncate
         max_tokens: Maximum tokens allowed
@@ -803,17 +807,17 @@ def truncate_context(
             - "head": Keep start
             - "middle": Keep start and end, remove middle
         chars_per_token: Chars per token for estimation
-        
+
     Returns:
         Tuple of (truncated_context, was_truncated)
     """
     estimated_tokens = estimate_tokens(context, chars_per_token)
-    
+
     if estimated_tokens <= max_tokens:
         return context, False
-    
+
     max_chars = int(max_tokens * chars_per_token)
-    
+
     if strategy == "tail":
         # Keep the end (most recent files)
         truncated = "...[TRUNCATED]...\n" + context[-max_chars:]
@@ -826,7 +830,7 @@ def truncate_context(
         truncated = context[:half] + "\n...[TRUNCATED]...\n" + context[-half:]
     else:
         raise ValueError(f"Unknown strategy: {strategy}")
-    
+
     return truncated, True
 
 
@@ -836,74 +840,74 @@ def smart_truncate_context(
     chars_per_token: float = 4.0,
 ) -> tuple[str, bool]:
     """Intelligently truncate context preserving file boundaries.
-    
+
     Removes complete files from the middle to preserve context coherence.
-    
+
     Args:
         context: Context with file markers (=== FILE: ... ===)
         max_tokens: Maximum tokens allowed
         chars_per_token: Chars per token for estimation
-        
+
     Returns:
         Tuple of (truncated_context, was_truncated)
     """
     import re
-    
+
     estimated_tokens = estimate_tokens(context, chars_per_token)
-    
+
     if estimated_tokens <= max_tokens:
         return context, False
-    
+
     # Split by file markers
     file_pattern = re.compile(r'(=== FILE: .+? ===\n.*?=== END FILE ===\n)', re.DOTALL)
     files = file_pattern.findall(context)
-    
+
     if not files:
         # No file markers, use simple truncation
         return truncate_context(context, max_tokens, "tail", chars_per_token)
-    
+
     # Calculate tokens per file
     file_tokens = [(f, estimate_tokens(f, chars_per_token)) for f in files]
-    total_tokens = sum(t for _, t in file_tokens)
-    
+    sum(t for _, t in file_tokens)
+
     # Remove files from middle until under limit
     # Keep first 25% and last 25% of files, remove from middle
     target_tokens = max_tokens - 100  # Buffer for truncation message
-    
+
     result_files = []
     current_tokens = 0
-    
+
     # Always include first and last files
     if len(files) >= 2:
         first_quarter = max(1, len(files) // 4)
         last_quarter = max(1, len(files) // 4)
-        
+
         # Add first files
         for f, t in file_tokens[:first_quarter]:
             result_files.append(f)
             current_tokens += t
-        
+
         # Add truncation marker
         result_files.append("\n...[TRUNCATED: removed middle files to fit context limit]...\n\n")
-        
+
         # Add last files (as many as fit)
         for f, t in reversed(file_tokens[-last_quarter:]):
             if current_tokens + t <= target_tokens:
                 result_files.insert(-1, f)  # Insert before truncation marker... wait, need to fix
                 current_tokens += t
-        
+
         # Fix order - rebuild properly
         result_files = []
         current_tokens = 0
-        
+
         # First quarter
         for f, t in file_tokens[:first_quarter]:
             if current_tokens + t <= target_tokens * 0.5:
                 result_files.append(f)
                 current_tokens += t
-        
+
         result_files.append("\n...[TRUNCATED: removed middle files to fit context limit]...\n\n")
-        
+
         # Last quarter
         last_files = []
         last_tokens = 0
@@ -911,10 +915,10 @@ def smart_truncate_context(
             if last_tokens + t <= target_tokens * 0.5:
                 last_files.insert(0, f)
                 last_tokens += t
-        
+
         result_files.extend(last_files)
     else:
         # Only one file, use simple truncation
         return truncate_context(context, max_tokens, "tail", chars_per_token)
-    
+
     return "".join(result_files), True

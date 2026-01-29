@@ -84,11 +84,11 @@ OutputFileOpt = Annotated[Optional[Path], typer.Option("--output", "-o", help="W
 
 def _safe_write_output(output_file: Path, content: str) -> None:
     """Write content to output file with path validation.
-    
+
     Args:
         output_file: Target file path
         content: Content to write
-        
+
     Raises:
         typer.Exit: If path validation fails
     """
@@ -143,7 +143,7 @@ def _get_config(
     if max_workers is not None and max_workers <= 0:
         console.print("[red]Error: --max-workers must be positive[/red]")
         raise typer.Exit(1)
-    
+
     # RLMConfig reads from env by default, only override if CLI args provided
     config = RLMConfig()
 
@@ -181,7 +181,7 @@ def _load_context(
     use_cache: bool = True,
 ) -> str:
     """Load context from stdin or file paths.
-    
+
     Args:
         rlm: RLM instance for loading files
         paths: List of file/directory paths
@@ -189,10 +189,10 @@ def _load_context(
         verbose: Show progress
         max_tokens: Optional token limit for context
         use_cache: Whether to use context caching
-        
+
     Returns:
         Loaded context string
-        
+
     Raises:
         typer.Exit: On error
     """
@@ -200,25 +200,25 @@ def _load_context(
         # Warn if stdin appears to be a TTY (interactive, not piped)
         if sys.stdin.isatty():
             console.print("[yellow]Reading from stdin (press Ctrl+D when done, or Ctrl+C to cancel)...[/yellow]")
-        
+
         # Read with size limit to prevent memory exhaustion (50MB max)
         MAX_STDIN_SIZE = 50 * 1024 * 1024  # 50MB
         context = sys.stdin.read(MAX_STDIN_SIZE + 1)
         if len(context) > MAX_STDIN_SIZE:
             console.print(f"[red]Error: stdin input too large (>{MAX_STDIN_SIZE // 1024 // 1024}MB)[/red]")
             raise typer.Exit(1)
-        
+
         if not context.strip():
             console.print("[red]Error: No input received from stdin[/red]")
             raise typer.Exit(1)
         return context
-    
+
     if paths:
         # Check for missing paths
         missing = [p for p in paths if not p.exists()]
         for p in missing:
             console.print(f"[yellow]Warning: Path not found: {p}[/yellow]")
-        
+
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -234,41 +234,41 @@ def _load_context(
                 max_tokens=max_tokens,
                 use_cache=use_cache,
             )
-        
+
         if not context.strip():
             console.print("[red]Error: No content loaded from provided paths[/red]")
             raise typer.Exit(1)
-        
+
         # Set current project for semantic_search tool (auto-detect from first path)
         from .tools import set_current_project
         first_path = paths[0].resolve()
         if first_path.is_file():
             first_path = first_path.parent
         set_current_project(str(first_path))
-        
+
         if verbose and max_tokens:
             from .core.fileutils import estimate_tokens
             actual_tokens = estimate_tokens(context)
             console.print(f"[dim]Context: ~{actual_tokens:,} tokens (limit: {max_tokens:,})[/dim]")
-        
+
         return context
-    
+
     console.print("[red]Error: Provide paths or use --stdin[/red]")
     raise typer.Exit(1)
 
 
 def _run_dry_run(config: RLMConfig, context: str) -> None:
     """Run preflight checks for dry-run mode.
-    
+
     Args:
         config: RLM configuration
         context: Loaded context
-        
+
     Raises:
         typer.Exit: Always exits after checks
     """
     from .core.validation import preflight_check
-    
+
     preflight = preflight_check(
         api_key_required=True,
         model=config.model,
@@ -278,7 +278,7 @@ def _run_dry_run(config: RLMConfig, context: str) -> None:
         check_network=True,
     )
     preflight.print_report()
-    
+
     if preflight.passed:
         console.print("\n[green]✓ Ready to run! Remove --dry-run to execute.[/green]")
         raise typer.Exit(0)
@@ -295,14 +295,14 @@ def _output_result(
     debug: bool,
 ) -> None:
     """Handle result output in various formats.
-    
+
     Args:
         result: Query result
         output_format: Output format (text, json, markdown)
         output_file: File to write to
         verbose: Show stats
         debug: Show trajectory
-        
+
     Raises:
         typer.Exit: On error
     """
@@ -325,7 +325,7 @@ def _output_result(
         else:
             print(json_output)
         return
-    
+
     # Markdown format
     if output_format == "markdown":
         md_output = _format_as_markdown(result)
@@ -335,7 +335,7 @@ def _output_result(
         else:
             print(md_output)
         return
-    
+
     # Text format (default) to file
     if output_file:
         if result.success:
@@ -347,7 +347,7 @@ def _output_result(
             console.print(f"[red]Error: {result.error or 'Unknown error'}[/red]")
             raise typer.Exit(1)
         return
-    
+
     # Console output
     if result.success:
         if result.outputs:
@@ -355,7 +355,7 @@ def _output_result(
             table = Table(title="Structured Output", show_header=True, header_style="bold cyan")
             table.add_column("Field", style="cyan")
             table.add_column("Value")
-            
+
             for key, value in result.outputs.items():
                 if isinstance(value, list):
                     value_str = "\n".join(f"• {v}" for v in value) if value else "(empty)"
@@ -364,7 +364,7 @@ def _output_result(
                 else:
                     value_str = str(value)
                 table.add_row(key, value_str)
-            
+
             console.print(table)
         else:
             # Standard string answer
@@ -390,11 +390,11 @@ def _output_result(
 def _format_as_markdown(result: RLMResult) -> str:
     """Format result as Markdown."""
     lines = ["# Analysis Result\n"]
-    
+
     if not result.success:
         lines.append(f"**Error:** {result.error or 'Unknown error'}\n")
         return "\n".join(lines)
-    
+
     if result.outputs:
         # Structured output from custom signature
         # Include summary answer if present and different from outputs
@@ -402,12 +402,12 @@ def _format_as_markdown(result: RLMResult) -> str:
             lines.append("## Summary\n")
             lines.append(result.answer)
             lines.append("")
-        
+
         for key, value in result.outputs.items():
             # Convert key from snake_case to Title Case
             title = key.replace("_", " ").title()
             lines.append(f"## {title}\n")
-            
+
             if isinstance(value, list):
                 for item in value:
                     lines.append(f"- {item}")
@@ -418,11 +418,11 @@ def _format_as_markdown(result: RLMResult) -> str:
                 lines.append(f"{value}\n")
     else:
         lines.append(result.answer)
-    
+
     # Add stats
     lines.append("\n---\n")
     lines.append(f"*Time: {result.elapsed_time:.1f}s | Iterations: {result.iterations}*")
-    
+
     return "\n".join(lines)
 
 
@@ -571,13 +571,12 @@ def ask(
 
     # Import and setup debug logging
     from .core.debug import is_debug, setup_logging, timer
-    from .core.validation import preflight_check
 
     if verbose or debug:
         setup_logging()
 
     config = _get_config(model, sub_model, budget, timeout, max_iterations, max_workers, verbose or debug)
-    
+
     # Resolve signature
     sig = "context, query -> answer"  # default
     if signature:
@@ -588,7 +587,7 @@ def ask(
             console.print(f"[dim]Available: {', '.join(list_signatures())}[/dim]")
             raise typer.Exit(1)
         sig = sig_class
-    
+
     rlm = RLM(config=config, signature=sig, use_tools=not no_tools)
 
     # Show debug info
@@ -616,7 +615,7 @@ def ask(
         rlm, paths, stdin, verbose or debug,
         max_tokens=max_tokens, use_cache=not no_cache
     )
-    
+
     if verbose or debug:
         src = f"{len(paths or [])} path(s)" if paths else "stdin"
         cache_status = "" if not no_cache else " (no cache)"
@@ -652,7 +651,7 @@ def ask(
     # Validate output for hallucinations if requested (uses LLM-as-judge)
     if validate and result.success:
         from .guards import validate_groundedness
-        
+
         console.print("\n[dim]Validating output with LLM-as-judge...[/dim]")
         validation = validate_groundedness(result.answer, context, query)
         if not validation.is_grounded:
@@ -660,10 +659,10 @@ def ask(
             console.print(f"[dim]{validation.discussion[:500]}[/dim]")
         else:
             console.print(f"\n[green]✓ Output validated ({validation.score:.0%} grounded)[/green]")
-    
+
     # Resolve output format (--json is shorthand for --format json)
     resolved_format = output_format or ("json" if output_json else "text")
-    
+
     # Output result
     _output_result(result, resolved_format, output_file, verbose, debug)
 
@@ -734,7 +733,7 @@ def analyze(
                     "Find potential bugs, code smells, or areas for improvement.",
                     context,
                 )
-                
+
                 results_list = [structure, components, issues]
             except KeyboardInterrupt:
                 console.print("\n[yellow]Analysis interrupted by user[/yellow]")
@@ -1319,20 +1318,20 @@ def index_build(
     ] = False,
 ) -> None:
     """Build or update vector index for semantic search.
-    
+
     Examples:
         rlm-dspy index build src/
         rlm-dspy index build . --force
     """
     from .core.vector_index import get_index_manager
-    
+
     manager = get_index_manager()
-    
+
     for path in paths:
         if not path.exists():
             console.print(f"[red]Path not found: {path}[/red]")
             continue
-        
+
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -1340,7 +1339,7 @@ def index_build(
             transient=True,
         ) as progress:
             progress.add_task(f"Indexing {path}...", total=None)
-            
+
             try:
                 count = manager.build(path, force=force)
                 console.print(f"[green]✓[/green] Indexed {path}: {count} code snippets")
@@ -1356,17 +1355,17 @@ def index_status(
     ],
 ) -> None:
     """Show index status for directories.
-    
+
     Examples:
         rlm-dspy index status src/
     """
     from .core.vector_index import get_index_manager
-    
+
     manager = get_index_manager()
-    
+
     for path in paths:
         status = manager.get_status(path)
-        
+
         if not status["indexed"]:
             console.print(f"[yellow]○[/yellow] {path}: Not indexed")
             console.print("  [dim]Run: rlm-dspy index build {path}[/dim]")
@@ -1377,7 +1376,7 @@ def index_status(
             if status["needs_update"]:
                 console.print(f"  [yellow]Needs update: {status['new_or_modified']} changed, {status['deleted']} deleted[/yellow]")
             else:
-                console.print(f"  [green]Up to date[/green]")
+                console.print("  [green]Up to date[/green]")
 
 
 @index_app.command("clear")
@@ -1392,27 +1391,27 @@ def index_clear(
     ] = False,
 ) -> None:
     """Clear vector indexes.
-    
+
     Examples:
         rlm-dspy index clear           # Clear all indexes
         rlm-dspy index clear src/      # Clear specific index
         rlm-dspy index clear -y        # Skip confirmation
     """
     from .core.vector_index import get_index_manager
-    
+
     if not confirm:
         if path:
             msg = f"Clear index for {path}?"
         else:
             msg = "Clear ALL indexes?"
-        
+
         if not typer.confirm(msg):
             console.print("[dim]Cancelled[/dim]")
             return
-    
+
     manager = get_index_manager()
     count = manager.clear(path)
-    
+
     if count > 0:
         console.print(f"[green]✓[/green] Cleared {count} index(es)")
     else:
@@ -1435,34 +1434,34 @@ def index_search(
     ] = 5,
 ) -> None:
     """Search code semantically.
-    
+
     Examples:
         rlm-dspy index search "authentication logic"
         rlm-dspy index search "error handling" -p src/ -k 10
     """
     from .core.vector_index import get_index_manager
-    
+
     manager = get_index_manager()
-    
+
     # Build index if needed
     status = manager.get_status(path)
     if not status["indexed"]:
         console.print(f"[dim]Building index for {path}...[/dim]")
         manager.build(path)
-    
+
     # Search
     results = manager.search(path, query, k=k)
-    
+
     if not results:
         console.print(f"[yellow]No results found for: {query}[/yellow]")
         return
-    
+
     console.print(f"\n[bold]Results for:[/bold] {query}\n")
-    
+
     for i, r in enumerate(results, 1):
         console.print(f"[bold cyan]{i}. {r.snippet.file}:{r.snippet.line}[/bold cyan]")
         console.print(f"   [dim]{r.snippet.type}[/dim] [green]{r.snippet.name}[/green]")
-        
+
         # Show snippet preview
         preview = r.snippet.text[:200].replace('\n', '\n   ')
         if len(r.snippet.text) > 200:
@@ -1503,27 +1502,27 @@ def project_add(
     ] = None,
 ) -> None:
     """Register a project for indexing.
-    
+
     Examples:
         rlm-dspy project add my-app ~/projects/my-app
         rlm-dspy project add backend ./backend --alias be --tags python,api
     """
     from .core.project_registry import get_project_registry
-    
+
     registry = get_project_registry()
-    
+
     try:
         tag_list = [t.strip() for t in tags.split(",")] if tags else []
         project = registry.add(name, path, alias=alias, tags=tag_list)
         console.print(f"[green]✓[/green] Registered project '{name}' at {project.path}")
-        
+
         if alias:
             console.print(f"  Alias: {alias}")
         if tag_list:
             console.print(f"  Tags: {', '.join(tag_list)}")
-        
+
         console.print(f"\n[dim]Run 'rlm-dspy index build {path}' to index the project.[/dim]")
-        
+
     except ValueError as e:
         console.print(f"[red]✗[/red] {e}")
         raise typer.Exit(1)
@@ -1541,25 +1540,25 @@ def project_list(
     ] = "name",
 ) -> None:
     """List all registered projects.
-    
+
     Examples:
         rlm-dspy project list
         rlm-dspy project list --tags python
         rlm-dspy project list --sort snippet_count
     """
     from .core.project_registry import get_project_registry
-    
+
     registry = get_project_registry()
     tag_list = [t.strip() for t in tags.split(",")] if tags else None
     projects = registry.list(tags=tag_list, sort_by=sort)
-    
+
     if not projects:
         console.print("[dim]No projects registered.[/dim]")
         console.print("[dim]Use 'rlm-dspy project add <name> <path>' to register a project.[/dim]")
         return
-    
+
     default = registry.get_default()
-    
+
     table = Table(title="Registered Projects")
     table.add_column("Name", style="cyan")
     table.add_column("Path", style="dim")
@@ -1567,7 +1566,7 @@ def project_list(
     table.add_column("Files", justify="right")
     table.add_column("Tags", style="green")
     table.add_column("Indexed", style="dim")
-    
+
     for p in projects:
         name = f"* {p.name}" if default and p.name == default.name else p.name
         indexed = ""
@@ -1575,7 +1574,7 @@ def project_list(
             from datetime import datetime
             dt = datetime.fromisoformat(p.indexed_at)
             indexed = dt.strftime("%Y-%m-%d %H:%M")
-        
+
         table.add_row(
             name,
             p.path,
@@ -1584,11 +1583,11 @@ def project_list(
             ", ".join(p.tags) if p.tags else "-",
             indexed or "-",
         )
-    
+
     console.print(table)
     console.print(f"\n[dim]Total: {len(projects)} project(s)[/dim]")
     if default:
-        console.print(f"[dim]* = default project[/dim]")
+        console.print("[dim]* = default project[/dim]")
 
 
 @project_app.command("remove")
@@ -1607,34 +1606,34 @@ def project_remove(
     ] = False,
 ) -> None:
     """Remove a project from the registry.
-    
+
     Examples:
         rlm-dspy project remove my-app
         rlm-dspy project remove my-app --delete-index
     """
     from .core.project_registry import get_project_registry
-    
+
     registry = get_project_registry()
-    
+
     project = registry.get(name)
     if not project:
         console.print(f"[red]✗[/red] Project '{name}' not found")
         raise typer.Exit(1)
-    
+
     if not confirm:
         msg = f"Remove project '{name}'"
         if delete_index:
             msg += " and delete index"
         msg += "?"
-        
+
         if not typer.confirm(msg):
             console.print("[dim]Cancelled[/dim]")
             return
-    
+
     registry.remove(name, delete_index=delete_index)
     console.print(f"[green]✓[/green] Removed project '{name}'")
     if delete_index:
-        console.print(f"  Index files deleted")
+        console.print("  Index files deleted")
 
 
 @project_app.command("default")
@@ -1645,15 +1644,15 @@ def project_default(
     ] = None,
 ) -> None:
     """Set or show the default project.
-    
+
     Examples:
         rlm-dspy project default           # Show current default
         rlm-dspy project default my-app    # Set default
     """
     from .core.project_registry import get_project_registry
-    
+
     registry = get_project_registry()
-    
+
     if name is None:
         default = registry.get_default()
         if default:
@@ -1662,7 +1661,7 @@ def project_default(
         else:
             console.print("[dim]No default project set[/dim]")
         return
-    
+
     try:
         registry.set_default(name)
         console.print(f"[green]✓[/green] Set default project to '{name}'")
@@ -1683,15 +1682,15 @@ def project_tag(
     ],
 ) -> None:
     """Add tags to a project.
-    
+
     Examples:
         rlm-dspy project tag my-app python,web,api
     """
     from .core.project_registry import get_project_registry
-    
+
     registry = get_project_registry()
     tag_list = [t.strip() for t in tags.split(",")]
-    
+
     try:
         registry.tag(name, tag_list)
         console.print(f"[green]✓[/green] Added tags to '{name}': {', '.join(tag_list)}")
@@ -1708,33 +1707,33 @@ def project_cleanup(
     ] = False,
 ) -> None:
     """Remove orphaned index directories.
-    
+
     Finds index directories that don't have a registered project
     and offers to delete them.
-    
+
     Examples:
         rlm-dspy project cleanup
         rlm-dspy project cleanup -y
     """
     from .core.project_registry import get_project_registry
-    
+
     registry = get_project_registry()
     orphaned = registry.find_orphaned()
-    
+
     if not orphaned:
         console.print("[green]✓[/green] No orphaned indexes found")
         return
-    
+
     console.print(f"Found {len(orphaned)} orphaned index(es):\n")
     for path in orphaned:
         console.print(f"  [dim]{path}[/dim]")
-    
+
     if not confirm:
         console.print()
         if not typer.confirm("Delete these orphaned indexes?"):
             console.print("[dim]Cancelled[/dim]")
             return
-    
+
     registry.cleanup_orphaned(dry_run=False)
     console.print(f"\n[green]✓[/green] Removed {len(orphaned)} orphaned index(es)")
 
@@ -1742,22 +1741,22 @@ def project_cleanup(
 @project_app.command("migrate")
 def project_migrate() -> None:
     """Migrate legacy hash-based indexes to named projects.
-    
+
     Scans for index directories with hash names and registers
     them as projects using the directory name from their manifest.
-    
+
     Examples:
         rlm-dspy project migrate
     """
     from .core.project_registry import get_project_registry
-    
+
     registry = get_project_registry()
     migrated = registry.migrate_legacy()
-    
+
     if not migrated:
         console.print("[dim]No legacy indexes to migrate[/dim]")
         return
-    
+
     console.print(f"[green]✓[/green] Migrated {len(migrated)} index(es):\n")
     for old_hash, new_name in migrated:
         console.print(f"  {old_hash} → [cyan]{new_name}[/cyan]")
@@ -1783,21 +1782,21 @@ def daemon_start(
     ] = False,
 ) -> None:
     """Start the index daemon.
-    
+
     The daemon watches registered projects for file changes and
     automatically updates their indexes.
-    
+
     Examples:
         rlm-dspy daemon start              # Start in background
         rlm-dspy daemon start --foreground # Run in foreground
     """
     from .core.daemon import IndexDaemon, is_daemon_running, get_daemon_pid
-    
+
     if is_daemon_running():
         pid = get_daemon_pid()
         console.print(f"[yellow]Daemon already running (PID: {pid})[/yellow]")
         return
-    
+
     if foreground:
         console.print("[dim]Starting daemon in foreground (Ctrl+C to stop)...[/dim]")
         daemon = IndexDaemon()
@@ -1813,19 +1812,19 @@ def daemon_start(
 @daemon_app.command("stop")
 def daemon_stop() -> None:
     """Stop the index daemon.
-    
+
     Examples:
         rlm-dspy daemon stop
     """
     from .core.daemon import stop_daemon, is_daemon_running, get_daemon_pid
-    
+
     if not is_daemon_running():
         console.print("[dim]Daemon not running[/dim]")
         return
-    
+
     pid = get_daemon_pid()
     console.print(f"[dim]Stopping daemon (PID: {pid})...[/dim]")
-    
+
     if stop_daemon():
         console.print("[green]✓[/green] Daemon stopped")
     else:
@@ -1836,29 +1835,29 @@ def daemon_stop() -> None:
 @daemon_app.command("status")
 def daemon_status() -> None:
     """Show daemon status.
-    
+
     Examples:
         rlm-dspy daemon status
     """
     from .core.daemon import is_daemon_running, get_daemon_pid, DaemonConfig
-    
+
     if not is_daemon_running():
         console.print("[yellow]○[/yellow] Daemon not running")
         console.print("[dim]Run 'rlm-dspy daemon start' to start[/dim]")
         return
-    
+
     pid = get_daemon_pid()
     config = DaemonConfig.from_user_config()
-    
+
     console.print(f"[green]●[/green] Daemon running (PID: {pid})")
     console.print(f"  Log file: {config.log_file}")
     console.print(f"  PID file: {config.pid_file}")
-    
+
     # Show watched projects
     from .core.project_registry import get_project_registry
     registry = get_project_registry()
     watched = [p for p in registry.list() if p.auto_watch]
-    
+
     if watched:
         console.print(f"\n  Watching {len(watched)} project(s):")
         for p in watched:
@@ -1873,30 +1872,30 @@ def daemon_watch(
     ],
 ) -> None:
     """Add a project to the daemon watch list.
-    
+
     The daemon must be running for this to take effect immediately.
     Otherwise, the project will be watched when the daemon starts.
-    
+
     Examples:
         rlm-dspy daemon watch my-app
     """
     from .core.project_registry import get_project_registry
     from .core.daemon import is_daemon_running
-    
+
     registry = get_project_registry()
     proj = registry.get(project)
-    
+
     if not proj:
         console.print(f"[red]✗[/red] Project '{project}' not found")
         console.print("[dim]Use 'rlm-dspy project add' to register it first[/dim]")
         raise typer.Exit(1)
-    
+
     # Set auto_watch flag
     proj.auto_watch = True
     registry._save()
-    
+
     console.print(f"[green]✓[/green] Project '{project}' will be watched")
-    
+
     if not is_daemon_running():
         console.print("[dim]Note: Daemon not running. Start with 'rlm-dspy daemon start'[/dim]")
     else:
@@ -1911,56 +1910,56 @@ def daemon_unwatch(
     ],
 ) -> None:
     """Remove a project from the daemon watch list.
-    
+
     Examples:
         rlm-dspy daemon unwatch my-app
     """
     from .core.project_registry import get_project_registry
-    
+
     registry = get_project_registry()
     proj = registry.get(project)
-    
+
     if not proj:
         console.print(f"[red]✗[/red] Project '{project}' not found")
         raise typer.Exit(1)
-    
+
     proj.auto_watch = False
     registry._save()
-    
+
     console.print(f"[green]✓[/green] Project '{project}' will no longer be watched")
 
 
 @daemon_app.command("list")
 def daemon_list() -> None:
     """List projects being watched by the daemon.
-    
+
     Examples:
         rlm-dspy daemon list
     """
     from .core.project_registry import get_project_registry
     from .core.daemon import is_daemon_running
-    
+
     registry = get_project_registry()
     watched = [p for p in registry.list() if p.auto_watch]
-    
+
     if not watched:
         console.print("[dim]No projects configured for watching[/dim]")
         console.print("[dim]Use 'rlm-dspy daemon watch <project>' to add one[/dim]")
         return
-    
+
     running = is_daemon_running()
     status = "[green]●[/green] running" if running else "[yellow]○[/yellow] stopped"
-    
+
     console.print(f"Daemon: {status}\n")
-    
+
     table = Table(title="Watched Projects")
     table.add_column("Project", style="cyan")
     table.add_column("Path", style="dim")
     table.add_column("Snippets", justify="right")
-    
+
     for p in watched:
         table.add_row(p.name, p.path, str(p.snippet_count) if p.snippet_count else "-")
-    
+
     console.print(table)
 
 
@@ -1980,7 +1979,7 @@ def daemon_log(
     ] = False,
 ) -> None:
     """View the daemon log file.
-    
+
     Examples:
         rlm-dspy daemon log              # Show last 50 lines
         rlm-dspy daemon log -n 100       # Show last 100 lines
@@ -1988,10 +1987,10 @@ def daemon_log(
         rlm-dspy daemon log --clear      # Clear the log
     """
     from .core.daemon import DaemonConfig
-    
+
     config = DaemonConfig.from_user_config()
     log_file = config.log_file
-    
+
     if clear:
         if log_file.exists():
             log_file.write_text("")
@@ -1999,12 +1998,12 @@ def daemon_log(
         else:
             console.print("[dim]Log file doesn't exist[/dim]")
         return
-    
+
     if not log_file.exists():
         console.print(f"[dim]No log file found at {log_file}[/dim]")
         console.print("[dim]Start the daemon to create logs[/dim]")
         return
-    
+
     if follow:
         import subprocess
         console.print(f"[dim]Following {log_file} (Ctrl+C to stop)...[/dim]\n")
@@ -2013,20 +2012,20 @@ def daemon_log(
         except KeyboardInterrupt:
             pass
         return
-    
+
     # Read last N lines
     content = log_file.read_text()
     all_lines = content.splitlines()
-    
+
     if not all_lines:
         console.print("[dim]Log file is empty[/dim]")
         return
-    
+
     # Show last N lines
     display_lines = all_lines[-lines:] if len(all_lines) > lines else all_lines
-    
+
     console.print(f"[dim]Showing last {len(display_lines)} of {len(all_lines)} lines from {log_file}[/dim]\n")
-    
+
     for line in display_lines:
         # Colorize based on log level
         if " - ERROR - " in line or "ERROR" in line:

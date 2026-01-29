@@ -1,8 +1,6 @@
 """Tests for built-in tools."""
 
 import os
-import tempfile
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -129,7 +127,7 @@ class TestFileStats:
         """Test file_stats on a single file."""
         f = tmp_path / "test.py"
         f.write_text("line 1\nline 2\n")
-        
+
         result = file_stats(str(f))
         assert "file" in result.lower()
         assert "line" in result.lower() or "2" in result
@@ -138,7 +136,7 @@ class TestFileStats:
         """Test file_stats on a directory."""
         (tmp_path / "a.py").write_text("# python\n")
         (tmp_path / "b.py").write_text("# python\n")
-        
+
         result = file_stats(str(tmp_path))
         assert "directory" in result.lower() or "file_count" in result.lower()
 
@@ -179,7 +177,7 @@ class TestGrepContext:
         """Test grep_context returns surrounding lines."""
         f = tmp_path / "test.py"
         f.write_text("# comment\ndef target():\n    pass\n# end\n")
-        
+
         result = grep_context("target", str(tmp_path), context_lines=1)
         if "not installed" not in result:
             # Should include context lines
@@ -194,7 +192,7 @@ class TestFindFiles:
         (tmp_path / "a.py").write_text("")
         (tmp_path / "b.py").write_text("")
         (tmp_path / "c.txt").write_text("")
-        
+
         result = find_files("*.py", str(tmp_path))
         if "not installed" not in result:
             assert "a.py" in result
@@ -254,7 +252,7 @@ class TestFindDefinitions:
         """Test finding definitions."""
         f = tmp_path / "test.py"
         f.write_text("def foo(): pass\nclass Bar: pass\n")
-        
+
         result = find_definitions(str(f))
         assert "foo" in result
         assert "Bar" in result
@@ -267,7 +265,7 @@ class TestFindClasses:
         """Test finding classes."""
         f = tmp_path / "test.py"
         f.write_text("class MyClass: pass\ndef func(): pass\n")
-        
+
         result = find_classes(str(f))
         assert "MyClass" in result
 
@@ -279,7 +277,7 @@ class TestFindFunctions:
         """Test finding functions."""
         f = tmp_path / "test.py"
         f.write_text("def my_func(): pass\nclass MyClass: pass\n")
-        
+
         result = find_functions(str(f))
         assert "my_func" in result
 
@@ -291,7 +289,7 @@ class TestFindMethods:
         """Test finding methods."""
         f = tmp_path / "test.py"
         f.write_text("class MyClass:\n    def my_method(self): pass\n")
-        
+
         result = find_methods(str(f))
         assert "my_method" in result
         assert "MyClass" in result  # Parent class should be shown
@@ -304,7 +302,7 @@ class TestFindImports:
         """Test finding imports."""
         f = tmp_path / "test.py"
         f.write_text("import os\nfrom pathlib import Path\n")
-        
+
         result = find_imports(str(f))
         if "not installed" not in result:
             assert "import" in result
@@ -317,7 +315,7 @@ class TestFindCalls:
         """Test finding function calls."""
         f = tmp_path / "test.py"
         f.write_text("print('hello')\nprint('world')\n")
-        
+
         result = find_calls(str(f), "print")
         if "not installed" not in result:
             assert "print" in result

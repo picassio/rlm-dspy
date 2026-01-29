@@ -1,8 +1,6 @@
 """Tests for core RLM functionality."""
 
 import os
-import tempfile
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -91,15 +89,15 @@ class TestRLMLoadContext:
         # Create files
         (tmp_path / "main.py").write_text("def main():\n    print('hello')\n")
         (tmp_path / "utils.py").write_text("def helper():\n    pass\n")
-        
+
         # Create subdirectory
         subdir = tmp_path / "src"
         subdir.mkdir()
         (subdir / "app.py").write_text("class App:\n    pass\n")
-        
+
         # Create gitignore
         (tmp_path / ".gitignore").write_text("*.pyc\n__pycache__/\n")
-        
+
         return tmp_path
 
     @pytest.fixture
@@ -127,7 +125,7 @@ class TestRLMLoadContext:
         """Test that gitignore patterns are respected."""
         # Create a .pyc file that should be ignored
         (temp_project / "test.pyc").write_text("binary content")
-        
+
         context = mock_rlm.load_context([str(temp_project)])
         assert "test.pyc" not in context
         assert "binary content" not in context
@@ -182,10 +180,10 @@ class TestRLMTools:
         with patch("rlm_dspy.core.rlm.dspy"):
             config = RLMConfig(api_key="test-key", model="test/model")
             rlm = RLM(config=config, use_tools=False)
-            
+
             def my_tool(query: str) -> str:
                 return f"Result: {query}"
-            
+
             rlm.add_tool("my_tool", my_tool)
             assert "my_tool" in rlm._tools
 
@@ -198,7 +196,7 @@ class TestRLMBatch:
         with patch("rlm_dspy.core.rlm.dspy"):
             config = RLMConfig(api_key="test-key", model="test/model")
             rlm = RLM(config=config, use_tools=False)
-            
+
             # Missing 'query' field should raise
             with pytest.raises(ValueError, match="missing 'query' field"):
                 rlm.batch([{"context": "test"}], context="base")
@@ -210,10 +208,10 @@ class TestRLMBatch:
             mock_rlm = MagicMock()
             mock_rlm.batch.return_value = ([], [], [])
             mock_dspy.RLM.return_value = mock_rlm
-            
+
             config = RLMConfig(api_key="test-key", model="test/model")
             rlm = RLM(config=config, use_tools=False)
-            
+
             # Should not raise
             queries = [
                 {"query": "Question 1"},
@@ -234,24 +232,24 @@ class TestRLMSignatures:
         with patch("rlm_dspy.core.rlm.dspy"):
             config = RLMConfig(api_key="test-key", model="test/model")
             rlm = RLM(config=config, signature="context, query -> answer")
-            
+
             # Signature should be wrapped
             assert rlm._signature is not None
 
     def test_class_signature(self):
         """Test class signature is wrapped with tool instructions."""
         import dspy
-        
+
         class TestSignature(dspy.Signature):
             """Test signature."""
             context: str = dspy.InputField()
             query: str = dspy.InputField()
             answer: str = dspy.OutputField()
-        
+
         with patch("rlm_dspy.core.rlm.dspy"):
             config = RLMConfig(api_key="test-key", model="test/model")
             rlm = RLM(config=config, signature=TestSignature)
-            
+
             assert rlm._signature is not None
             assert rlm._is_structured is True
 
@@ -259,7 +257,7 @@ class TestRLMSignatures:
 @pytest.mark.integration
 class TestRLMIntegration:
     """Integration tests requiring API access.
-    
+
     These tests are skipped unless RLM_API_KEY is set.
     Run with: pytest -m integration
     """
@@ -275,10 +273,10 @@ class TestRLMIntegration:
         # Create a test file
         test_file = tmp_path / "test.py"
         test_file.write_text("def hello():\n    return 'world'\n")
-        
+
         rlm = RLM()
         context = rlm.load_context([str(test_file)])
         result = rlm.query("What does the hello function return?", context)
-        
+
         assert result.success
         assert "world" in result.answer.lower()

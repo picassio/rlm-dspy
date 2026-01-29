@@ -5,8 +5,8 @@
 This PR represents a complete refactoring of rlm-dspy to use DSPy's native `dspy.RLM` module for REPL-based exploration. The changes include extensive new features, comprehensive test coverage, security hardening, and performance optimizations.
 
 **Branch:** `refactor/use-dspy-rlm`  
-**Commits:** 95  
-**Lines Changed:** +16,781 / -6,540  
+**Commits:** 97  
+**Lines Changed:** +16,894 / -6,512  
 
 ## Key Changes
 

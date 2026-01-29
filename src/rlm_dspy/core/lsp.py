@@ -9,7 +9,6 @@ Uses solidlsp from the Serena project for unified LSP management.
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -26,14 +25,14 @@ class LSPConfig:
     enabled: bool = True
     timeout: int = 30  # Request timeout in seconds
     cache_dir: Path = field(default_factory=lambda: Path.home() / ".rlm" / "lsp_cache")
-    
+
     @classmethod
     def from_user_config(cls) -> "LSPConfig":
         """Load from user config."""
         try:
             from .user_config import load_config
             config = load_config()
-            
+
             return cls(
                 enabled=config.get("lsp_enabled", True),
                 timeout=config.get("lsp_timeout", 30),
@@ -45,31 +44,31 @@ class LSPConfig:
 
 class LSPManager:
     """Manages language server connections for different projects/languages.
-    
+
     Provides a unified interface for LSP operations across all supported languages.
     Lazily starts language servers as needed.
-    
+
     Example:
         ```python
         manager = get_lsp_manager()
-        
+
         # Find all references to a symbol
         refs = manager.find_references("/path/to/file.py", "MyClass", line=10)
-        
+
         # Get type info for a symbol
         info = manager.get_hover_info("/path/to/file.py", line=10, column=5)
         ```
     """
-    
+
     def __init__(self, config: LSPConfig | None = None):
         self.config = config or LSPConfig.from_user_config()
         self._servers: dict[str, Any] = {}  # project_root -> SolidLanguageServer
         self._solidlsp_available = self._check_solidlsp()
-    
+
     def _check_solidlsp(self) -> bool:
         """Check if solidlsp is available."""
         try:
-            from solidlsp import SolidLanguageServer
+            from solidlsp import SolidLanguageServer  # noqa: F401
             return True
         except ImportError:
             logger.warning(
@@ -77,23 +76,22 @@ class LSPManager:
                 "Install with: pip install -e path/to/serena"
             )
             return False
-    
+
     def _get_server(self, file_path: str) -> Any | None:
         """Get or create a language server for the given file."""
         if not self._solidlsp_available or not self.config.enabled:
             return None
-        
+
         from solidlsp import SolidLanguageServer
-        from solidlsp.ls_config import Language
-        
+
         path = Path(file_path).resolve()
         if not path.exists():
             return None
-        
+
         # Find project root (look for common markers)
         project_root = self._find_project_root(path)
         project_key = str(project_root)
-        
+
         if project_key in self._servers:
             server = self._servers[project_key]
             if server.is_running():
@@ -101,16 +99,16 @@ class LSPManager:
             else:
                 # Server stopped, remove from cache
                 del self._servers[project_key]
-        
+
         # Determine language from file extension
         language = self._get_language(path)
         if not language:
             return None
-        
+
         # Create and start language server
         try:
             from solidlsp.ls_config import LanguageServerConfig
-            
+
             ls_config = LanguageServerConfig(code_language=language)
             server = SolidLanguageServer.create(
                 config=ls_config,
@@ -124,7 +122,7 @@ class LSPManager:
         except Exception as e:
             logger.warning("Failed to start language server: %s", e)
             return None
-    
+
     def _find_project_root(self, path: Path) -> Path:
         """Find project root by looking for common markers."""
         markers = [
@@ -132,22 +130,22 @@ class LSPManager:
             "go.mod", "pom.xml", "build.gradle", "build.sbt",
             ".project", "Makefile", "CMakeLists.txt"
         ]
-        
+
         current = path if path.is_dir() else path.parent
         while current != current.parent:
             for marker in markers:
                 if (current / marker).exists():
                     return current
             current = current.parent
-        
+
         # Fallback to file's directory
         return path if path.is_dir() else path.parent
-    
+
     def _get_language(self, path: Path) -> Any | None:
         """Get Language enum for a file extension."""
         try:
             from solidlsp.ls_config import Language
-            
+
             ext_map = {
                 # Python
                 ".py": Language.PYTHON,
@@ -216,27 +214,27 @@ class LSPManager:
             return ext_map.get(path.suffix.lower())
         except ImportError:
             return None
-    
+
     def find_references(
-        self, 
-        file_path: str, 
-        line: int, 
+        self,
+        file_path: str,
+        line: int,
         column: int = 0,
     ) -> list[dict[str, Any]]:
         """Find all references to the symbol at the given position.
-        
+
         Args:
             file_path: Path to the file
             line: Line number (1-indexed)
             column: Column number (0-indexed)
-            
+
         Returns:
             List of references with file, line, and column info
         """
         server = self._get_server(file_path)
         if not server:
             return []
-        
+
         try:
             # solidlsp uses relative path from project root
             abs_path = Path(file_path).resolve()
@@ -245,16 +243,16 @@ class LSPManager:
                 rel_path = str(abs_path.relative_to(project_root))
             except ValueError:
                 rel_path = str(abs_path)
-            
+
             refs = server.request_references(
-                rel_path, 
+                rel_path,
                 line - 1,  # LSP uses 0-indexed lines
                 column,
             )
-            
+
             if not refs:
                 return []
-            
+
             # solidlsp returns Location objects (TypedDict-like)
             result = []
             for ref in refs:
@@ -276,35 +274,35 @@ class LSPManager:
         except Exception as e:
             logger.warning("Failed to find references: %s", e)
             return []
-    
+
     def go_to_definition(
-        self, 
-        file_path: str, 
-        line: int, 
+        self,
+        file_path: str,
+        line: int,
         column: int = 0
     ) -> dict[str, Any] | None:
         """Go to the definition of the symbol at the given position.
-        
+
         Args:
             file_path: Path to the file
             line: Line number (1-indexed)
             column: Column number (0-indexed)
-            
+
         Returns:
             Definition location with file, line, and column
         """
         server = self._get_server(file_path)
         if not server:
             return None
-        
+
         try:
             result = server.request_definition(file_path, line - 1, column)
             if not result:
                 return None
-            
+
             # Handle both single location and list of locations
             loc = result[0] if isinstance(result, list) else result
-            
+
             return {
                 "file": loc.get("uri", "").replace("file://", ""),
                 "line": loc.get("range", {}).get("start", {}).get("line", 0) + 1,
@@ -313,32 +311,32 @@ class LSPManager:
         except Exception as e:
             logger.warning("Failed to go to definition: %s", e)
             return None
-    
+
     def get_hover_info(
-        self, 
-        file_path: str, 
-        line: int, 
+        self,
+        file_path: str,
+        line: int,
         column: int = 0
     ) -> str | None:
         """Get hover information (type signature, docs) for symbol at position.
-        
+
         Args:
             file_path: Path to the file
             line: Line number (1-indexed)
             column: Column number (0-indexed)
-            
+
         Returns:
             Hover information as string (may contain markdown)
         """
         server = self._get_server(file_path)
         if not server:
             return None
-        
+
         try:
             result = server.request_hover(file_path, line - 1, column)
             if not result:
                 return None
-            
+
             # Extract contents from hover response
             contents = result.get("contents", "")
             if isinstance(contents, dict):
@@ -352,25 +350,25 @@ class LSPManager:
         except Exception as e:
             logger.warning("Failed to get hover info: %s", e)
             return None
-    
+
     def get_document_symbols(self, file_path: str) -> list[dict[str, Any]]:
         """Get all symbols in a document.
-        
+
         Args:
             file_path: Path to the file
-            
+
         Returns:
             List of symbols with name, kind, line, and children
         """
         server = self._get_server(file_path)
         if not server:
             return []
-        
+
         try:
             result = server.request_document_symbols(file_path)
             if result is None:
                 return []
-            
+
             # solidlsp returns DocumentSymbols object with root_symbols attribute
             if hasattr(result, 'root_symbols'):
                 symbols = result.root_symbols
@@ -378,15 +376,15 @@ class LSPManager:
                 symbols = result
             else:
                 symbols = []
-            
+
             return self._flatten_symbols(symbols)
         except Exception as e:
             logger.warning("Failed to get document symbols: %s", e)
             return []
-    
+
     def _flatten_symbols(
-        self, 
-        symbols: list[dict], 
+        self,
+        symbols: list[dict],
         parent: str | None = None
     ) -> list[dict[str, Any]]:
         """Flatten nested document symbols into a list."""
@@ -395,7 +393,7 @@ class LSPManager:
             name = sym.get("name", "")
             kind = sym.get("kind", 0)
             range_info = sym.get("range", sym.get("location", {}).get("range", {}))
-            
+
             result.append({
                 "name": name,
                 "kind": self._symbol_kind_name(kind),
@@ -403,14 +401,14 @@ class LSPManager:
                 "end_line": range_info.get("end", {}).get("line", 0) + 1,
                 "parent": parent,
             })
-            
+
             # Recurse into children
             children = sym.get("children", [])
             if children:
                 result.extend(self._flatten_symbols(children, parent=name))
-        
+
         return result
-    
+
     def _symbol_kind_name(self, kind: int) -> str:
         """Convert LSP SymbolKind number to name."""
         kinds = {
@@ -423,36 +421,36 @@ class LSPManager:
             25: "operator", 26: "type_parameter",
         }
         return kinds.get(kind, f"kind_{kind}")
-    
+
     def rename_symbol(
-        self, 
-        file_path: str, 
-        line: int, 
-        column: int, 
+        self,
+        file_path: str,
+        line: int,
+        column: int,
         new_name: str
     ) -> dict[str, list[dict]] | None:
         """Get edits needed to rename a symbol.
-        
+
         Args:
             file_path: Path to the file
             line: Line number (1-indexed)
             column: Column number (0-indexed)
             new_name: New name for the symbol
-            
+
         Returns:
             Dict mapping file paths to list of edits
         """
         server = self._get_server(file_path)
         if not server:
             return None
-        
+
         try:
             result = server.request_rename_symbol_edit(
                 file_path, line - 1, column, new_name
             )
             if not result:
                 return None
-            
+
             # Convert workspace edit to our format
             edits: dict[str, list[dict]] = {}
             for uri, changes in result.get("changes", {}).items():
@@ -471,7 +469,7 @@ class LSPManager:
         except Exception as e:
             logger.warning("Failed to rename symbol: %s", e)
             return None
-    
+
     def shutdown(self) -> None:
         """Shutdown all running language servers."""
         for project, server in list(self._servers.items()):

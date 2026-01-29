@@ -125,13 +125,13 @@ def parse_retry_after(response: httpx.Response | None) -> float | None:
 
     # Maximum retry delay (1 hour) to prevent unbounded waits
     MAX_RETRY_DELAY = 3600.0
-    
+
     retry_after = response.headers.get("retry-after") or response.headers.get("Retry-After")
     if not retry_after:
         return None
 
     delay = None
-    
+
     # Try as integer seconds
     try:
         delay = float(retry_after)
@@ -155,7 +155,7 @@ def parse_retry_after(response: httpx.Response | None) -> float | None:
     # Apply bounds: must be positive and capped at MAX_RETRY_DELAY
     if delay is not None:
         return max(0.0, min(delay, MAX_RETRY_DELAY))
-    
+
     return None
 
 
@@ -321,11 +321,11 @@ def retry_sync(
                     delay = None
                     if isinstance(e, httpx.HTTPStatusError):
                         delay = parse_retry_after(e.response)
-                    
+
                     # Fall back to exponential backoff with jitter
                     if delay is None:
                         delay = base_delay * (2**attempt) + random.random()
-                    
+
                     logger.warning(
                         "Retry %d/%d: %s. Waiting %.2fs",
                         attempt + 1,

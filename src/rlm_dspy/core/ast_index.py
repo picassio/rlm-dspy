@@ -66,38 +66,38 @@ class Definition:
 class ASTIndex:
     """Index of code definitions extracted via tree-sitter."""
     definitions: list[Definition] = field(default_factory=list)
-    
+
     # Lazy-built indexes for O(1) lookup
     _by_name: dict[str, list[Definition]] = field(default_factory=dict, repr=False)
     _by_kind: dict[str, list[Definition]] = field(default_factory=dict, repr=False)
     _indexes_built: bool = field(default=False, repr=False)
-    
+
     def _build_indexes(self) -> None:
         """Build hash indexes for fast lookup."""
         if self._indexes_built:
             return
-        
+
         self._by_name.clear()
         self._by_kind.clear()
-        
+
         for d in self.definitions:
             # Index by lowercase name for case-insensitive lookup
             name_lower = d.name.lower()
             if name_lower not in self._by_name:
                 self._by_name[name_lower] = []
             self._by_name[name_lower].append(d)
-            
+
             # Index by kind
             if d.kind not in self._by_kind:
                 self._by_kind[d.kind] = []
             self._by_kind[d.kind].append(d)
-        
+
         self._indexes_built = True
 
     def find(self, name: str | None = None, kind: str | None = None) -> list[Definition]:
         """Find definitions matching criteria. Uses hash indexes for O(1) lookup."""
         self._build_indexes()
-        
+
         if name and kind:
             # Both filters: intersect results using id() for comparison
             name_lower = name.lower()
@@ -105,11 +105,11 @@ class ASTIndex:
             for key in self._by_name:
                 if name_lower in key:
                     name_matches.extend(self._by_name[key])
-            
+
             # Get kind matches
             kind_matches = self._by_kind.get(kind, [])
             kind_ids = {id(d) for d in kind_matches}
-            
+
             # Return intersection
             return [d for d in name_matches if id(d) in kind_ids]
         elif name:
@@ -263,7 +263,7 @@ def _extract_definitions(node, language: str, results: list[Definition], file: s
                 ))
                 break
         return  # Don't recurse into function body
-    
+
     # Lua: function_declaration with name child
     if language == "lua" and node.type == "function_declaration":
         name_node = node.child_by_field_name("name")
@@ -299,11 +299,11 @@ def _get_cache_key(path: Path) -> tuple[str, float] | None:
 
 def index_file(path: Path | str, use_cache: bool = True) -> ASTIndex:
     """Index a single file using tree-sitter.
-    
+
     Args:
         path: Path to the file to index
         use_cache: Whether to use cached results (default: True)
-        
+
     Returns:
         ASTIndex with definitions found in the file
     """
@@ -331,7 +331,7 @@ def index_file(path: Path | str, use_cache: bool = True) -> ASTIndex:
         if path.stat().st_size > 1_000_000:
             logger.debug("Skipping large file: %s", path)
             return ASTIndex()
-        
+
         code = path.read_text(encoding='utf-8', errors='replace')
         tree = parser.parse(bytes(code, "utf8"))
 
@@ -339,7 +339,7 @@ def index_file(path: Path | str, use_cache: bool = True) -> ASTIndex:
         _extract_definitions(tree.root_node, language, definitions, str(path))
 
         result = ASTIndex(definitions=definitions)
-        
+
         # Store in cache
         if use_cache:
             cache_key = _get_cache_key(path)
@@ -348,7 +348,7 @@ def index_file(path: Path | str, use_cache: bool = True) -> ASTIndex:
                 while len(_index_cache) >= _MAX_CACHE_SIZE:
                     _index_cache.popitem(last=False)  # Remove oldest (FIFO order)
                 _index_cache[cache_key] = result
-        
+
         return result
     except Exception as e:
         logger.warning(f"Failed to index {path}: {e}")
@@ -357,11 +357,11 @@ def index_file(path: Path | str, use_cache: bool = True) -> ASTIndex:
 
 def index_files(paths: list[Path | str], use_cache: bool = True) -> ASTIndex:
     """Index multiple files.
-    
+
     Args:
         paths: List of file paths to index
         use_cache: Whether to use cached results (default: True)
-        
+
     Returns:
         Combined ASTIndex with all definitions
     """
@@ -374,7 +374,7 @@ def index_files(paths: list[Path | str], use_cache: bool = True) -> ASTIndex:
 
 def clear_index_cache() -> int:
     """Clear the AST index cache.
-    
+
     Returns:
         Number of entries cleared
     """
@@ -386,7 +386,7 @@ def clear_index_cache() -> int:
 
 def get_cache_stats() -> dict[str, int]:
     """Get cache statistics.
-    
+
     Returns:
         Dict with cache size and max size
     """
