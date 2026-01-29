@@ -547,14 +547,28 @@ class IndexDaemon:
         signal.signal(signal.SIGTERM, handle_signal)
         signal.signal(signal.SIGINT, handle_signal)
     
+    def __del__(self) -> None:
+        """Cleanup on garbage collection."""
+        # Ensure PID fd is closed even if stop() wasn't called
+        if hasattr(self, '_pid_fd') and self._pid_fd is not None:
+            try:
+                os.close(self._pid_fd)
+            except OSError:
+                pass
+            self._pid_fd = None
+    
     def _write_pid_file(self) -> None:
         """Write PID file with file locking to prevent races."""
         pid_file = self.config.pid_file
         pid_file.parent.mkdir(parents=True, exist_ok=True)
         
         try:
-            # Open with exclusive creation to detect existing daemon
-            fd = os.open(str(pid_file), os.O_CREAT | os.O_WRONLY | os.O_TRUNC)
+            # Open with O_CLOEXEC to prevent fd inheritance after fork
+            # This prevents the fd from leaking to child processes
+            flags = os.O_CREAT | os.O_WRONLY | os.O_TRUNC
+            if hasattr(os, 'O_CLOEXEC'):  # Unix
+                flags |= os.O_CLOEXEC
+            fd = os.open(str(pid_file), flags)
             
             # Try to get exclusive lock (platform-specific)
             if sys.platform != "win32":

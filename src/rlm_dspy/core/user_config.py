@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -219,8 +220,7 @@ def save_config(config: dict[str, Any], use_template: bool = True) -> None:
             env_file=fmt(full_config.get("env_file")),
         )
         
-        with open(CONFIG_FILE, "w") as f:
-            f.write(content)
+        _atomic_write(CONFIG_FILE, content)
     else:
         # Simple mode: only save non-default values
         to_save = {}
@@ -230,8 +230,32 @@ def save_config(config: dict[str, Any], use_template: bool = True) -> None:
             elif key not in DEFAULT_CONFIG:
                 to_save[key] = value
 
-        with open(CONFIG_FILE, "w") as f:
-            yaml.dump(to_save, f, default_flow_style=False, sort_keys=False)
+        content = yaml.dump(to_save, default_flow_style=False, sort_keys=False)
+        _atomic_write(CONFIG_FILE, content)
+
+
+def _atomic_write(path: Path, content: str) -> None:
+    """Write content to file atomically using temp file + rename."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode='w',
+            dir=path.parent,
+            suffix='.tmp',
+            delete=False,
+            encoding='utf-8'
+        ) as f:
+            f.write(content)
+            temp_path = Path(f.name)
+        
+        temp_path.replace(path)
+    except Exception:
+        if temp_path and temp_path.exists():
+            temp_path.unlink()
+        raise
 
 
 def load_env_file(env_path: str | Path | None = None) -> dict[str, str]:
