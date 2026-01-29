@@ -322,6 +322,9 @@ sub_model: openrouter/google/gemini-3-flash-preview  # Use same model to reduce 
 max_iterations: 30      # Max REPL iterations (default: 20)
 max_llm_calls: 100      # Max sub-LLM calls (default: 50)
 
+# Parallelism settings
+max_workers: 8          # Workers for batch operations (default: 8)
+
 # Budget/safety limits
 max_budget: 2.0         # Max cost in USD (default: 1.0)
 max_timeout: 600        # Max time in seconds (default: 300)
@@ -343,6 +346,7 @@ env_file: ~/.env
 | `RLM_MAX_ITERATIONS` | `20` | Max REPL iterations |
 | `RLM_MAX_LLM_CALLS` | `50` | Max sub-LLM calls per query |
 | `RLM_MAX_OUTPUT_CHARS` | `100000` | Max chars in REPL output |
+| `RLM_MAX_WORKERS` | `8` | Parallel workers for batch ops |
 | `RLM_MAX_BUDGET` | `1.0` | Maximum cost in USD |
 | `RLM_MAX_TIMEOUT` | `300` | Maximum time in seconds |
 
@@ -378,10 +382,58 @@ rlm-dspy ask "How is the code organized?" src/
 rlm-dspy example
 ```
 
+## CLI Reference
+
+### Basic Usage
+
+```bash
+rlm-dspy ask "Your question" src/           # Analyze files/directories
+rlm-dspy ask "Question" --stdin < file.txt  # From stdin
+rlm-dspy analyze src/                       # Parallel batch analysis
+rlm-dspy diff HEAD~1                        # Review git diff
+```
+
+### Key Options
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--signature` | `-S` | Output format: security, bugs, review, architecture, performance, diff |
+| `--max-iterations` | `-i` | Max REPL iterations (default: 20) |
+| `--max-tokens` | `-T` | Truncate context to token limit |
+| `--max-workers` | `-w` | Parallel workers for batch ops |
+| `--no-tools` | | Disable built-in tools (ripgrep, AST) |
+| `--no-cache` | | Disable context caching |
+| `--validate` | `-V` | Check output for hallucinations |
+| `--json` | `-j` | JSON output format |
+| `--verbose` | `-v` | Show detailed progress |
+| `--debug` | `-d` | Full debug output |
+
+### Examples with Options
+
+```bash
+# Structured security audit
+rlm-dspy ask "Find vulnerabilities" src/ -S security -j
+
+# Truncate large codebase
+rlm-dspy ask "Overview" src/ -T 50000
+
+# More thorough analysis
+rlm-dspy ask "Find bugs" src/ -S bugs -i 30
+
+# Parallel batch (8 workers)
+rlm-dspy ask "Analyze" src/ -w 8
+
+# Fresh load (no cache)
+rlm-dspy ask "Check" src/ --no-cache
+
+# With hallucination check
+rlm-dspy ask "Find issues" src/ --validate
+```
+
 ## Python API Reference
 
 ```python
-from rlm_dspy import RLM, RLMConfig, RLMResult
+from rlm_dspy import RLM, RLMConfig, RLMResult, ProgressCallback
 
 # Configuration
 config = RLMConfig(
@@ -390,6 +442,7 @@ config = RLMConfig(
     max_iterations=20,
     max_llm_calls=50,
     max_output_chars=100_000,
+    max_workers=8,             # Parallel workers for batch
     max_budget=1.0,
     max_timeout=300,
     verbose=False,
@@ -398,8 +451,12 @@ config = RLMConfig(
 # Create RLM instance
 rlm = RLM(config=config)
 
-# Load context
-context = rlm.load_context(["src/", "docs/"])
+# Load context with options
+context = rlm.load_context(
+    ["src/", "docs/"],
+    max_tokens=100_000,   # Truncate if too large
+    use_cache=True,       # Use context caching
+)
 
 # Query
 result = rlm.query("What does this do?", context)
@@ -411,6 +468,22 @@ result.trajectory      # list: REPL iteration history
 result.iterations      # int: Number of iterations
 result.elapsed_time    # float: Total time in seconds
 result.error           # str | None: Error message if failed
+result.outputs         # dict: Structured outputs (for custom signatures)
+
+# Batch processing (parallel)
+results = rlm.batch([
+    {"query": "What is this?"},
+    {"query": "Find bugs"},
+], context, num_threads=4)
+
+# Progress callbacks
+class MyProgress(ProgressCallback):
+    def on_start(self, query, tokens):
+        print(f"Starting with {tokens} tokens")
+    def on_complete(self, result):
+        print(f"Done in {result.elapsed_time:.1f}s")
+
+rlm = RLM(config=config, progress_callback=MyProgress())
 
 # Add custom tools
 def search_docs(query: str) -> str:
