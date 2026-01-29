@@ -860,6 +860,64 @@ project = registry.get("my-app")
     └── backend/
 ```
 
+### Index Daemon (Auto-Indexing)
+
+Run a background daemon that automatically re-indexes projects when files change:
+
+```bash
+# Start daemon
+rlm-dspy daemon start              # Background (daemonize)
+rlm-dspy daemon start --foreground # Foreground (Ctrl+C to stop)
+
+# Stop daemon
+rlm-dspy daemon stop
+
+# Check status
+rlm-dspy daemon status
+# ● Daemon running (PID: 12345)
+#   Watching 2 project(s):
+#     - my-app
+#     - backend
+
+# Add project to watch list
+rlm-dspy daemon watch my-app
+
+# Remove from watch list
+rlm-dspy daemon unwatch my-app
+
+# List watched projects
+rlm-dspy daemon list
+```
+
+```python
+from rlm_dspy.core import IndexDaemon
+
+# Start daemon programmatically
+daemon = IndexDaemon()
+daemon.start()
+
+# Watch a project
+daemon.watch("my-app")
+
+# Stop daemon
+daemon.stop()
+```
+
+**Features:**
+- **File watching**: Uses `watchdog` for cross-platform file monitoring
+- **Debouncing**: Waits 5s after last change before re-indexing
+- **Auto-watch**: Projects with `auto_watch=True` are watched on daemon start
+- **Resource limits**: Configurable max concurrent index builds
+- **Idle timeout**: Optional auto-stop after period of inactivity
+
+**Configuration** (`~/.rlm/config.yaml`):
+```yaml
+daemon:
+  watch_debounce: 5        # Seconds to wait after file change
+  max_concurrent_indexes: 2 # Max parallel index builds
+  idle_timeout: 0          # Auto-stop after N seconds (0 = never)
+```
+
 ## Documentation
 
 - **[Provider Guide](docs/PROVIDERS.md)** - Supported LLM providers

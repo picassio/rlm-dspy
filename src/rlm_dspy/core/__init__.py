@@ -41,6 +41,15 @@ from .project_registry import (
     get_project_registry,
 )
 
+# Daemon
+from .daemon import (
+    DaemonConfig,
+    IndexDaemon,
+    get_daemon_pid,
+    is_daemon_running,
+    stop_daemon,
+)
+
 # Debug utilities
 from .debug import (
     Verbosity,
@@ -148,6 +157,12 @@ __all__ = [
     "ProjectRegistry",
     "RegistryConfig",
     "get_project_registry",
+    # Daemon
+    "DaemonConfig",
+    "IndexDaemon",
+    "get_daemon_pid",
+    "is_daemon_running",
+    "stop_daemon",
     # Debug utilities
     "Verbosity",
     "get_verbosity",

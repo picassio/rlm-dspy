@@ -1756,5 +1756,206 @@ def project_migrate() -> None:
         console.print(f"  {old_hash} → [cyan]{new_name}[/cyan]")
 
 
+# =============================================================================
+# Daemon Commands (for automatic background indexing)
+# =============================================================================
+
+daemon_app = typer.Typer(
+    name="daemon",
+    help="Manage background index daemon",
+    no_args_is_help=True,
+)
+app.add_typer(daemon_app, name="daemon")
+
+
+@daemon_app.command("start")
+def daemon_start(
+    foreground: Annotated[
+        bool,
+        typer.Option("--foreground", "-f", help="Run in foreground (don't daemonize)"),
+    ] = False,
+) -> None:
+    """Start the index daemon.
+    
+    The daemon watches registered projects for file changes and
+    automatically updates their indexes.
+    
+    Examples:
+        rlm-dspy daemon start              # Start in background
+        rlm-dspy daemon start --foreground # Run in foreground
+    """
+    from .core.daemon import IndexDaemon, is_daemon_running, get_daemon_pid
+    
+    if is_daemon_running():
+        pid = get_daemon_pid()
+        console.print(f"[yellow]Daemon already running (PID: {pid})[/yellow]")
+        return
+    
+    if foreground:
+        console.print("[dim]Starting daemon in foreground (Ctrl+C to stop)...[/dim]")
+        daemon = IndexDaemon()
+        daemon.run_forever()
+    else:
+        console.print("[dim]Starting daemon in background...[/dim]")
+        daemon = IndexDaemon()
+        daemon.start(daemonize=True)
+        console.print(f"[green]✓[/green] Daemon started (PID: {get_daemon_pid()})")
+        console.print(f"[dim]Log file: {daemon.config.log_file}[/dim]")
+
+
+@daemon_app.command("stop")
+def daemon_stop() -> None:
+    """Stop the index daemon.
+    
+    Examples:
+        rlm-dspy daemon stop
+    """
+    from .core.daemon import stop_daemon, is_daemon_running, get_daemon_pid
+    
+    if not is_daemon_running():
+        console.print("[dim]Daemon not running[/dim]")
+        return
+    
+    pid = get_daemon_pid()
+    console.print(f"[dim]Stopping daemon (PID: {pid})...[/dim]")
+    
+    if stop_daemon():
+        console.print("[green]✓[/green] Daemon stopped")
+    else:
+        console.print("[red]✗[/red] Failed to stop daemon")
+        raise typer.Exit(1)
+
+
+@daemon_app.command("status")
+def daemon_status() -> None:
+    """Show daemon status.
+    
+    Examples:
+        rlm-dspy daemon status
+    """
+    from .core.daemon import is_daemon_running, get_daemon_pid, DaemonConfig
+    
+    if not is_daemon_running():
+        console.print("[yellow]○[/yellow] Daemon not running")
+        console.print("[dim]Run 'rlm-dspy daemon start' to start[/dim]")
+        return
+    
+    pid = get_daemon_pid()
+    config = DaemonConfig.from_user_config()
+    
+    console.print(f"[green]●[/green] Daemon running (PID: {pid})")
+    console.print(f"  Log file: {config.log_file}")
+    console.print(f"  PID file: {config.pid_file}")
+    
+    # Show watched projects
+    from .core.project_registry import get_project_registry
+    registry = get_project_registry()
+    watched = [p for p in registry.list() if p.auto_watch]
+    
+    if watched:
+        console.print(f"\n  Watching {len(watched)} project(s):")
+        for p in watched:
+            console.print(f"    - {p.name}")
+
+
+@daemon_app.command("watch")
+def daemon_watch(
+    project: Annotated[
+        str,
+        typer.Argument(help="Project name to watch"),
+    ],
+) -> None:
+    """Add a project to the daemon watch list.
+    
+    The daemon must be running for this to take effect immediately.
+    Otherwise, the project will be watched when the daemon starts.
+    
+    Examples:
+        rlm-dspy daemon watch my-app
+    """
+    from .core.project_registry import get_project_registry
+    from .core.daemon import is_daemon_running
+    
+    registry = get_project_registry()
+    proj = registry.get(project)
+    
+    if not proj:
+        console.print(f"[red]✗[/red] Project '{project}' not found")
+        console.print("[dim]Use 'rlm-dspy project add' to register it first[/dim]")
+        raise typer.Exit(1)
+    
+    # Set auto_watch flag
+    proj.auto_watch = True
+    registry._save()
+    
+    console.print(f"[green]✓[/green] Project '{project}' will be watched")
+    
+    if not is_daemon_running():
+        console.print("[dim]Note: Daemon not running. Start with 'rlm-dspy daemon start'[/dim]")
+    else:
+        console.print("[dim]Daemon will pick up the change automatically[/dim]")
+
+
+@daemon_app.command("unwatch")
+def daemon_unwatch(
+    project: Annotated[
+        str,
+        typer.Argument(help="Project name to stop watching"),
+    ],
+) -> None:
+    """Remove a project from the daemon watch list.
+    
+    Examples:
+        rlm-dspy daemon unwatch my-app
+    """
+    from .core.project_registry import get_project_registry
+    
+    registry = get_project_registry()
+    proj = registry.get(project)
+    
+    if not proj:
+        console.print(f"[red]✗[/red] Project '{project}' not found")
+        raise typer.Exit(1)
+    
+    proj.auto_watch = False
+    registry._save()
+    
+    console.print(f"[green]✓[/green] Project '{project}' will no longer be watched")
+
+
+@daemon_app.command("list")
+def daemon_list() -> None:
+    """List projects being watched by the daemon.
+    
+    Examples:
+        rlm-dspy daemon list
+    """
+    from .core.project_registry import get_project_registry
+    from .core.daemon import is_daemon_running
+    
+    registry = get_project_registry()
+    watched = [p for p in registry.list() if p.auto_watch]
+    
+    if not watched:
+        console.print("[dim]No projects configured for watching[/dim]")
+        console.print("[dim]Use 'rlm-dspy daemon watch <project>' to add one[/dim]")
+        return
+    
+    running = is_daemon_running()
+    status = "[green]●[/green] running" if running else "[yellow]○[/yellow] stopped"
+    
+    console.print(f"Daemon: {status}\n")
+    
+    table = Table(title="Watched Projects")
+    table.add_column("Project", style="cyan")
+    table.add_column("Path", style="dim")
+    table.add_column("Snippets", justify="right")
+    
+    for p in watched:
+        table.add_row(p.name, p.path, str(p.snippet_count) if p.snippet_count else "-")
+    
+    console.print(table)
+
+
 if __name__ == "__main__":
     app()

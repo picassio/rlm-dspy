@@ -40,6 +40,8 @@ dependencies = [
     "tree-sitter-c-sharp>=0.23.0",
     # FAISS for fast vector similarity search (semantic search)
     "faiss-cpu>=1.7.0",
+    # Watchdog for file system monitoring (daemon auto-indexing)
+    "watchdog>=3.0.0",
 ]
 
 [project.optional-dependencies]
