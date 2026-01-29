@@ -29,26 +29,46 @@ _RESTRICTED_PATHS = {
 }
 
 
-def _is_safe_path(path: str) -> tuple[bool, str]:
+def _is_safe_path(path: str, base_dir: str | None = None) -> tuple[bool, str]:
     """Check if a path is safe to access.
+    
+    Args:
+        path: Path to check
+        base_dir: Optional base directory to restrict access to.
+                  If provided, path must resolve to within base_dir.
     
     Returns:
         (is_safe, error_message)
     """
-    # Expand user home
-    expanded = str(Path(path).expanduser())
-    
-    # Check for restricted paths
-    for restricted in _RESTRICTED_PATHS:
-        restricted_expanded = str(Path(restricted).expanduser())
-        if expanded.startswith(restricted_expanded):
-            return False, f"Access to {restricted} is restricted"
-    
-    # Check for obvious traversal attempts
-    if ".." in path and "/etc" in str(Path(path).resolve()):
-        return False, "Path traversal to system directories blocked"
-    
-    return True, ""
+    try:
+        # Resolve to absolute path (resolves symlinks and ..)
+        resolved = Path(path).expanduser().resolve()
+        resolved_str = str(resolved)
+        
+        # Check for restricted system paths
+        for restricted in _RESTRICTED_PATHS:
+            restricted_resolved = str(Path(restricted).expanduser().resolve())
+            if resolved_str.startswith(restricted_resolved):
+                return False, f"Access to {restricted} is restricted"
+        
+        # Additional system path restrictions
+        system_paths = ['/etc', '/var', '/usr', '/bin', '/sbin', '/boot', '/root', '/proc', '/sys']
+        for sys_path in system_paths:
+            if resolved_str.startswith(sys_path):
+                return False, f"Access to system path {sys_path} is restricted"
+        
+        # If base_dir provided, ensure path is within it
+        if base_dir:
+            base_resolved = Path(base_dir).expanduser().resolve()
+            try:
+                resolved.relative_to(base_resolved)
+            except ValueError:
+                return False, f"Path must be within {base_dir}"
+        
+        return True, ""
+        
+    except (OSError, ValueError) as e:
+        return False, f"Invalid path: {e}"
 
 
 def ripgrep(pattern: str, path: str = ".", flags: str = "") -> str:
@@ -200,6 +220,11 @@ def file_stats(path: str) -> str:
         JSON with file count, line count, size info
     """
     try:
+        # Safety check
+        is_safe, error = _is_safe_path(path)
+        if not is_safe:
+            return f"(security: {error})"
+        
         p = Path(path)
         if not p.exists():
             return f"(path not found: {path})"
@@ -221,14 +246,16 @@ def file_stats(path: str) -> str:
         # Count by extension
         extensions: dict[str, int] = {}
         total_lines = 0
+        skipped_files = 0
         for f in files:
             if f.is_file():
                 ext = f.suffix or "(no ext)"
                 extensions[ext] = extensions.get(ext, 0) + 1
                 try:
                     total_lines += len(f.read_text(errors="replace").splitlines())
-                except Exception:
-                    pass
+                except (OSError, UnicodeDecodeError):
+                    # Skip binary files and unreadable files
+                    skipped_files += 1
         
         return json.dumps({
             "type": "directory",
@@ -263,6 +290,11 @@ def index_code(path: str, kind: str | None = None, name: str | None = None) -> s
         index_code("file.py", kind="method")  # Methods in a single file
     """
     try:
+        # Safety check
+        is_safe, error = _is_safe_path(path)
+        if not is_safe:
+            return f"(security: {error})"
+        
         from .core.ast_index import index_file, index_files, LANGUAGE_MAP
         
         p = Path(path)
@@ -399,30 +431,60 @@ def shell(command: str, timeout: int = 30) -> str:
         
     Security:
         - Disabled by default (requires RLM_ALLOW_SHELL=1)
-        - Uses shell=True which can be dangerous with untrusted input
-        - Only enable in trusted environments
+        - Allowlist of safe commands enforced
+        - Dangerous patterns blocked
         - Commands are logged for audit purposes
     """
     import os
+    import shlex
+    
     if not os.environ.get("RLM_ALLOW_SHELL"):
         return "(shell disabled - set RLM_ALLOW_SHELL=1 to enable)"
     
-    # Basic safety checks
-    dangerous_patterns = ["rm -rf /", "mkfs", "> /dev/", "dd if="]
+    # Allowlist of safe base commands
+    ALLOWED_COMMANDS = {
+        'ls', 'cat', 'head', 'tail', 'grep', 'find', 'wc', 'sort', 'uniq',
+        'echo', 'pwd', 'date', 'whoami', 'env', 'which', 'file', 'stat',
+        'diff', 'tree', 'du', 'df', 'uname', 'hostname', 'ps', 'top',
+        'git', 'python', 'python3', 'pip', 'node', 'npm', 'cargo', 'go',
+    }
+    
+    # Parse command to get base command
+    try:
+        parts = shlex.split(command)
+        if not parts:
+            return "(empty command)"
+        base_cmd = Path(parts[0]).name  # Get basename (e.g., /usr/bin/ls -> ls)
+    except ValueError as e:
+        return f"(invalid command syntax: {e})"
+    
+    # Check if command is allowed
+    if base_cmd not in ALLOWED_COMMANDS:
+        return f"(command '{base_cmd}' not in allowlist. Allowed: {', '.join(sorted(ALLOWED_COMMANDS)[:10])}...)"
+    
+    # Block dangerous patterns
+    dangerous_patterns = [
+        "rm -rf /", "rm -rf ~", "rm -rf .", "mkfs", "> /dev/", "dd if=",
+        "chmod 777", "curl | sh", "wget | sh", "; rm", "&& rm",
+        "eval ", "exec ", "$(",  "`", ">/dev/sd",
+    ]
+    cmd_lower = command.lower()
     for pattern in dangerous_patterns:
-        if pattern in command.lower():
-            return f"(blocked dangerous command pattern: {pattern})"
+        if pattern in cmd_lower:
+            return f"(blocked dangerous pattern: {pattern})"
     
     # Log command for audit
-    logger.warning("Shell command executed: %s", command[:100])
+    logger.warning("Shell command executed: %s", command[:200])
     
     try:
+        # Use shell=False with parsed arguments for safety
         result = subprocess.run(
-            command,
-            shell=True,
+            parts,
+            shell=False,
             capture_output=True,
             text=True,
             timeout=timeout,
+            cwd=os.getcwd(),  # Run in current directory
         )
         output = result.stdout + result.stderr
         return output[:50000] if output else "(no output)"

@@ -9,6 +9,8 @@ import asyncio
 import logging
 import random
 import re
+import time
+from email.utils import parsedate_to_datetime
 from functools import wraps
 from typing import Any, Callable, TypeVar
 
@@ -133,13 +135,10 @@ def parse_retry_after(response: httpx.Response | None) -> float | None:
 
     # Try as HTTP date
     try:
-        import time
-        from email.utils import parsedate_to_datetime
-
         dt = parsedate_to_datetime(retry_after)
         delay = dt.timestamp() - time.time()
         return max(0, delay)
-    except Exception as e:
+    except (ValueError, TypeError) as e:
         logger.debug("Failed to parse retry-after as HTTP date '%s': %s", retry_after, e)
 
     # Try to extract number from error message (some APIs include it)

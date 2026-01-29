@@ -409,6 +409,9 @@ class IndexDaemon:
             while self._running:
                 time.sleep(1.0)
                 
+                # Check worker health and restart if needed
+                self._check_worker_health()
+                
                 # Check idle timeout
                 if self.config.idle_timeout > 0:
                     if self._last_activity:
@@ -421,6 +424,20 @@ class IndexDaemon:
             logger.info("Received interrupt signal")
         finally:
             self.stop()
+    
+    def _check_worker_health(self) -> None:
+        """Check if worker is alive and restart if crashed."""
+        if self._worker and not self._worker.is_alive():
+            logger.warning("Worker thread died, restarting...")
+            
+            # Create new worker
+            self._worker = IndexWorker(
+                self._queue,
+                self.config,
+                on_index_complete=self._on_index_complete,
+            )
+            self._worker.start()
+            logger.info("Worker thread restarted")
     
     def _setup_logging(self) -> None:
         """Setup logging to file and configure daemon loggers."""

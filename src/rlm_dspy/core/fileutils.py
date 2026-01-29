@@ -222,7 +222,7 @@ def smart_rmtree(path: Path, aggressive: bool = False) -> bool:
                 timeout=60,
             )
             return result.returncode == 0
-        except Exception as e:
+        except (subprocess.TimeoutExpired, OSError) as e:
             logger.warning("Windows rmdir failed: %s", e)
 
     # Unix fallback
@@ -234,7 +234,7 @@ def smart_rmtree(path: Path, aggressive: bool = False) -> bool:
                 timeout=60,
             )
             return result.returncode == 0
-        except Exception as e:
+        except (subprocess.TimeoutExpired, OSError) as e:
             logger.warning("rm -rf failed: %s", e)
 
     return False
