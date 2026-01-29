@@ -308,7 +308,15 @@ def retry_sync(
                     if attempt == max_retries:
                         raise
 
-                    delay = base_delay * (2**attempt) + random.random()
+                    # Check for Retry-After header if it's an HTTP error
+                    delay = None
+                    if isinstance(e, httpx.HTTPStatusError):
+                        delay = parse_retry_after(e.response)
+                    
+                    # Fall back to exponential backoff with jitter
+                    if delay is None:
+                        delay = base_delay * (2**attempt) + random.random()
+                    
                     logger.warning(
                         "Retry %d/%d: %s. Waiting %.2fs",
                         attempt + 1,

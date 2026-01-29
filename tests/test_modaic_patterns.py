@@ -209,3 +209,117 @@ class TestFileUtils:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestFileCollection:
+    """Test file collection utilities."""
+
+    def test_skip_dirs_contains_common_patterns(self):
+        """Test SKIP_DIRS contains common ignore patterns."""
+        from rlm_dspy.core.fileutils import SKIP_DIRS
+        
+        assert ".git" in SKIP_DIRS
+        assert "__pycache__" in SKIP_DIRS
+        assert "node_modules" in SKIP_DIRS
+        assert ".venv" in SKIP_DIRS
+
+    def test_load_gitignore_patterns(self, tmp_path):
+        """Test loading gitignore patterns."""
+        from rlm_dspy.core.fileutils import load_gitignore_patterns
+        
+        # Create .gitignore
+        gitignore = tmp_path / ".gitignore"
+        gitignore.write_text("*.pyc\n__pycache__/\n")
+        
+        patterns = load_gitignore_patterns([tmp_path])
+        assert "*.pyc" in patterns
+        assert "__pycache__/" in patterns
+
+    def test_collect_files_basic(self, tmp_path):
+        """Test basic file collection."""
+        from rlm_dspy.core.fileutils import collect_files
+        
+        # Create test files
+        (tmp_path / "a.py").write_text("# a")
+        (tmp_path / "b.py").write_text("# b")
+        subdir = tmp_path / "sub"
+        subdir.mkdir()
+        (subdir / "c.py").write_text("# c")
+        
+        files = collect_files([tmp_path])
+        names = {f.name for f in files}
+        
+        assert "a.py" in names
+        assert "b.py" in names
+        assert "c.py" in names
+
+    def test_collect_files_skips_pycache(self, tmp_path):
+        """Test that __pycache__ is skipped."""
+        from rlm_dspy.core.fileutils import collect_files
+        
+        # Create test files
+        (tmp_path / "main.py").write_text("# main")
+        pycache = tmp_path / "__pycache__"
+        pycache.mkdir()
+        (pycache / "main.cpython-312.pyc").write_text("binary")
+        
+        files = collect_files([tmp_path])
+        names = {f.name for f in files}
+        
+        assert "main.py" in names
+        assert "main.cpython-312.pyc" not in names
+
+    def test_format_file_context(self, tmp_path):
+        """Test file context formatting."""
+        from rlm_dspy.core.fileutils import format_file_context
+        
+        f = tmp_path / "test.py"
+        f.write_text("line 1\nline 2\n")
+        
+        context, skipped = format_file_context([f])
+        
+        assert "=== FILE:" in context
+        assert "test.py" in context
+        assert "line 1" in context
+        assert "line 2" in context
+        assert len(skipped) == 0
+
+    def test_format_file_context_with_line_numbers(self, tmp_path):
+        """Test that line numbers are added."""
+        from rlm_dspy.core.fileutils import format_file_context
+        
+        f = tmp_path / "test.py"
+        f.write_text("first\nsecond\n")
+        
+        context, _ = format_file_context([f], add_line_numbers=True)
+        
+        assert "1 |" in context or "1|" in context
+        assert "2 |" in context or "2|" in context
+
+    def test_format_file_context_skips_binary(self, tmp_path):
+        """Test that binary files are skipped."""
+        from rlm_dspy.core.fileutils import format_file_context
+        
+        f = tmp_path / "binary.bin"
+        f.write_bytes(b"\x00\x01\x02\xff\xfe")
+        
+        context, skipped = format_file_context([f])
+        
+        assert len(skipped) == 1
+        assert skipped[0][0] == f
+
+    def test_load_context_from_paths(self, tmp_path):
+        """Test the main load_context_from_paths function."""
+        from rlm_dspy.core.fileutils import load_context_from_paths
+        
+        # Create test structure
+        (tmp_path / "main.py").write_text("def main(): pass\n")
+        (tmp_path / ".gitignore").write_text("*.log\n")
+        (tmp_path / "debug.log").write_text("logs")
+        
+        context = load_context_from_paths([tmp_path], gitignore=True)
+        
+        assert "main.py" in context
+        assert "def main()" in context
+        # .log files should be ignored
+        assert "debug.log" not in context

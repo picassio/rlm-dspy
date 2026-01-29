@@ -579,109 +579,13 @@ These tools provide 100% accurate results. Only fall back to manual parsing if t
         Returns:
             Combined context string with file markers
         """
-        import pathspec
-
-        # Load gitignore patterns
-        patterns = []
-        if gitignore:
-            for path in paths:
-                p = Path(path)
-                gitignore_path = (p if p.is_dir() else p.parent) / ".gitignore"
-                if gitignore_path.exists():
-                    patterns.extend(gitignore_path.read_text(encoding="utf-8").splitlines())
-
-        spec = pathspec.PathSpec.from_lines("gitignore", patterns) if patterns else None
-
-        # Common directories to always skip (performance optimization)
-        SKIP_DIRS = {'.git', '__pycache__', 'node_modules', '.venv', 'venv', '.tox', 'dist', 'build'}
+        from .fileutils import load_context_from_paths
         
-        def _should_skip_entry(entry, entry_path: Path, root_path: Path, spec) -> bool:
-            """Check if an entry should be skipped based on gitignore and common patterns."""
-            # Skip common ignored directories
-            if entry.is_dir(follow_symlinks=False) and entry.name in SKIP_DIRS:
-                return True
-            # Check gitignore patterns
-            if spec:
-                try:
-                    rel_path = entry_path.relative_to(root_path)
-                except ValueError:
-                    rel_path = entry_path
-                if spec.match_file(str(rel_path)):
-                    return True
-            return False
-
-        def collect_files_iterative(
-            start_path: Path, 
-            root_path: Path,
-            spec: pathspec.PathSpec | None
-        ) -> list[Path]:
-            """Iteratively collect files, pruning ignored directories early.
-            
-            Uses a stack instead of recursion to avoid RecursionError on deep trees.
-            """
-            from collections import deque
-            
-            result: list[Path] = []
-            dirs_to_process: deque[Path] = deque([start_path])
-            
-            while dirs_to_process:
-                current_path = dirs_to_process.popleft()
-                
-                try:
-                    entries = os.scandir(current_path)
-                except PermissionError:
-                    _logger.debug("Permission denied: %s", current_path)
-                    continue
-                
-                with entries:
-                    for entry in entries:
-                        entry_path = Path(entry.path)
-                        
-                        if _should_skip_entry(entry, entry_path, root_path, spec):
-                            continue
-                        
-                        if entry.is_file(follow_symlinks=False):
-                            result.append(entry_path)
-                        elif entry.is_dir(follow_symlinks=False):
-                            dirs_to_process.append(entry_path)
-            
-            return result
-
-        files: list[Path] = []
-        for path in paths:
-            p = Path(path)
-            if p.is_file():
-                files.append(p)
-            elif p.is_dir():
-                # Pass p as both current and root path
-                files.extend(collect_files_iterative(p, p, spec))
-
-        # Read and combine with clear file markers
-        context_parts = []
-        skipped_files = []
-        for f in sorted(files):
-            try:
-                content = f.read_text(encoding="utf-8")
-                # Add line numbers to help LLM report accurate locations
-                numbered_lines = [
-                    f"{i+1:4d} | {line}"
-                    for i, line in enumerate(content.splitlines())
-                ]
-                numbered_content = "\n".join(numbered_lines)
-                context_parts.append(f"=== FILE: {f} ===\n{numbered_content}\n=== END FILE ===\n")
-            except UnicodeDecodeError:
-                skipped_files.append((f, "binary/encoding"))
-            except PermissionError:
-                skipped_files.append((f, "permission denied"))
-
-        if skipped_files:
-            _logger.warning(
-                "Skipped %d files: %s",
-                len(skipped_files),
-                ", ".join(f"{f.name} ({reason})" for f, reason in skipped_files[:5]),
-            )
-
-        return "\n".join(context_parts)
+        return load_context_from_paths(
+            paths=[Path(p) for p in paths],
+            gitignore=gitignore,
+            add_line_numbers=True,
+        )
 
     def _build_result(self, prediction: Any, elapsed: float) -> RLMResult:
         """Build RLMResult from dspy prediction, handling structured outputs."""

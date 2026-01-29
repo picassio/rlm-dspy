@@ -454,3 +454,203 @@ def atomic_write(
         except Exception as cleanup_err:
             logger.debug("Failed to remove temp file during cleanup: %s", cleanup_err)
         raise
+
+
+# Common directories to always skip (performance optimization)
+SKIP_DIRS = frozenset({
+    '.git', '__pycache__', 'node_modules', '.venv', 'venv', 
+    '.tox', 'dist', 'build', '.eggs', '*.egg-info', '.mypy_cache',
+    '.pytest_cache', '.ruff_cache', '.coverage', 'htmlcov',
+})
+
+
+def load_gitignore_patterns(paths: list[Path]) -> list[str]:
+    """Load .gitignore patterns from paths.
+    
+    Args:
+        paths: List of file or directory paths
+        
+    Returns:
+        List of gitignore pattern strings
+    """
+    patterns = []
+    for path in paths:
+        p = Path(path)
+        gitignore_path = (p if p.is_dir() else p.parent) / ".gitignore"
+        if gitignore_path.exists():
+            try:
+                patterns.extend(gitignore_path.read_text(encoding="utf-8").splitlines())
+            except (OSError, UnicodeDecodeError):
+                logger.debug("Failed to read .gitignore: %s", gitignore_path)
+    return patterns
+
+
+def should_skip_entry(
+    entry_name: str,
+    entry_path: Path,
+    root_path: Path,
+    spec: "pathspec.PathSpec | None" = None,
+    is_dir: bool = False,
+) -> bool:
+    """Check if an entry should be skipped based on gitignore and common patterns.
+    
+    Args:
+        entry_name: Name of the file/directory
+        entry_path: Full path to the entry
+        root_path: Root path for relative path calculation
+        spec: Optional pathspec for gitignore matching
+        is_dir: Whether the entry is a directory
+        
+    Returns:
+        True if entry should be skipped
+    """
+    # Skip common ignored directories
+    if is_dir and entry_name in SKIP_DIRS:
+        return True
+    
+    # Check gitignore patterns
+    if spec:
+        try:
+            rel_path = entry_path.relative_to(root_path)
+        except ValueError:
+            rel_path = entry_path
+        if spec.match_file(str(rel_path)):
+            return True
+    
+    return False
+
+
+def collect_files(
+    paths: list[Path | str],
+    spec: "pathspec.PathSpec | None" = None,
+) -> list[Path]:
+    """Collect files from paths, respecting gitignore patterns.
+    
+    Uses iterative traversal to avoid RecursionError on deep trees.
+    
+    Args:
+        paths: List of file or directory paths
+        spec: Optional pathspec for gitignore matching
+        
+    Returns:
+        List of file paths
+    """
+    from collections import deque
+    
+    files: list[Path] = []
+    
+    for path in paths:
+        p = Path(path)
+        if p.is_file():
+            files.append(p)
+        elif p.is_dir():
+            # Iterative directory traversal
+            dirs_to_process: deque[Path] = deque([p])
+            root_path = p
+            
+            while dirs_to_process:
+                current_path = dirs_to_process.popleft()
+                
+                try:
+                    entries = list(os.scandir(current_path))
+                except PermissionError:
+                    logger.debug("Permission denied: %s", current_path)
+                    continue
+                
+                for entry in entries:
+                    entry_path = Path(entry.path)
+                    is_dir = entry.is_dir(follow_symlinks=False)
+                    
+                    if should_skip_entry(entry.name, entry_path, root_path, spec, is_dir):
+                        continue
+                    
+                    if entry.is_file(follow_symlinks=False):
+                        files.append(entry_path)
+                    elif is_dir:
+                        dirs_to_process.append(entry_path)
+    
+    return sorted(files)
+
+
+def format_file_context(
+    files: list[Path],
+    add_line_numbers: bool = True,
+) -> tuple[str, list[tuple[Path, str]]]:
+    """Format files into a context string for LLM consumption.
+    
+    Args:
+        files: List of file paths to read
+        add_line_numbers: Whether to add line numbers (helps LLM report locations)
+        
+    Returns:
+        Tuple of (context_string, list of (skipped_file, reason) tuples)
+    """
+    context_parts = []
+    skipped_files = []
+    
+    for f in files:
+        try:
+            content = f.read_text(encoding="utf-8")
+            
+            if add_line_numbers:
+                numbered_lines = [
+                    f"{i+1:4d} | {line}"
+                    for i, line in enumerate(content.splitlines())
+                ]
+                formatted_content = "\n".join(numbered_lines)
+            else:
+                formatted_content = content
+            
+            context_parts.append(
+                f"=== FILE: {f} ===\n{formatted_content}\n=== END FILE ===\n"
+            )
+        except UnicodeDecodeError:
+            skipped_files.append((f, "binary/encoding"))
+        except PermissionError:
+            skipped_files.append((f, "permission denied"))
+        except OSError as e:
+            skipped_files.append((f, str(e)))
+    
+    return "\n".join(context_parts), skipped_files
+
+
+def load_context_from_paths(
+    paths: list[Path | str],
+    gitignore: bool = True,
+    add_line_numbers: bool = True,
+) -> str:
+    """Load and format context from file/directory paths.
+    
+    This is the main entry point for loading context for LLM analysis.
+    
+    Args:
+        paths: List of file or directory paths
+        gitignore: Whether to respect .gitignore patterns
+        add_line_numbers: Whether to add line numbers
+        
+    Returns:
+        Formatted context string
+    """
+    import pathspec
+    
+    # Load gitignore patterns
+    spec = None
+    if gitignore:
+        patterns = load_gitignore_patterns([Path(p) for p in paths])
+        if patterns:
+            spec = pathspec.PathSpec.from_lines("gitignore", patterns)
+    
+    # Collect files
+    files = collect_files(paths, spec)
+    
+    # Format context
+    context, skipped = format_file_context(files, add_line_numbers)
+    
+    if skipped:
+        logger.warning(
+            "Skipped %d files: %s",
+            len(skipped),
+            ", ".join(f"{f.name} ({reason})" for f, reason in skipped[:5]),
+        )
+    
+    return context
