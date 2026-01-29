@@ -788,9 +788,18 @@ These tools provide 100% accurate results. Only fall back to manual parsing if t
         Returns:
             RLMResult with answer, trajectory, and metadata.
             For custom signatures, structured outputs available via result.outputs dict.
+            
+        Raises:
+            ValueError: If query or context is empty/None
         """
         import concurrent.futures
         from .fileutils import estimate_tokens
+        
+        # Validate inputs
+        if not query or not query.strip():
+            raise ValueError("Query cannot be empty")
+        if not context or not context.strip():
+            raise ValueError("Context cannot be empty")
 
         self._start_time = time.time()
         
