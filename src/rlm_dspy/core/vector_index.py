@@ -197,32 +197,36 @@ class CodeIndex:
     
     def _extract_snippets(self, repo_path: Path) -> list[CodeSnippet]:
         """Extract code snippets from repository using AST parsing."""
+        import os
         from .ast_index import index_file, LANGUAGE_MAP
         
         snippets = []
         
-        # Directories to skip (check once, not per file)
+        # Directories to skip - pruned at walk level for efficiency
         SKIP_DIRS = {'__pycache__', 'node_modules', '.venv', 'venv', 'dist', 'build',
                      '.git', '.hg', '.svn', 'eggs', '.eggs', '.tox', '.nox'}
         
-        # Use specific globs per extension for faster traversal
-        # This avoids processing binaries, images, etc.
-        for ext in LANGUAGE_MAP.keys():
-            pattern = f"**/*{ext}"
+        # Supported extensions
+        supported_extensions = set(LANGUAGE_MAP.keys())
+        
+        # Single directory walk - more efficient than multiple globs
+        for root, dirs, files in os.walk(repo_path):
+            # Prune directories in-place (prevents descent into them)
+            dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.startswith('.')]
             
-            for file_path in repo_path.glob(pattern):
-                # Skip hidden directories
-                if any(part.startswith('.') for part in file_path.parts):
+            for filename in files:
+                # Check extension early
+                ext = os.path.splitext(filename)[1]
+                if ext not in supported_extensions:
                     continue
-                # Skip common non-source directories
-                if SKIP_DIRS & set(file_path.parts):
-                    continue
+                
+                file_path = Path(root) / filename
                 
                 if not file_path.is_file():
                     continue
                 
                 try:
-                    # Language is known from the glob pattern's extension
+                    # Language from extension
                     language = LANGUAGE_MAP.get(ext)
                     
                     if not language:
@@ -296,26 +300,29 @@ class CodeIndex:
         Returns:
             (needs_update, new_or_modified_files, deleted_files)
         """
+        import os
         from .ast_index import LANGUAGE_MAP
         
         supported_extensions = set(LANGUAGE_MAP.keys())
+        SKIP_DIRS = {'__pycache__', 'node_modules', '.venv', 'venv', 'dist', 'build',
+                     '.git', '.hg', '.svn', 'eggs', '.eggs', '.tox', '.nox'}
         
         current_files = {}
-        for f in repo_path.rglob("*"):
-            if not f.is_file():
-                continue
-            if f.suffix not in supported_extensions:
-                continue
-            if any(part.startswith('.') for part in f.parts):
-                continue
-            if any(ignore in f.parts for ignore in 
-                   ['__pycache__', 'node_modules', '.venv', 'venv', 'dist', 'build']):
-                continue
+        # Use os.walk with directory pruning - much faster than rglob
+        for root, dirs, files in os.walk(repo_path):
+            # Prune directories in-place
+            dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.startswith('.')]
             
-            try:
-                current_files[str(f)] = f.stat().st_mtime
-            except OSError:
-                continue
+            for filename in files:
+                ext = os.path.splitext(filename)[1]
+                if ext not in supported_extensions:
+                    continue
+                
+                f = Path(root) / filename
+                try:
+                    current_files[str(f)] = f.stat().st_mtime
+                except OSError:
+                    continue
         
         old_files = manifest.get("files", {})
         

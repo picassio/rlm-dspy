@@ -39,19 +39,29 @@ class EmbeddingConfig:
     api_base: str | None = None
     caching: bool = True
     
+    # Cached config instance
+    _cached_config: "EmbeddingConfig | None" = None
+    
     @classmethod
-    def from_user_config(cls) -> "EmbeddingConfig":
+    def from_user_config(cls, use_cache: bool = True) -> "EmbeddingConfig":
         """Load embedding configuration from user config.
         
         Priority: env vars > config.yaml > defaults
+        
+        Args:
+            use_cache: Use cached config if available (default True)
         """
+        # Return cached config if available
+        if use_cache and cls._cached_config is not None:
+            return cls._cached_config
+        
         from .user_config import load_config, load_env_file
         
         # Load env file first
         load_env_file()
         config = load_config()
         
-        return cls(
+        result = cls(
             model=os.environ.get(
                 "RLM_EMBEDDING_MODEL", 
                 config.get("embedding_model", "openai/text-embedding-3-small")
@@ -68,6 +78,12 @@ class EmbeddingConfig:
             api_base=os.environ.get("RLM_EMBEDDING_API_BASE"),
             caching=config.get("embedding_caching", True),
         )
+        
+        # Cache for future calls
+        if use_cache:
+            cls._cached_config = result
+        
+        return result
     
     def __repr__(self) -> str:
         key_status = "***" if self.api_key else "not set"
@@ -192,10 +208,11 @@ def _create_hosted_embedder(config: EmbeddingConfig) -> Any:
 
 
 def clear_embedder_cache() -> None:
-    """Clear the embedder cache."""
+    """Clear the embedder and config caches."""
     global _embedder_cache
     _embedder_cache.clear()
-    logger.debug("Embedder cache cleared")
+    EmbeddingConfig._cached_config = None
+    logger.debug("Embedder and config caches cleared")
 
 
 def embed_texts(
