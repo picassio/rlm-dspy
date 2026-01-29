@@ -582,6 +582,59 @@ def semantic_search(query: str, path: str = ".", k: int = 5) -> str:
         return f"Semantic search error: {e}\nTip: Run 'rlm-dspy index build {path}' first."
 
 
+def get_workspace_info() -> str:
+    """Get current workspace context including working directory and indexed projects.
+    
+    Call this FIRST when you need to understand what code is available to search.
+    Returns the current working directory and all indexed projects with their paths.
+    
+    Returns:
+        Workspace context with cwd and available projects
+    """
+    import os
+    from pathlib import Path
+    
+    try:
+        from .core.project_registry import get_project_registry
+        
+        cwd = Path.cwd()
+        registry = get_project_registry()
+        projects = registry.list()
+        
+        # Filter to projects with snippets
+        indexed_projects = []
+        for p in projects:
+            if p.snippet_count > 0:
+                indexed_projects.append(p)
+        
+        # Find which project(s) contain cwd
+        current_projects = []
+        for p in indexed_projects:
+            try:
+                cwd.relative_to(Path(p.path))
+                current_projects.append(p.name)
+            except ValueError:
+                pass
+        
+        output = [
+            f"Current working directory: {cwd}",
+            f"Current project(s): {', '.join(current_projects) if current_projects else 'None (not in indexed project)'}",
+            "",
+            f"Indexed projects ({len(indexed_projects)}):"
+        ]
+        
+        for p in indexed_projects:
+            marker = " [CURRENT]" if p.name in current_projects else ""
+            output.append(f"  • {p.name}: {p.path} ({p.snippet_count} snippets){marker}")
+        
+        if not indexed_projects:
+            output.append("  (none - use 'rlm-dspy index build <path>' to index)")
+        
+        return "\n".join(output)
+    except Exception as e:
+        return f"Error getting workspace info: {e}"
+
+
 def list_projects(include_empty: bool = False) -> str:
     """List all indexed projects available for semantic search.
     
@@ -749,6 +802,10 @@ def search_all_projects(query: str, k: int = 3) -> str:
 
 # Collection of all built-in tools
 BUILTIN_TOOLS: dict[str, Any] = {
+    # Workspace discovery
+    "get_workspace_info": get_workspace_info,
+    "list_projects": list_projects,
+    # Structural search
     "ripgrep": ripgrep,
     "grep_context": grep_context,
     "find_files": find_files,
@@ -761,9 +818,10 @@ BUILTIN_TOOLS: dict[str, Any] = {
     "find_methods": find_methods,
     "find_imports": find_imports,
     "find_calls": find_calls,
+    # Semantic search
     "semantic_search": semantic_search,
-    "list_projects": list_projects,
     "search_all_projects": search_all_projects,
+    # Shell (unsafe)
     "shell": shell,
 }
 
