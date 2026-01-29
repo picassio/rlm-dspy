@@ -17,14 +17,19 @@ SECRET_MASK = "********"
 # Common secret keys to auto-mask
 COMMON_SECRETS = frozenset(
     {
+        # API keys
         "api_key",
         "apikey",
         "api-key",
         "openai_api_key",
         "anthropic_api_key",
         "openrouter_api_key",
+        "deepseek_api_key",
+        "gemini_api_key",
+        "groq_api_key",
         "hf_token",
         "huggingface_token",
+        # Auth tokens
         "access_token",
         "secret_key",
         "secret",
@@ -36,6 +41,15 @@ COMMON_SECRETS = frozenset(
         "bearer",
         "credential",
         "credentials",
+        "private_key",
+        # Database/connection strings
+        "database_url",
+        "db_url",
+        "dsn",
+        "connection_string",
+        "redis_url",
+        "mongodb_uri",
+        "postgres_url",
     }
 )
 

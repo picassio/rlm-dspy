@@ -22,6 +22,34 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Restricted paths that tools should not access
+_RESTRICTED_PATHS = {
+    "/etc/passwd", "/etc/shadow", "/etc/sudoers",
+    "~/.ssh", "~/.gnupg", "~/.aws/credentials",
+}
+
+
+def _is_safe_path(path: str) -> tuple[bool, str]:
+    """Check if a path is safe to access.
+    
+    Returns:
+        (is_safe, error_message)
+    """
+    # Expand user home
+    expanded = str(Path(path).expanduser())
+    
+    # Check for restricted paths
+    for restricted in _RESTRICTED_PATHS:
+        restricted_expanded = str(Path(restricted).expanduser())
+        if expanded.startswith(restricted_expanded):
+            return False, f"Access to {restricted} is restricted"
+    
+    # Check for obvious traversal attempts
+    if ".." in path and "/etc" in str(Path(path).resolve()):
+        return False, "Path traversal to system directories blocked"
+    
+    return True, ""
+
 
 def ripgrep(pattern: str, path: str = ".", flags: str = "") -> str:
     """
@@ -132,6 +160,11 @@ def read_file(path: str, start_line: int = 1, end_line: int | None = None) -> st
         File contents with line numbers
     """
     try:
+        # Safety check
+        is_safe, error = _is_safe_path(path)
+        if not is_safe:
+            return f"(security: {error})"
+        
         p = Path(path)
         if not p.exists():
             return f"(file not found: {path})"
@@ -364,13 +397,24 @@ def shell(command: str, timeout: int = 30) -> str:
     Returns:
         Command output (stdout + stderr)
         
-    Note:
-        This tool is disabled by default for security.
-        Enable by setting RLM_ALLOW_SHELL=1.
+    Security:
+        - Disabled by default (requires RLM_ALLOW_SHELL=1)
+        - Uses shell=True which can be dangerous with untrusted input
+        - Only enable in trusted environments
+        - Commands are logged for audit purposes
     """
     import os
     if not os.environ.get("RLM_ALLOW_SHELL"):
         return "(shell disabled - set RLM_ALLOW_SHELL=1 to enable)"
+    
+    # Basic safety checks
+    dangerous_patterns = ["rm -rf /", "mkfs", "> /dev/", "dd if="]
+    for pattern in dangerous_patterns:
+        if pattern in command.lower():
+            return f"(blocked dangerous command pattern: {pattern})"
+    
+    # Log command for audit
+    logger.warning("Shell command executed: %s", command[:100])
     
     try:
         result = subprocess.run(

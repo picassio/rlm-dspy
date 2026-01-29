@@ -56,6 +56,19 @@ def validate_path_safety(path: Path, base_dir: Path | None = None) -> Path:
             raise PathTraversalError(
                 f"Path {resolved} is outside base directory {base_resolved}"
             )
+        
+        # Additional symlink-aware check using commonpath
+        try:
+            common = os.path.commonpath([str(base_resolved), str(resolved)])
+            if common != str(base_resolved):
+                raise PathTraversalError(
+                    f"Path {resolved} escapes base directory via symlink"
+                )
+        except ValueError:
+            # Different drives on Windows
+            raise PathTraversalError(
+                f"Path {resolved} is on different drive than {base_resolved}"
+            )
     
     return resolved
 
