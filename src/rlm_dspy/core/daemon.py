@@ -549,23 +549,33 @@ class IndexDaemon:
     
     def _write_pid_file(self) -> None:
         """Write PID file with file locking to prevent races."""
-        import fcntl
-        
         pid_file = self.config.pid_file
         pid_file.parent.mkdir(parents=True, exist_ok=True)
         
         try:
             # Open with exclusive creation to detect existing daemon
             fd = os.open(str(pid_file), os.O_CREAT | os.O_WRONLY | os.O_TRUNC)
-            try:
-                # Try to get exclusive lock (non-blocking)
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                os.write(fd, str(os.getpid()).encode())
-                # Store fd so lock is held and can be closed on shutdown
-                self._pid_fd = fd
-            except BlockingIOError:
-                os.close(fd)
-                raise RuntimeError("Another daemon instance is already running")
+            
+            # Try to get exclusive lock (platform-specific)
+            if sys.platform != "win32":
+                import fcntl
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    os.close(fd)
+                    raise RuntimeError("Another daemon instance is already running")
+            else:
+                # Windows: use msvcrt for file locking
+                import msvcrt
+                try:
+                    msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                except OSError:
+                    os.close(fd)
+                    raise RuntimeError("Another daemon instance is already running")
+            
+            os.write(fd, str(os.getpid()).encode())
+            # Store fd so lock is held and can be closed on shutdown
+            self._pid_fd = fd
         except OSError as e:
             raise RuntimeError(f"Failed to write PID file: {e}")
     

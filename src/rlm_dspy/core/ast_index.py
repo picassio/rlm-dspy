@@ -196,6 +196,11 @@ def index_file(path: Path | str, use_cache: bool = True) -> ASTIndex:
         return ASTIndex()
 
     try:
+        # Skip files larger than 1MB to prevent OOM
+        if path.stat().st_size > 1_000_000:
+            logger.debug("Skipping large file: %s", path)
+            return ASTIndex()
+        
         code = path.read_text(encoding='utf-8', errors='replace')
         tree = parser.parse(bytes(code, "utf8"))
 

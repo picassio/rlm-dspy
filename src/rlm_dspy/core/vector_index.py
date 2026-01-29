@@ -171,9 +171,28 @@ class CodeIndex:
         return {"files": {}, "created": 0, "updated": 0, "snippet_count": 0}
     
     def _save_manifest(self, index_path: Path, manifest: dict) -> None:
-        """Save manifest file."""
+        """Save manifest file atomically."""
+        import tempfile
+        
         manifest_path = self._get_manifest_path(index_path)
-        manifest_path.write_text(json.dumps(manifest, indent=2), encoding='utf-8')
+        
+        # Atomic write: temp file + rename
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode='w',
+                dir=index_path,
+                suffix='.tmp',
+                delete=False,
+                encoding='utf-8'
+            ) as f:
+                json.dump(manifest, f, indent=2)
+                temp_path = Path(f.name)
+            
+            temp_path.replace(manifest_path)
+        except OSError as e:
+            logger.error("Failed to save manifest: %s", e)
+            if 'temp_path' in locals() and temp_path.exists():
+                temp_path.unlink()
     
     def _extract_snippets(self, repo_path: Path) -> list[CodeSnippet]:
         """Extract code snippets from repository using AST parsing."""
@@ -206,6 +225,14 @@ class CodeIndex:
                 if not language:
                     continue
                 
+                # Skip files larger than 1MB to prevent OOM
+                try:
+                    if file_path.stat().st_size > 1_000_000:
+                        logger.debug("Skipping large file: %s", file_path)
+                        continue
+                except OSError:
+                    continue
+                
                 # Index the file (returns ASTIndex with .definitions)
                 ast_index = index_file(str(file_path))
                 
@@ -217,7 +244,13 @@ class CodeIndex:
                     continue
                 
                 # Use relative path for consistent storage
-                rel_path = str(file_path.relative_to(repo_path))
+                # Handle symlinks pointing outside repo gracefully
+                try:
+                    rel_path = str(file_path.relative_to(repo_path))
+                except ValueError:
+                    # Symlink points outside repo - use absolute path
+                    logger.debug("File outside repo (symlink?): %s", file_path)
+                    continue
                 
                 for defn in ast_index.definitions:
                     # Extract text for the definition
