@@ -68,3 +68,8 @@ select = ["E", "F", "I", "W"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: marks tests as integration tests (require API key)",
+]

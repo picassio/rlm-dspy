@@ -590,7 +590,7 @@ These tools provide 100% accurate results. Only fall back to manual parsing if t
                 if gitignore_path.exists():
                     patterns.extend(gitignore_path.read_text(encoding="utf-8").splitlines())
 
-        spec = pathspec.PathSpec.from_lines("gitwildmatch", patterns) if patterns else None
+        spec = pathspec.PathSpec.from_lines("gitignore", patterns) if patterns else None
 
         # Common directories to always skip (performance optimization)
         SKIP_DIRS = {'.git', '__pycache__', 'node_modules', '.venv', 'venv', '.tox', 'dist', 'build'}
