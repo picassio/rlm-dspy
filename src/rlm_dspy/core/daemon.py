@@ -153,6 +153,9 @@ class IndexWorker(threading.Thread):
     
     def run(self) -> None:
         """Process index update requests with debouncing."""
+        consecutive_errors = 0
+        max_backoff = 60.0  # Maximum backoff in seconds
+        
         while not self._stop_event.is_set():
             try:
                 # Get items from queue with timeout
@@ -176,9 +179,16 @@ class IndexWorker(threading.Thread):
                 # Index ready projects
                 for project_name in ready:
                     self._index_project(project_name)
+                
+                # Reset error count on successful iteration
+                consecutive_errors = 0
                     
             except Exception as e:
-                logger.error("Worker error: %s", e)
+                consecutive_errors += 1
+                # Exponential backoff: 1s, 2s, 4s, ..., max 60s
+                backoff = min(2 ** (consecutive_errors - 1), max_backoff)
+                logger.error("Worker error (backoff %.1fs): %s", backoff, e)
+                time.sleep(backoff)
     
     def _index_project(self, project_name: str) -> None:
         """Re-index a project."""

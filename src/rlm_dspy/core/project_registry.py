@@ -10,6 +10,8 @@ import hashlib
 import json
 import logging
 import shutil
+import tempfile
+import threading
 import time
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
@@ -101,6 +103,7 @@ class ProjectRegistry:
         
         self._projects: dict[str, Project] = {}
         self._default_project: str | None = None
+        self._lock = threading.RLock()  # Reentrant lock for thread safety
         self._load()
     
     def _load(self) -> None:
@@ -108,26 +111,48 @@ class ProjectRegistry:
         if not self.config.registry_file.exists():
             return
         
-        try:
-            data = json.loads(self.config.registry_file.read_text(encoding='utf-8'))
-            self._default_project = data.get("default_project")
-            
-            for name, proj_data in data.get("projects", {}).items():
-                self._projects[name] = Project.from_dict(proj_data)
-        except (json.JSONDecodeError, KeyError) as e:
-            logger.warning("Failed to load project registry: %s", e)
+        with self._lock:
+            try:
+                data = json.loads(self.config.registry_file.read_text(encoding='utf-8'))
+                self._default_project = data.get("default_project")
+                
+                for name, proj_data in data.get("projects", {}).items():
+                    self._projects[name] = Project.from_dict(proj_data)
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.warning("Failed to load project registry: %s", e)
     
     def _save(self) -> None:
-        """Save registry to disk."""
-        data = {
-            "default_project": self._default_project,
-            "projects": {
-                name: proj.to_dict() 
-                for name, proj in self._projects.items()
-            },
-            "updated_at": datetime.now().isoformat(),
-        }
-        self.config.registry_file.write_text(json.dumps(data, indent=2), encoding='utf-8')
+        """Save registry to disk atomically."""
+        with self._lock:
+            data = {
+                "default_project": self._default_project,
+                "projects": {
+                    name: proj.to_dict() 
+                    for name, proj in self._projects.items()
+                },
+                "updated_at": datetime.now().isoformat(),
+            }
+            
+            # Atomic write: write to temp file then rename
+            registry_dir = self.config.registry_file.parent
+            try:
+                with tempfile.NamedTemporaryFile(
+                    mode='w',
+                    dir=registry_dir,
+                    suffix='.tmp',
+                    delete=False,
+                    encoding='utf-8'
+                ) as f:
+                    json.dump(data, f, indent=2)
+                    temp_path = Path(f.name)
+                
+                # Atomic rename (on POSIX systems)
+                temp_path.replace(self.config.registry_file)
+            except OSError as e:
+                logger.error("Failed to save registry: %s", e)
+                # Clean up temp file if it exists
+                if 'temp_path' in locals() and temp_path.exists():
+                    temp_path.unlink()
     
     def add(
         self,
@@ -157,30 +182,34 @@ class ProjectRegistry:
         if not path.exists():
             raise ValueError(f"Path does not exist: {path}")
         
-        if name in self._projects:
-            raise ValueError(f"Project '{name}' already exists. Use update() or remove() first.")
+        if not path.is_dir():
+            raise ValueError(f"Path is not a directory: {path}")
         
-        # Check for duplicate paths
-        for existing in self._projects.values():
-            if existing.path == str(path):
-                raise ValueError(
-                    f"Path already registered as '{existing.name}'. "
-                    f"Use 'rlm-dspy project remove {existing.name}' first."
-                )
-        
-        project = Project(
-            name=name,
-            path=str(path),
-            alias=alias,
-            tags=tags or [],
-            auto_watch=auto_watch,
-        )
-        
-        self._projects[name] = project
-        self._save()
-        
-        logger.info("Registered project '%s' at %s", name, path)
-        return project
+        with self._lock:
+            if name in self._projects:
+                raise ValueError(f"Project '{name}' already exists. Use update() or remove() first.")
+            
+            # Check for duplicate paths
+            for existing in self._projects.values():
+                if existing.path == str(path):
+                    raise ValueError(
+                        f"Path already registered as '{existing.name}'. "
+                        f"Use 'rlm-dspy project remove {existing.name}' first."
+                    )
+            
+            project = Project(
+                name=name,
+                path=str(path),
+                alias=alias,
+                tags=tags or [],
+                auto_watch=auto_watch,
+            )
+            
+            self._projects[name] = project
+            self._save()
+            
+            logger.info("Registered project '%s' at %s", name, path)
+            return project
     
     def remove(self, name: str, delete_index: bool = False) -> bool:
         """Remove a project from the registry.
@@ -192,42 +221,44 @@ class ProjectRegistry:
         Returns:
             True if removed, False if not found
         """
-        if name not in self._projects:
-            return False
-        
-        project = self._projects[name]
-        
-        if delete_index:
-            index_path = self.config.index_dir / name
-            if index_path.exists():
-                shutil.rmtree(index_path)
-                logger.info("Deleted index for '%s'", name)
+        with self._lock:
+            if name not in self._projects:
+                return False
             
-            # Also try legacy hash path
-            legacy_path = self.config.index_dir / project.path_hash
-            if legacy_path.exists():
-                shutil.rmtree(legacy_path)
-        
-        del self._projects[name]
-        
-        if self._default_project == name:
-            self._default_project = None
-        
-        self._save()
-        logger.info("Removed project '%s'", name)
-        return True
+            project = self._projects[name]
+            
+            if delete_index:
+                index_path = self.config.index_dir / name
+                if index_path.exists():
+                    shutil.rmtree(index_path)
+                    logger.info("Deleted index for '%s'", name)
+                
+                # Also try legacy hash path
+                legacy_path = self.config.index_dir / project.path_hash
+                if legacy_path.exists():
+                    shutil.rmtree(legacy_path)
+            
+            del self._projects[name]
+            
+            if self._default_project == name:
+                self._default_project = None
+            
+            self._save()
+            logger.info("Removed project '%s'", name)
+            return True
     
     def get(self, name: str) -> Project | None:
         """Get a project by name or alias."""
-        if name in self._projects:
-            return self._projects[name]
-        
-        # Try alias
-        for project in self._projects.values():
-            if project.alias and project.alias.lower() == name.lower():
-                return project
-        
-        return None
+        with self._lock:
+            if name in self._projects:
+                return self._projects[name]
+            
+            # Try alias
+            for project in self._projects.values():
+                if project.alias and project.alias.lower() == name.lower():
+                    return project
+            
+            return None
     
     def list(
         self,
@@ -243,7 +274,8 @@ class ProjectRegistry:
         Returns:
             List of Project objects
         """
-        projects = list(self._projects.values())
+        with self._lock:
+            projects = list(self._projects.values())
         
         if tags:
             tags_lower = [t.lower() for t in tags]
@@ -263,17 +295,19 @@ class ProjectRegistry:
     
     def set_default(self, name: str) -> None:
         """Set the default project for searches."""
-        if name not in self._projects:
-            raise ValueError(f"Project '{name}' not found")
-        
-        self._default_project = name
-        self._save()
+        with self._lock:
+            if name not in self._projects:
+                raise ValueError(f"Project '{name}' not found")
+            
+            self._default_project = name
+            self._save()
     
     def get_default(self) -> Project | None:
         """Get the default project."""
-        if self._default_project:
-            return self._projects.get(self._default_project)
-        return None
+        with self._lock:
+            if self._default_project:
+                return self._projects.get(self._default_project)
+            return None
     
     def update_stats(
         self,
@@ -282,34 +316,37 @@ class ProjectRegistry:
         file_count: int,
     ) -> None:
         """Update project statistics after indexing."""
-        if name not in self._projects:
-            return
-        
-        project = self._projects[name]
-        project.snippet_count = snippet_count
-        project.file_count = file_count
-        project.indexed_at = datetime.now().isoformat()
-        self._save()
+        with self._lock:
+            if name not in self._projects:
+                return
+            
+            project = self._projects[name]
+            project.snippet_count = snippet_count
+            project.file_count = file_count
+            project.indexed_at = datetime.now().isoformat()
+            self._save()
     
     def tag(self, name: str, tags: list[str]) -> None:
         """Add tags to a project."""
-        if name not in self._projects:
-            raise ValueError(f"Project '{name}' not found")
-        
-        project = self._projects[name]
-        for tag in tags:
-            if tag not in project.tags:
-                project.tags.append(tag)
-        self._save()
+        with self._lock:
+            if name not in self._projects:
+                raise ValueError(f"Project '{name}' not found")
+            
+            project = self._projects[name]
+            for tag in tags:
+                if tag not in project.tags:
+                    project.tags.append(tag)
+            self._save()
     
     def untag(self, name: str, tags: list[str]) -> None:
         """Remove tags from a project."""
-        if name not in self._projects:
-            raise ValueError(f"Project '{name}' not found")
-        
-        project = self._projects[name]
-        project.tags = [t for t in project.tags if t not in tags]
-        self._save()
+        with self._lock:
+            if name not in self._projects:
+                raise ValueError(f"Project '{name}' not found")
+            
+            project = self._projects[name]
+            project.tags = [t for t in project.tags if t not in tags]
+            self._save()
     
     def get_index_path(self, name: str) -> Path:
         """Get the index directory path for a project."""
@@ -322,8 +359,9 @@ class ProjectRegistry:
         if not self.config.index_dir.exists():
             return orphaned
         
-        registered_names = set(self._projects.keys())
-        registered_hashes = {p.path_hash for p in self._projects.values()}
+        with self._lock:
+            registered_names = set(self._projects.keys())
+            registered_hashes = {p.path_hash for p in self._projects.values()}
         
         for child in self.config.index_dir.iterdir():
             if not child.is_dir():
