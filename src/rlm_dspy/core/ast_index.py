@@ -151,14 +151,41 @@ def _extract_definitions(node, language: str, results: list[Definition], file: s
         _extract_definitions(child, language, results, file, current_class)
 
 
-def index_file(path: Path | str) -> ASTIndex:
-    """Index a single file using tree-sitter."""
+# Cache for parsed AST indexes: {(path, mtime): ASTIndex}
+_index_cache: dict[tuple[str, float], ASTIndex] = {}
+_MAX_CACHE_SIZE = 500  # Max files to cache
+
+
+def _get_cache_key(path: Path) -> tuple[str, float] | None:
+    """Get cache key for a file (path + mtime)."""
+    try:
+        return (str(path.resolve()), path.stat().st_mtime)
+    except OSError:
+        return None
+
+
+def index_file(path: Path | str, use_cache: bool = True) -> ASTIndex:
+    """Index a single file using tree-sitter.
+    
+    Args:
+        path: Path to the file to index
+        use_cache: Whether to use cached results (default: True)
+        
+    Returns:
+        ASTIndex with definitions found in the file
+    """
     path = Path(path)
     suffix = path.suffix.lower()
     language = LANGUAGE_MAP.get(suffix)
 
     if not language:
         return ASTIndex()
+
+    # Check cache
+    if use_cache:
+        cache_key = _get_cache_key(path)
+        if cache_key and cache_key in _index_cache:
+            return _index_cache[cache_key]
 
     parser = _get_parser(language)
     if not parser:
@@ -171,16 +198,62 @@ def index_file(path: Path | str) -> ASTIndex:
         definitions: list[Definition] = []
         _extract_definitions(tree.root_node, language, definitions, str(path))
 
-        return ASTIndex(definitions=definitions)
+        result = ASTIndex(definitions=definitions)
+        
+        # Store in cache
+        if use_cache:
+            cache_key = _get_cache_key(path)
+            if cache_key:
+                # Evict old entries if cache is full
+                if len(_index_cache) >= _MAX_CACHE_SIZE:
+                    # Remove oldest entries (first 100)
+                    keys_to_remove = list(_index_cache.keys())[:100]
+                    for k in keys_to_remove:
+                        del _index_cache[k]
+                _index_cache[cache_key] = result
+        
+        return result
     except Exception as e:
         logger.warning(f"Failed to index {path}: {e}")
         return ASTIndex()
 
 
-def index_files(paths: list[Path | str]) -> ASTIndex:
-    """Index multiple files."""
+def index_files(paths: list[Path | str], use_cache: bool = True) -> ASTIndex:
+    """Index multiple files.
+    
+    Args:
+        paths: List of file paths to index
+        use_cache: Whether to use cached results (default: True)
+        
+    Returns:
+        Combined ASTIndex with all definitions
+    """
     all_defs: list[Definition] = []
     for path in paths:
-        idx = index_file(path)
+        idx = index_file(path, use_cache=use_cache)
         all_defs.extend(idx.definitions)
     return ASTIndex(definitions=all_defs)
+
+
+def clear_index_cache() -> int:
+    """Clear the AST index cache.
+    
+    Returns:
+        Number of entries cleared
+    """
+    global _index_cache
+    count = len(_index_cache)
+    _index_cache = {}
+    return count
+
+
+def get_cache_stats() -> dict[str, int]:
+    """Get cache statistics.
+    
+    Returns:
+        Dict with cache size and max size
+    """
+    return {
+        "size": len(_index_cache),
+        "max_size": _MAX_CACHE_SIZE,
+    }
