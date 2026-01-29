@@ -8,9 +8,23 @@ from .signatures import (
     DiffReview,
     PerformanceAnalysis,
     SecurityAudit,
+    # Cited signatures (with file:line references)
+    CitedAnalysis,
+    CitedSecurityAudit,
+    CitedBugFinder,
+    CitedCodeReview,
     SIGNATURES,
     get_signature,
     list_signatures,
+)
+from .core.citations import (
+    SourceLocation,
+    CitedFinding,
+    CitedAnalysisResult,
+    code_to_document,
+    files_to_documents,
+    citations_to_locations,
+    parse_findings_from_text,
 )
 from .guards import (
     GroundednessResult,
@@ -51,9 +65,22 @@ __all__ = [
     "ArchitectureAnalysis",
     "PerformanceAnalysis",
     "DiffReview",
+    # Cited signatures
+    "CitedAnalysis",
+    "CitedSecurityAudit",
+    "CitedBugFinder",
+    "CitedCodeReview",
     "SIGNATURES",
     "get_signature",
     "list_signatures",
+    # Citations utilities
+    "SourceLocation",
+    "CitedFinding",
+    "CitedAnalysisResult",
+    "code_to_document",
+    "files_to_documents",
+    "citations_to_locations",
+    "parse_findings_from_text",
     # Hallucination Guards (LLM-as-judge)
     "GroundednessResult",
     "validate_groundedness",

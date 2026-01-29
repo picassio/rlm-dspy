@@ -22,6 +22,17 @@ from .vector_index import (
     semantic_search,
 )
 
+# Citations
+from .citations import (
+    SourceLocation,
+    CitedFinding,
+    CitedAnalysisResult,
+    code_to_document,
+    files_to_documents,
+    citations_to_locations,
+    parse_findings_from_text,
+)
+
 # Debug utilities
 from .debug import (
     Verbosity,
@@ -116,6 +127,14 @@ __all__ = [
     "CodeIndex",
     "get_index_manager",
     "semantic_search",
+    # Citations
+    "SourceLocation",
+    "CitedFinding",
+    "CitedAnalysisResult",
+    "code_to_document",
+    "files_to_documents",
+    "citations_to_locations",
+    "parse_findings_from_text",
     # Debug utilities
     "Verbosity",
     "get_verbosity",

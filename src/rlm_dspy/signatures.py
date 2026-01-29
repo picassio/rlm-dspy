@@ -213,6 +213,119 @@ class DiffReview(dspy.Signature):
     )
 
 
+# =============================================================================
+# Cited Signatures (with file:line source references)
+# =============================================================================
+
+@register_signature("cited", aliases=["cite"])
+class CitedAnalysis(dspy.Signature):
+    """Analyze code and provide findings with source citations.
+    
+    For each finding, include the exact file and line number.
+    Format references as: filename.py:line_number
+    
+    Example output:
+    - Found SQL injection at db/query.py:45
+    - Unused import at utils.py:3
+    """
+    context: str = dspy.InputField(desc="Source code with line numbers")
+    query: str = dspy.InputField(desc="What to analyze or look for")
+    
+    summary: str = dspy.OutputField(
+        desc="Brief summary of findings"
+    )
+    findings: list[str] = dspy.OutputField(
+        desc="Each finding with file:line citation"
+    )
+    locations: list[str] = dspy.OutputField(
+        desc="List of file:line locations referenced"
+    )
+
+
+@register_signature("cited-security", aliases=["cited-audit"])
+class CitedSecurityAudit(dspy.Signature):
+    """Security audit with precise source citations.
+    
+    Identify security vulnerabilities and reference exact file:line locations.
+    Format: [SEVERITY] Description - filename.py:line
+    
+    Example:
+    - [CRITICAL] SQL injection - db/query.py:45
+    - [HIGH] Hardcoded password - config.py:12
+    """
+    context: str = dspy.InputField(desc="Source code with line numbers")
+    query: str = dspy.InputField(desc="Security aspect to focus on or 'full audit'")
+    
+    vulnerabilities: list[str] = dspy.OutputField(
+        desc="Each vulnerability with [SEVERITY] and file:line citation"
+    )
+    risk_level: str = dspy.OutputField(
+        desc="Overall risk: safe, low, medium, high, or critical"
+    )
+    locations: list[str] = dspy.OutputField(
+        desc="All file:line locations with security issues"
+    )
+    remediation: list[str] = dspy.OutputField(
+        desc="How to fix each vulnerability"
+    )
+
+
+@register_signature("cited-bugs")
+class CitedBugFinder(dspy.Signature):
+    """Find bugs with precise source citations.
+    
+    Identify potential bugs and reference exact file:line locations.
+    Format: [TYPE] Description - filename.py:line
+    
+    Example:
+    - [NULL] Possible null dereference - parser.py:89
+    - [LOGIC] Off-by-one error - utils.py:156
+    """
+    context: str = dspy.InputField(desc="Source code with line numbers")
+    query: str = dspy.InputField(desc="Bug type to focus on or 'all bugs'")
+    
+    bugs: list[str] = dspy.OutputField(
+        desc="Each bug with [TYPE] and file:line citation"
+    )
+    severity: str = dspy.OutputField(
+        desc="Overall severity: none, low, medium, high, or critical"
+    )
+    locations: list[str] = dspy.OutputField(
+        desc="All file:line locations with bugs"
+    )
+    fixes: list[str] = dspy.OutputField(
+        desc="Suggested fix for each bug"
+    )
+
+
+@register_signature("cited-review")
+class CitedCodeReview(dspy.Signature):
+    """Code review with precise source citations.
+    
+    Review code quality and reference exact file:line locations.
+    Format: [CATEGORY] Description - filename.py:line
+    
+    Example:
+    - [STYLE] Missing docstring - api.py:23
+    - [SMELL] God class - models.py:1
+    """
+    context: str = dspy.InputField(desc="Source code with line numbers")
+    query: str = dspy.InputField(desc="Review focus or 'general review'")
+    
+    issues: list[str] = dspy.OutputField(
+        desc="Each issue with [CATEGORY] and file:line citation"
+    )
+    quality_score: int = dspy.OutputField(
+        desc="Quality score from 1 (poor) to 10 (excellent)"
+    )
+    locations: list[str] = dspy.OutputField(
+        desc="All file:line locations with issues"
+    )
+    improvements: list[str] = dspy.OutputField(
+        desc="Suggested improvements for each issue"
+    )
+
+
 # Public alias for the registry (for backwards compatibility)
 SIGNATURES = _SIGNATURES
 
@@ -258,6 +371,11 @@ __all__ = [
     "ArchitectureAnalysis",
     "PerformanceAnalysis",
     "DiffReview",
+    # Cited signatures (with file:line references)
+    "CitedAnalysis",
+    "CitedSecurityAudit",
+    "CitedBugFinder",
+    "CitedCodeReview",
     # Registry
     "SIGNATURES",
     "register_signature",
