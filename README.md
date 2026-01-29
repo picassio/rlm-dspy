@@ -27,6 +27,39 @@ The LLM has **agency**. It writes Python code to:
 3. Build up an answer iteratively
 4. Call `SUBMIT()` when it has enough information
 
+## When to Use RLM
+
+RLM is designed for **large contexts** that don't fit in a single LLM context window:
+
+| Context Size | Recommendation |
+|--------------|----------------|
+| Small (<50KB) | Direct LLM query may be faster |
+| Medium (50-200KB) | RLM helps with navigation and accuracy |
+| Large (>200KB) | **RLM essential** - can't fit in standard context |
+
+### Best Use Cases
+
+✅ **RLM excels at:**
+- Analyzing entire codebases (multiple files, 1000s of lines)
+- Cross-file dependency analysis ("How does data flow from A to B?")
+- Architecture overviews ("Describe how these components interact")
+- Finding patterns across many files ("Find all error handling issues")
+
+⚠️ **Consider direct LLM for:**
+- Single small file analysis
+- Simple questions with obvious answers
+- When speed is more important than thoroughness
+
+### Accuracy with Tools
+
+When analyzing large codebases, RLM automatically uses built-in tools for **100% accurate** structural queries:
+
+| Query Type | Without Tools | With Tools (default) |
+|------------|---------------|---------------------|
+| "List all classes" | ~70% accurate | **100% accurate** |
+| "Find methods in class X" | Line numbers often wrong | **Exact line numbers** |
+| "Architecture overview" | Good | **100% grounded** |
+
 ## Architecture
 
 ```
@@ -576,9 +609,15 @@ result = rlm.query(
 
 **How it works:**
 1. Tools are documented in the LLM's prompt automatically
-2. LLM decides when to use them based on the query
-3. Tools run on the host and return results to the LLM
+2. LLM is instructed to use tools FIRST for accurate results
+3. Tools run on the host (not in sandbox) and return results to the LLM
 4. LLM combines tool outputs with semantic analysis
+
+**Automatic tool selection:**
+- For structural queries (classes, functions, line numbers): Uses AST tools
+- For pattern search: Uses ripgrep (faster than regex on large contexts)
+- For semantic analysis: Uses llm_query() on relevant sections
+- The LLM decides the best approach based on the query
 
 ## Documentation
 

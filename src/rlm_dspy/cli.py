@@ -429,14 +429,29 @@ def ask(
     through a Python REPL. The LLM writes code to navigate, analyze,
     and build up answers iteratively.
 
+    BEST FOR LARGE CONTEXTS:
+        RLM shines when analyzing codebases too large to fit in a single
+        LLM context window. For small files (<50KB), a direct LLM query
+        may be faster. For large codebases (>200KB), RLM is essential.
+
     HOW IT WORKS:
         1. Your files are loaded as the 'context' variable in a REPL
         2. The LLM writes Python code to explore the context
-        3. It can call llm_query() for semantic analysis of sections
-        4. It iterates until it has enough info, then calls SUBMIT()
+        3. It uses tools (ripgrep, tree-sitter) for accurate code search
+        4. It can call llm_query() for semantic analysis of sections
+        5. It iterates until it has enough info, then calls SUBMIT()
+
+    BUILT-IN TOOLS (enabled by default):
+        The LLM automatically uses these tools for accurate results:
+        - index_code, find_classes, find_functions: AST-based search (exact line numbers)
+        - ripgrep, find_calls: Fast pattern search across all files
+        - read_file: Read specific file sections
+        Use --no-tools to disable if needed.
 
     EXAMPLES:
-        rlm-dspy ask "What does main() do?" src/
+        rlm-dspy ask "Describe the architecture" src/          # Best for large codebases
+        rlm-dspy ask "Find all security issues" src/           # Cross-file analysis
+        rlm-dspy ask "Trace the data flow from input to output" src/
         rlm-dspy ask "Summarize this" --stdin < large_file.txt
         rlm-dspy ask "Find bugs" src/*.py --model anthropic/claude-sonnet-4
         rlm-dspy ask "Explain" file.py -v           # verbose progress
@@ -444,6 +459,7 @@ def ask(
         rlm-dspy ask "Test" file.py -n              # dry run (validate only)
         rlm-dspy ask "Analyze" src/ -o report.md    # write to file
         rlm-dspy ask "Analyze" src/ -j -o data.json # JSON output to file
+        rlm-dspy ask "Simple query" src/ --no-tools # disable tools
     """
     import os
 
