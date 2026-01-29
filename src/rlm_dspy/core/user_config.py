@@ -18,13 +18,81 @@ logger = logging.getLogger(__name__)
 CONFIG_DIR = Path.home() / ".rlm"
 CONFIG_FILE = CONFIG_DIR / "config.yaml"
 
-# Default configuration
+# Default configuration with all supported options
 DEFAULT_CONFIG = {
+    # Model settings
     "model": "openai/gpt-4o-mini",
+    "sub_model": None,  # Defaults to model if not set
+    
+    # Execution limits
+    "max_iterations": 20,
+    "max_llm_calls": 50,
+    "max_output_chars": 100_000,
+    
+    # Parallelism
+    "max_workers": 8,
+    
+    # Budget/safety limits
     "max_budget": 1.0,
     "max_timeout": 300,
-    "env_file": None,  # Optional path to .env file
+    
+    # API key location
+    "env_file": None,
 }
+
+# Template for config file with comments
+CONFIG_TEMPLATE = """# RLM-DSPy Configuration
+# Priority: CLI args > env vars > this file > defaults
+# Docs: https://github.com/picassio/rlm-dspy
+
+# ============================================================================
+# Model Settings
+# ============================================================================
+# Model format: provider/model-name
+# Examples: openai/gpt-4o, anthropic/claude-sonnet-4, deepseek/deepseek-chat
+model: {model}
+
+# Sub-model for llm_query() calls (defaults to main model if not set)
+# Tip: Use same model as main to reduce hallucinations
+sub_model: {sub_model}
+
+# ============================================================================
+# Execution Limits
+# ============================================================================
+# Higher values = more thorough exploration, but slower and more expensive
+
+# Max REPL iterations (default: 20)
+# Tip: Use 25-30 for complex queries to avoid forced completion
+max_iterations: {max_iterations}
+
+# Max sub-LLM calls per query (default: 50)
+max_llm_calls: {max_llm_calls}
+
+# Max chars in REPL output (default: 100000)
+max_output_chars: {max_output_chars}
+
+# ============================================================================
+# Parallelism
+# ============================================================================
+# Workers for batch operations (default: 8)
+max_workers: {max_workers}
+
+# ============================================================================
+# Budget/Safety Limits
+# ============================================================================
+# Max cost per query in USD (default: 1.0)
+max_budget: {max_budget}
+
+# Max execution time in seconds (default: 300)
+max_timeout: {max_timeout}
+
+# ============================================================================
+# API Key Location
+# ============================================================================
+# Path to .env file with API keys (optional)
+# If not set, uses environment variables directly
+env_file: {env_file}
+"""
 
 
 def ensure_config_dir() -> Path:
@@ -55,20 +123,56 @@ def load_config() -> dict[str, Any]:
         return DEFAULT_CONFIG.copy()
 
 
-def save_config(config: dict[str, Any]) -> None:
-    """Save configuration to file."""
+def save_config(config: dict[str, Any], use_template: bool = True) -> None:
+    """Save configuration to file.
+    
+    Args:
+        config: Configuration dictionary
+        use_template: If True, saves with full template and comments
+    """
     ensure_config_dir()
 
-    # Only save non-default values
-    to_save = {}
-    for key, value in config.items():
-        if key in DEFAULT_CONFIG and value != DEFAULT_CONFIG[key]:
-            to_save[key] = value
-        elif key not in DEFAULT_CONFIG:
-            to_save[key] = value
+    if use_template:
+        # Merge with defaults to ensure all fields are present
+        full_config = DEFAULT_CONFIG.copy()
+        full_config.update(config)
+        
+        # Format values for YAML
+        def fmt(val):
+            if val is None:
+                return "null"
+            elif isinstance(val, bool):
+                return "true" if val else "false"
+            elif isinstance(val, str):
+                return val
+            else:
+                return str(val)
+        
+        content = CONFIG_TEMPLATE.format(
+            model=fmt(full_config.get("model")),
+            sub_model=fmt(full_config.get("sub_model")),
+            max_iterations=fmt(full_config.get("max_iterations")),
+            max_llm_calls=fmt(full_config.get("max_llm_calls")),
+            max_output_chars=fmt(full_config.get("max_output_chars")),
+            max_workers=fmt(full_config.get("max_workers")),
+            max_budget=fmt(full_config.get("max_budget")),
+            max_timeout=fmt(full_config.get("max_timeout")),
+            env_file=fmt(full_config.get("env_file")),
+        )
+        
+        with open(CONFIG_FILE, "w") as f:
+            f.write(content)
+    else:
+        # Simple mode: only save non-default values
+        to_save = {}
+        for key, value in config.items():
+            if key in DEFAULT_CONFIG and value != DEFAULT_CONFIG[key]:
+                to_save[key] = value
+            elif key not in DEFAULT_CONFIG:
+                to_save[key] = value
 
-    with open(CONFIG_FILE, "w") as f:
-        yaml.dump(to_save, f, default_flow_style=False, sort_keys=False)
+        with open(CONFIG_FILE, "w") as f:
+            yaml.dump(to_save, f, default_flow_style=False, sort_keys=False)
 
 
 def load_env_file(env_path: str | Path | None = None) -> dict[str, str]:
