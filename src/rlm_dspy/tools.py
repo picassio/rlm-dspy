@@ -647,10 +647,13 @@ def list_projects(include_empty: bool = False) -> str:
 
 
 def search_all_projects(query: str, k: int = 3) -> str:
-    """Search semantically across ALL indexed projects.
+    """Search semantically across ALL indexed projects (without duplicates).
     
     Unlike semantic_search which searches one project, this searches
     all registered projects and returns the best matches from each.
+    
+    Automatically skips overlapping projects to avoid duplicate results
+    (e.g., if /project and /project/src are both indexed, only searches /project).
     
     Args:
         query: Natural language description of what you're looking for
@@ -662,6 +665,7 @@ def search_all_projects(query: str, k: int = 3) -> str:
     try:
         from .core.project_registry import get_project_registry
         from .core.vector_index import get_index_manager
+        from pathlib import Path
         
         registry = get_project_registry()
         projects = registry.list()
@@ -669,11 +673,33 @@ def search_all_projects(query: str, k: int = 3) -> str:
         if not projects:
             return "No projects indexed. Use 'rlm-dspy index build <path>' first."
         
+        # Filter out child projects that overlap with parent projects
+        # Keep only the most specific (deepest) non-overlapping projects
+        overlaps = registry.find_overlaps()
+        projects_to_skip = set()
+        
+        for project_name, overlap_list in overlaps.items():
+            project_path = Path(registry.get(project_name).path)
+            for overlap in overlap_list:
+                overlap_path = Path(overlap.path)
+                # If this project is a parent of the overlap, skip the overlap (child)
+                try:
+                    overlap_path.relative_to(project_path)
+                    # overlap is a child of project - skip the child to avoid duplicates
+                    projects_to_skip.add(overlap.name)
+                except ValueError:
+                    pass
+        
         manager = get_index_manager()
         all_results = []
         searched_projects = 0
         
         for p in projects:
+            # Skip overlapping child projects
+            if p.name in projects_to_skip:
+                logger.debug(f"Skipping '{p.name}' - overlaps with parent project")
+                continue
+            
             # Skip projects with no snippets
             if p.snippet_count == 0:
                 index_path = manager.config.index_dir / p.name

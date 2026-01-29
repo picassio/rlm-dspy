@@ -137,17 +137,28 @@ class CodeIndex:
     def _get_index_path(self, repo_path: Path) -> Path:
         """Get index storage path for a repository.
         
-        Uses project registry if available, otherwise falls back to hash-based path.
+        Uses project registry with best-match semantics for overlapping paths.
+        Falls back to hash-based path if no match found.
         """
         from .project_registry import get_project_registry
         
         repo_path = repo_path.resolve()
         registry = get_project_registry()
         
-        # Check if registered project
+        # First check for exact match
         for project in registry.list():
             if project.path == str(repo_path):
                 return self.config.index_dir / project.name
+        
+        # For overlapping paths, find the most specific (deepest) match
+        best_match = registry.find_best_match(repo_path)
+        if best_match and best_match.path != str(repo_path):
+            # Path is under an existing project - use that project's index
+            logger.debug(
+                "Path %s is under project '%s' (%s) - using existing index",
+                repo_path, best_match.name, best_match.path
+            )
+            return self.config.index_dir / best_match.name
         
         # Auto-register if enabled
         project = registry.auto_register(repo_path)

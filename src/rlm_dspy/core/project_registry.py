@@ -204,6 +204,16 @@ class ProjectRegistry:
                         f"Use 'rlm-dspy project remove {existing.name}' first."
                     )
             
+            # Check for overlapping paths (parent/child relationships)
+            overlaps = self._find_overlapping_projects(path)
+            if overlaps:
+                overlap_info = ", ".join(f"'{p.name}' ({p.path})" for p in overlaps)
+                logger.warning(
+                    "Project '%s' overlaps with: %s. "
+                    "This may cause duplicate search results.",
+                    name, overlap_info
+                )
+            
             project = Project(
                 name=name,
                 path=str(path),
@@ -325,6 +335,112 @@ class ProjectRegistry:
             if self._default_project:
                 return self._projects.get(self._default_project)
             return None
+    
+    def _find_overlapping_projects(self, path: Path) -> list[Project]:
+        """Find projects that overlap with the given path (internal, no lock)."""
+        path = Path(path).resolve()
+        overlaps = []
+        
+        for project in self._projects.values():
+            project_path = Path(project.path)
+            
+            # Check if new path is a parent of existing project
+            try:
+                project_path.relative_to(path)
+                overlaps.append(project)
+                continue
+            except ValueError:
+                pass
+            
+            # Check if new path is a child of existing project
+            try:
+                path.relative_to(project_path)
+                overlaps.append(project)
+            except ValueError:
+                pass
+        
+        return overlaps
+    
+    def find_overlaps(self, name: str | None = None) -> dict[str, list[Project]]:
+        """Find all overlapping project paths.
+        
+        Args:
+            name: Check specific project, or None for all projects
+            
+        Returns:
+            Dict of project_name -> list of overlapping projects
+        """
+        with self._lock:
+            overlaps = {}
+            
+            projects_to_check = [self._projects[name]] if name else list(self._projects.values())
+            
+            for project in projects_to_check:
+                if name and name not in self._projects:
+                    continue
+                    
+                path = Path(project.path)
+                project_overlaps = []
+                
+                for other in self._projects.values():
+                    if other.name == project.name:
+                        continue
+                    
+                    other_path = Path(other.path)
+                    
+                    # Check parent/child relationship
+                    try:
+                        other_path.relative_to(path)
+                        project_overlaps.append(other)
+                        continue
+                    except ValueError:
+                        pass
+                    
+                    try:
+                        path.relative_to(other_path)
+                        project_overlaps.append(other)
+                    except ValueError:
+                        pass
+                
+                if project_overlaps:
+                    overlaps[project.name] = project_overlaps
+            
+            return overlaps
+    
+    def find_best_match(self, path: str | Path) -> Project | None:
+        """Find the most specific project for a given path.
+        
+        When paths overlap, returns the project whose path is closest
+        (deepest parent) to the given path.
+        
+        Args:
+            path: Path to find best matching project for
+            
+        Returns:
+            Best matching project or None
+        """
+        path = Path(path).resolve()
+        
+        with self._lock:
+            best_match = None
+            best_depth = -1
+            
+            for project in self._projects.values():
+                project_path = Path(project.path)
+                
+                # Check if path is under this project
+                try:
+                    rel_path = path.relative_to(project_path)
+                    # Count depth (fewer parts = more specific match)
+                    depth = len(project_path.parts)
+                    if depth > best_depth:
+                        best_depth = depth
+                        best_match = project
+                except ValueError:
+                    # path is not under project_path
+                    pass
+            
+            return best_match
     
     def update_stats(
         self,
