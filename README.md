@@ -546,11 +546,16 @@ result = rlm.query(
 | `find_files(pattern, path, type)` | Find files by glob pattern |
 | `read_file(path, start, end)` | Read file with line numbers |
 | `file_stats(path)` | Get file/directory statistics (JSON) |
-| `ast_query(code, node_types)` | Tree-sitter AST node search |
-| `find_definitions(path, name)` | Find function/class definitions |
+| `index_code(path, kind, name)` | **AST index with EXACT line numbers** (10+ languages) |
+| `find_definitions(path, name)` | Find all definitions (classes, functions, methods) |
+| `find_classes(path, name)` | Find class definitions |
+| `find_functions(path, name)` | Find top-level functions |
+| `find_methods(path, name)` | Find methods (shows parent class) |
 | `find_imports(path)` | Find all import statements |
 | `find_calls(path, func_name)` | Find function/method call sites |
 | `shell(cmd, timeout)` | Run shell commands (disabled by default) |
+
+**Supported languages for AST tools:** Python, JavaScript, TypeScript, Go, Rust, Java, C, C++, Ruby, C#
 
 **Prerequisites for tools:**
 
