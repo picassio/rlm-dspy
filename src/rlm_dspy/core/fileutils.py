@@ -164,7 +164,6 @@ def _recursive_hard_link(source: Path, target: Path) -> None:
                 dest.hardlink_to(item)
             except OSError:
                 # Hardlink failed (cross-volume, permissions, etc.) - fall back to copy
-                import shutil
                 shutil.copy2(item, dest)
 
 

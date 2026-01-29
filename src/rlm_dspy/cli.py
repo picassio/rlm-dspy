@@ -267,8 +267,6 @@ def _output_result(
     if result.success:
         if result.outputs:
             # Structured output from custom signature
-            from rich.table import Table
-            
             table = Table(title="Structured Output", show_header=True, header_style="bold cyan")
             table.add_column("Field", style="cyan")
             table.add_column("Value")

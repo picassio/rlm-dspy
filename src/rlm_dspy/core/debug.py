@@ -17,7 +17,6 @@ from typing import Any, Callable, Generator, TypeVar
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.syntax import Syntax
-from rich.table import Table
 
 T = TypeVar("T")
 
