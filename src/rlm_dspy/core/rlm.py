@@ -590,6 +590,7 @@ class RLM:
 
         # Create the dspy.RLM instance
         self._rlm = self._create_rlm()
+        self._rlm_dirty = False  # Track if RLM needs rebuild (for lazy add_tool)
 
         # Tracking
         self._start_time: float | None = None
@@ -827,6 +828,11 @@ These tools provide 100% accurate results. Only fall back to manual parsing if t
             raise ValueError("Query cannot be empty")
         if not context or not context.strip():
             raise ValueError("Context cannot be empty")
+        
+        # Rebuild RLM if tools were added (lazy rebuild)
+        if self._rlm_dirty:
+            self._rlm = self._create_rlm()
+            self._rlm_dirty = False
 
         self._start_time = time.time()
         
@@ -943,8 +949,8 @@ These tools provide 100% accurate results. Only fall back to manual parsing if t
         """
         self._validate_tools({name: func})
         self._tools[name] = func
-        # Recreate RLM with updated tools
-        self._rlm = self._create_rlm()
+        # Mark RLM as needing rebuild (lazy - only rebuild when query() is called)
+        self._rlm_dirty = True
     
     def _validate_tools(self, tools: dict[str, Callable]) -> None:
         """Validate tool names and types.

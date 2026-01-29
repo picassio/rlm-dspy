@@ -53,7 +53,7 @@ class IndexConfig:
         return cls(
             index_dir=Path(index_dir).expanduser(),
             use_faiss=config.get("use_faiss", True),
-            faiss_threshold=config.get("faiss_threshold", 5000),
+            faiss_threshold=config.get("faiss_threshold", 100),
             auto_update=config.get("auto_update_index", True),
             cache_ttl=config.get("index_cache_ttl", 3600),
         )
