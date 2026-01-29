@@ -33,6 +33,14 @@ from .citations import (
     parse_findings_from_text,
 )
 
+# Project Registry
+from .project_registry import (
+    Project,
+    ProjectRegistry,
+    RegistryConfig,
+    get_project_registry,
+)
+
 # Debug utilities
 from .debug import (
     Verbosity,
@@ -135,6 +143,11 @@ __all__ = [
     "files_to_documents",
     "citations_to_locations",
     "parse_findings_from_text",
+    # Project Registry
+    "Project",
+    "ProjectRegistry",
+    "RegistryConfig",
+    "get_project_registry",
     # Debug utilities
     "Verbosity",
     "get_verbosity",

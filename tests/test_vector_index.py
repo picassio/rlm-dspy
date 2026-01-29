@@ -91,8 +91,9 @@ class TestCodeIndex:
         index_path = index._get_index_path(repo_path)
         
         assert index_path.parent == config.index_dir
-        # Should be a hash-based name
-        assert len(index_path.name) == 12
+        # Should be project name (auto-registered) or hash-based name
+        # With auto_register enabled, it uses the directory name (possibly with suffix)
+        assert index_path.name.startswith("my_repo") or len(index_path.name) == 12
 
     def test_extract_snippets(self, tmp_path):
         """Test snippet extraction from Python files."""

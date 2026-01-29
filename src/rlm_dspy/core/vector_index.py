@@ -134,8 +134,27 @@ class CodeIndex:
         return self._embedder
     
     def _get_index_path(self, repo_path: Path) -> Path:
-        """Get index storage path for a repository."""
-        path_hash = hashlib.md5(str(repo_path.resolve()).encode()).hexdigest()[:12]
+        """Get index storage path for a repository.
+        
+        Uses project registry if available, otherwise falls back to hash-based path.
+        """
+        from .project_registry import get_project_registry
+        
+        repo_path = repo_path.resolve()
+        registry = get_project_registry()
+        
+        # Check if registered project
+        for project in registry.list():
+            if project.path == str(repo_path):
+                return self.config.index_dir / project.name
+        
+        # Auto-register if enabled
+        project = registry.auto_register(repo_path)
+        if project:
+            return self.config.index_dir / project.name
+        
+        # Fallback to hash-based path
+        path_hash = hashlib.md5(str(repo_path).encode()).hexdigest()[:12]
         return self.config.index_dir / path_hash
     
     def _get_manifest_path(self, index_path: Path) -> Path:
@@ -396,6 +415,14 @@ class CodeIndex:
         self._indexes[cache_key] = (index, time.time())
         self._metadata[cache_key] = metadata
         self._corpus_idx_map[cache_key] = corpus_idx_to_id
+        
+        # Update project registry stats
+        from .project_registry import get_project_registry
+        registry = get_project_registry()
+        for project in registry.list():
+            if project.path == str(repo_path):
+                registry.update_stats(project.name, len(snippets), len(file_mtimes))
+                break
         
         logger.info("Index built: %d snippets from %d files", 
                    len(snippets), len(file_mtimes))

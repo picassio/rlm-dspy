@@ -1464,5 +1464,297 @@ def index_search(
         console.print()
 
 
+# =============================================================================
+# Project Commands (for multi-project management)
+# =============================================================================
+
+project_app = typer.Typer(
+    name="project",
+    help="Manage indexed projects",
+    no_args_is_help=True,
+)
+app.add_typer(project_app, name="project")
+
+
+@project_app.command("add")
+def project_add(
+    name: Annotated[
+        str,
+        typer.Argument(help="Project name"),
+    ],
+    path: Annotated[
+        Path,
+        typer.Argument(help="Path to project directory"),
+    ],
+    alias: Annotated[
+        Optional[str],
+        typer.Option("--alias", "-a", help="Short alias for the project"),
+    ] = None,
+    tags: Annotated[
+        Optional[str],
+        typer.Option("--tags", "-t", help="Comma-separated tags"),
+    ] = None,
+) -> None:
+    """Register a project for indexing.
+    
+    Examples:
+        rlm-dspy project add my-app ~/projects/my-app
+        rlm-dspy project add backend ./backend --alias be --tags python,api
+    """
+    from .core.project_registry import get_project_registry
+    
+    registry = get_project_registry()
+    
+    try:
+        tag_list = [t.strip() for t in tags.split(",")] if tags else []
+        project = registry.add(name, path, alias=alias, tags=tag_list)
+        console.print(f"[green]✓[/green] Registered project '{name}' at {project.path}")
+        
+        if alias:
+            console.print(f"  Alias: {alias}")
+        if tag_list:
+            console.print(f"  Tags: {', '.join(tag_list)}")
+        
+        console.print(f"\n[dim]Run 'rlm-dspy index build {path}' to index the project.[/dim]")
+        
+    except ValueError as e:
+        console.print(f"[red]✗[/red] {e}")
+        raise typer.Exit(1)
+
+
+@project_app.command("list")
+def project_list(
+    tags: Annotated[
+        Optional[str],
+        typer.Option("--tags", "-t", help="Filter by tags (comma-separated)"),
+    ] = None,
+    sort: Annotated[
+        str,
+        typer.Option("--sort", "-s", help="Sort by: name, indexed_at, snippet_count"),
+    ] = "name",
+) -> None:
+    """List all registered projects.
+    
+    Examples:
+        rlm-dspy project list
+        rlm-dspy project list --tags python
+        rlm-dspy project list --sort snippet_count
+    """
+    from .core.project_registry import get_project_registry
+    
+    registry = get_project_registry()
+    tag_list = [t.strip() for t in tags.split(",")] if tags else None
+    projects = registry.list(tags=tag_list, sort_by=sort)
+    
+    if not projects:
+        console.print("[dim]No projects registered.[/dim]")
+        console.print("[dim]Use 'rlm-dspy project add <name> <path>' to register a project.[/dim]")
+        return
+    
+    default = registry.get_default()
+    
+    table = Table(title="Registered Projects")
+    table.add_column("Name", style="cyan")
+    table.add_column("Path", style="dim")
+    table.add_column("Snippets", justify="right")
+    table.add_column("Files", justify="right")
+    table.add_column("Tags", style="green")
+    table.add_column("Indexed", style="dim")
+    
+    for p in projects:
+        name = f"* {p.name}" if default and p.name == default.name else p.name
+        indexed = ""
+        if p.indexed_at:
+            from datetime import datetime
+            dt = datetime.fromisoformat(p.indexed_at)
+            indexed = dt.strftime("%Y-%m-%d %H:%M")
+        
+        table.add_row(
+            name,
+            p.path,
+            str(p.snippet_count) if p.snippet_count else "-",
+            str(p.file_count) if p.file_count else "-",
+            ", ".join(p.tags) if p.tags else "-",
+            indexed or "-",
+        )
+    
+    console.print(table)
+    console.print(f"\n[dim]Total: {len(projects)} project(s)[/dim]")
+    if default:
+        console.print(f"[dim]* = default project[/dim]")
+
+
+@project_app.command("remove")
+def project_remove(
+    name: Annotated[
+        str,
+        typer.Argument(help="Project name to remove"),
+    ],
+    delete_index: Annotated[
+        bool,
+        typer.Option("--delete-index", "-d", help="Also delete the index files"),
+    ] = False,
+    confirm: Annotated[
+        bool,
+        typer.Option("--yes", "-y", help="Skip confirmation"),
+    ] = False,
+) -> None:
+    """Remove a project from the registry.
+    
+    Examples:
+        rlm-dspy project remove my-app
+        rlm-dspy project remove my-app --delete-index
+    """
+    from .core.project_registry import get_project_registry
+    
+    registry = get_project_registry()
+    
+    project = registry.get(name)
+    if not project:
+        console.print(f"[red]✗[/red] Project '{name}' not found")
+        raise typer.Exit(1)
+    
+    if not confirm:
+        msg = f"Remove project '{name}'"
+        if delete_index:
+            msg += " and delete index"
+        msg += "?"
+        
+        if not typer.confirm(msg):
+            console.print("[dim]Cancelled[/dim]")
+            return
+    
+    registry.remove(name, delete_index=delete_index)
+    console.print(f"[green]✓[/green] Removed project '{name}'")
+    if delete_index:
+        console.print(f"  Index files deleted")
+
+
+@project_app.command("default")
+def project_default(
+    name: Annotated[
+        Optional[str],
+        typer.Argument(help="Project name to set as default"),
+    ] = None,
+) -> None:
+    """Set or show the default project.
+    
+    Examples:
+        rlm-dspy project default           # Show current default
+        rlm-dspy project default my-app    # Set default
+    """
+    from .core.project_registry import get_project_registry
+    
+    registry = get_project_registry()
+    
+    if name is None:
+        default = registry.get_default()
+        if default:
+            console.print(f"Default project: [cyan]{default.name}[/cyan]")
+            console.print(f"  Path: {default.path}")
+        else:
+            console.print("[dim]No default project set[/dim]")
+        return
+    
+    try:
+        registry.set_default(name)
+        console.print(f"[green]✓[/green] Set default project to '{name}'")
+    except ValueError as e:
+        console.print(f"[red]✗[/red] {e}")
+        raise typer.Exit(1)
+
+
+@project_app.command("tag")
+def project_tag(
+    name: Annotated[
+        str,
+        typer.Argument(help="Project name"),
+    ],
+    tags: Annotated[
+        str,
+        typer.Argument(help="Tags to add (comma-separated)"),
+    ],
+) -> None:
+    """Add tags to a project.
+    
+    Examples:
+        rlm-dspy project tag my-app python,web,api
+    """
+    from .core.project_registry import get_project_registry
+    
+    registry = get_project_registry()
+    tag_list = [t.strip() for t in tags.split(",")]
+    
+    try:
+        registry.tag(name, tag_list)
+        console.print(f"[green]✓[/green] Added tags to '{name}': {', '.join(tag_list)}")
+    except ValueError as e:
+        console.print(f"[red]✗[/red] {e}")
+        raise typer.Exit(1)
+
+
+@project_app.command("cleanup")
+def project_cleanup(
+    confirm: Annotated[
+        bool,
+        typer.Option("--yes", "-y", help="Skip confirmation"),
+    ] = False,
+) -> None:
+    """Remove orphaned index directories.
+    
+    Finds index directories that don't have a registered project
+    and offers to delete them.
+    
+    Examples:
+        rlm-dspy project cleanup
+        rlm-dspy project cleanup -y
+    """
+    from .core.project_registry import get_project_registry
+    
+    registry = get_project_registry()
+    orphaned = registry.find_orphaned()
+    
+    if not orphaned:
+        console.print("[green]✓[/green] No orphaned indexes found")
+        return
+    
+    console.print(f"Found {len(orphaned)} orphaned index(es):\n")
+    for path in orphaned:
+        console.print(f"  [dim]{path}[/dim]")
+    
+    if not confirm:
+        console.print()
+        if not typer.confirm("Delete these orphaned indexes?"):
+            console.print("[dim]Cancelled[/dim]")
+            return
+    
+    registry.cleanup_orphaned(dry_run=False)
+    console.print(f"\n[green]✓[/green] Removed {len(orphaned)} orphaned index(es)")
+
+
+@project_app.command("migrate")
+def project_migrate() -> None:
+    """Migrate legacy hash-based indexes to named projects.
+    
+    Scans for index directories with hash names and registers
+    them as projects using the directory name from their manifest.
+    
+    Examples:
+        rlm-dspy project migrate
+    """
+    from .core.project_registry import get_project_registry
+    
+    registry = get_project_registry()
+    migrated = registry.migrate_legacy()
+    
+    if not migrated:
+        console.print("[dim]No legacy indexes to migrate[/dim]")
+        return
+    
+    console.print(f"[green]✓[/green] Migrated {len(migrated)} index(es):\n")
+    for old_hash, new_name in migrated:
+        console.print(f"  {old_hash} → [cyan]{new_name}[/cyan]")
+
+
 if __name__ == "__main__":
     app()
