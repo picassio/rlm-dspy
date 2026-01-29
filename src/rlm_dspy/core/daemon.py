@@ -259,8 +259,11 @@ class IndexDaemon:
         if daemonize:
             self._daemonize()
         
-        # Write PID file
-        self.config.pid_file.write_text(str(os.getpid()))
+        # Setup signal handlers for graceful shutdown
+        self._setup_signal_handlers()
+        
+        # Write PID file with locking
+        self._write_pid_file()
         
         # Setup logging
         self._setup_logging()
@@ -514,6 +517,37 @@ class IndexDaemon:
         with open(str(self.config.log_file), 'a') as log:
             os.dup2(log.fileno(), sys.stdout.fileno())
             os.dup2(log.fileno(), sys.stderr.fileno())
+    
+    def _setup_signal_handlers(self) -> None:
+        """Setup signal handlers for graceful shutdown."""
+        def handle_signal(signum, frame):
+            logger.info("Received signal %d, initiating shutdown...", signum)
+            self._running = False
+        
+        # Handle SIGTERM (kill) and SIGINT (Ctrl+C)
+        signal.signal(signal.SIGTERM, handle_signal)
+        signal.signal(signal.SIGINT, handle_signal)
+    
+    def _write_pid_file(self) -> None:
+        """Write PID file with file locking to prevent races."""
+        import fcntl
+        
+        pid_file = self.config.pid_file
+        pid_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        try:
+            # Open with exclusive creation to detect existing daemon
+            fd = os.open(str(pid_file), os.O_CREAT | os.O_WRONLY | os.O_TRUNC)
+            try:
+                # Try to get exclusive lock (non-blocking)
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                os.write(fd, str(os.getpid()).encode())
+                # Keep lock held - will be released when process exits
+            except BlockingIOError:
+                os.close(fd)
+                raise RuntimeError("Another daemon instance is already running")
+        except OSError as e:
+            raise RuntimeError(f"Failed to write PID file: {e}")
     
     def _auto_watch_projects(self) -> None:
         """Auto-watch projects with auto_watch=True."""
