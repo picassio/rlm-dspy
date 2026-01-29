@@ -582,6 +582,111 @@ def semantic_search(query: str, path: str = ".", k: int = 5) -> str:
         return f"Semantic search error: {e}\nTip: Run 'rlm-dspy index build {path}' first."
 
 
+def list_projects() -> str:
+    """List all indexed projects available for semantic search.
+    
+    Use this to discover what codebases are indexed and their paths.
+    Then use semantic_search with the project path to search that specific project.
+    
+    Returns:
+        Formatted list of projects with names, paths, and snippet counts
+    """
+    try:
+        from .core.project_registry import get_project_registry
+        from .core.vector_index import get_index_manager
+        
+        registry = get_project_registry()
+        projects = registry.list()
+        
+        if not projects:
+            return "No projects indexed. Use 'rlm-dspy index build <path>' to index a project."
+        
+        manager = get_index_manager()
+        output = [f"Found {len(projects)} indexed projects:\n"]
+        
+        for p in projects:
+            # Get snippet count from index
+            index_path = manager.config.index_dir / p.name
+            manifest_path = index_path / "manifest.json"
+            snippet_count = 0
+            if manifest_path.exists():
+                try:
+                    import json
+                    manifest = json.loads(manifest_path.read_text())
+                    snippet_count = manifest.get("snippet_count", 0)
+                except Exception:
+                    pass
+            
+            output.append(f"  • {p.name}")
+            output.append(f"    Path: {p.path}")
+            output.append(f"    Snippets: {snippet_count}")
+            if p.is_default:
+                output.append("    [DEFAULT]")
+            output.append("")
+        
+        return "\n".join(output)
+    except Exception as e:
+        return f"Error listing projects: {e}"
+
+
+def search_all_projects(query: str, k: int = 3) -> str:
+    """Search semantically across ALL indexed projects.
+    
+    Unlike semantic_search which searches one project, this searches
+    all registered projects and returns the best matches from each.
+    
+    Args:
+        query: Natural language description of what you're looking for
+        k: Number of results per project (default: 3)
+        
+    Returns:
+        Aggregated results from all projects, sorted by relevance
+    """
+    try:
+        from .core.project_registry import get_project_registry
+        from .core.vector_index import get_index_manager
+        
+        registry = get_project_registry()
+        projects = registry.list()
+        
+        if not projects:
+            return "No projects indexed. Use 'rlm-dspy index build <path>' first."
+        
+        manager = get_index_manager()
+        all_results = []
+        
+        for p in projects:
+            try:
+                results = manager.search(p.path, query, k=k)
+                for r in results:
+                    all_results.append((p.name, r))
+            except Exception as e:
+                logger.debug(f"Search failed for {p.name}: {e}")
+                continue
+        
+        if not all_results:
+            return f"No results found for: {query}"
+        
+        # Sort by score descending
+        all_results.sort(key=lambda x: x[1].score, reverse=True)
+        
+        # Take top results
+        top_results = all_results[:k * 2]  # Return more since it's cross-project
+        
+        output = [f"Found {len(top_results)} results across {len(projects)} projects:\n"]
+        for i, (project_name, r) in enumerate(top_results, 1):
+            output.append(f"--- Result {i}: [{project_name}] {r.snippet.file}:{r.snippet.line} ---")
+            output.append(f"Type: {r.snippet.type} | Name: {r.snippet.name} | Score: {r.score:.3f}")
+            output.append(r.snippet.text[:400])
+            if len(r.snippet.text) > 400:
+                output.append("... (truncated)")
+            output.append("")
+        
+        return "\n".join(output)
+    except Exception as e:
+        return f"Cross-project search error: {e}"
+
+
 # Collection of all built-in tools
 BUILTIN_TOOLS: dict[str, Any] = {
     "ripgrep": ripgrep,
@@ -597,6 +702,8 @@ BUILTIN_TOOLS: dict[str, Any] = {
     "find_imports": find_imports,
     "find_calls": find_calls,
     "semantic_search": semantic_search,
+    "list_projects": list_projects,
+    "search_all_projects": search_all_projects,
     "shell": shell,
 }
 
