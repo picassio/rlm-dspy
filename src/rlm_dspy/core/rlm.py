@@ -42,6 +42,22 @@ _SECRET_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 ]
 
 
+# Cache resolved secret values (lazy initialization)
+_cached_env_secrets: list[str] | None = None
+
+
+def _get_env_secrets() -> list[str]:
+    """Get secret values from environment (cached for performance)."""
+    global _cached_env_secrets
+    if _cached_env_secrets is None:
+        _cached_env_secrets = [
+            os.environ.get(key, "")
+            for key in COMMON_SECRETS
+            if os.environ.get(key) and len(os.environ.get(key, "")) > 8
+        ]
+    return _cached_env_secrets
+
+
 def _sanitize_secrets(text: str, extra_secrets: list[str] | None = None) -> str:
     """Remove any leaked secrets from output text.
     
@@ -63,10 +79,9 @@ def _sanitize_secrets(text: str, extra_secrets: list[str] | None = None) -> str:
             if secret and len(secret) > 8 and secret in result:
                 result = result.replace(secret, "[REDACTED]")
     
-    # Check for actual secret values from environment
-    for key in COMMON_SECRETS:
-        value = os.environ.get(key)
-        if value and len(value) > 8 and value in result:
+    # Check for actual secret values from environment (cached)
+    for value in _get_env_secrets():
+        if value in result:
             result = result.replace(value, "[REDACTED]")
     
     # Apply pre-compiled regex patterns
@@ -568,6 +583,7 @@ These tools provide 100% accurate results. Only fall back to manual parsing if t
         self,
         paths: list[str | Path],
         gitignore: bool = True,
+        use_cache: bool = True,
     ) -> str:
         """
         Load context from files or directories.
@@ -575,13 +591,15 @@ These tools provide 100% accurate results. Only fall back to manual parsing if t
         Args:
             paths: List of file or directory paths
             gitignore: Whether to respect .gitignore patterns
+            use_cache: Whether to use context caching (default True)
 
         Returns:
             Combined context string with file markers
         """
-        from .fileutils import load_context_from_paths
+        from .fileutils import load_context_from_paths, load_context_from_paths_cached
         
-        return load_context_from_paths(
+        loader = load_context_from_paths_cached if use_cache else load_context_from_paths
+        return loader(
             paths=[Path(p) for p in paths],
             gitignore=gitignore,
             add_line_numbers=True,

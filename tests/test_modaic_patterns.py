@@ -323,3 +323,90 @@ class TestFileCollection:
         assert "def main()" in context
         # .log files should be ignored
         assert "debug.log" not in context
+
+
+class TestContextCaching:
+    """Test context caching utilities."""
+
+    def test_load_context_cached(self, tmp_path):
+        """Test that cached loading returns same result."""
+        from rlm_dspy.core.fileutils import (
+            load_context_from_paths,
+            load_context_from_paths_cached,
+            clear_context_cache,
+        )
+        
+        # Clear cache first
+        clear_context_cache()
+        
+        # Create test file
+        f = tmp_path / "test.py"
+        f.write_text("def hello(): pass\n")
+        
+        # Load without cache
+        context1 = load_context_from_paths([tmp_path])
+        
+        # Load with cache (first time - cache miss)
+        context2 = load_context_from_paths_cached([tmp_path])
+        
+        # Load with cache again (cache hit)
+        context3 = load_context_from_paths_cached([tmp_path])
+        
+        assert context1 == context2 == context3
+
+    def test_cache_invalidation_on_file_change(self, tmp_path):
+        """Test that cache invalidates when file changes."""
+        from rlm_dspy.core.fileutils import (
+            load_context_from_paths_cached,
+            clear_context_cache,
+        )
+        import time
+        
+        # Clear cache first
+        clear_context_cache()
+        
+        # Create test file
+        f = tmp_path / "test.py"
+        f.write_text("version 1\n")
+        
+        # Load (cache miss)
+        context1 = load_context_from_paths_cached([tmp_path])
+        assert "version 1" in context1
+        
+        # Modify file (need to ensure mtime changes)
+        time.sleep(0.1)
+        f.write_text("version 2\n")
+        
+        # Load again (should be cache miss due to mtime change)
+        context2 = load_context_from_paths_cached([tmp_path])
+        assert "version 2" in context2
+        
+        assert context1 != context2
+
+    def test_cache_stats(self):
+        """Test cache stats function."""
+        from rlm_dspy.core.fileutils import get_context_cache_stats
+        
+        stats = get_context_cache_stats()
+        assert "entries" in stats
+        assert "max_size" in stats
+        assert "max_age_seconds" in stats
+
+    def test_clear_cache(self, tmp_path):
+        """Test cache clearing."""
+        from rlm_dspy.core.fileutils import (
+            load_context_from_paths_cached,
+            clear_context_cache,
+            get_context_cache_stats,
+        )
+        
+        # Create and load
+        f = tmp_path / "test.py"
+        f.write_text("content\n")
+        load_context_from_paths_cached([tmp_path])
+        
+        # Clear cache
+        clear_context_cache()
+        
+        stats = get_context_cache_stats()
+        assert stats["entries"] == 0

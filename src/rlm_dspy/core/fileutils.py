@@ -654,3 +654,116 @@ def load_context_from_paths(
         )
     
     return context
+
+
+# Context cache for repeated loads (key: frozenset of (path, mtime) tuples)
+_context_cache: dict[tuple, tuple[str, float]] = {}
+_CONTEXT_CACHE_MAX_SIZE = 50  # Max number of cached contexts
+_CONTEXT_CACHE_MAX_AGE = 300  # Max age in seconds
+
+
+def _get_cache_key(paths: list[Path], files: list[Path]) -> tuple:
+    """Generate a cache key based on input paths and collected file mtimes.
+    
+    Args:
+        paths: Original input paths (for identity)
+        files: Collected files (for mtime checking)
+    """
+    # Include input paths for identity
+    key_parts = [("input", tuple(str(p.resolve()) for p in sorted(paths)))]
+    
+    # Include file mtimes for invalidation
+    for f in sorted(files):
+        try:
+            mtime = f.stat().st_mtime if f.exists() else 0
+            key_parts.append((str(f), mtime))
+        except OSError:
+            key_parts.append((str(f), 0))
+    
+    return tuple(key_parts)
+
+
+def load_context_from_paths_cached(
+    paths: list[Path | str],
+    gitignore: bool = True,
+    add_line_numbers: bool = True,
+) -> str:
+    """Load context with caching based on file paths and mtimes.
+    
+    This is a cached version of load_context_from_paths that avoids
+    re-reading files that haven't changed.
+    
+    Args:
+        paths: List of file or directory paths
+        gitignore: Whether to respect .gitignore patterns
+        add_line_numbers: Whether to add line numbers
+        
+    Returns:
+        Formatted context string (from cache if available and valid)
+    """
+    import pathspec
+    import time
+    
+    global _context_cache
+    
+    # Convert to Path objects
+    path_objs = [Path(p) for p in paths]
+    
+    # Load gitignore patterns and collect files
+    spec = None
+    if gitignore:
+        patterns = load_gitignore_patterns(path_objs)
+        if patterns:
+            spec = pathspec.PathSpec.from_lines("gitignore", patterns)
+    
+    files = collect_files(path_objs, spec)
+    
+    # Generate cache key using collected files
+    cache_key = _get_cache_key(path_objs, files)
+    
+    # Check cache
+    now = time.time()
+    if cache_key in _context_cache:
+        cached_context, cached_time = _context_cache[cache_key]
+        if now - cached_time < _CONTEXT_CACHE_MAX_AGE:
+            logger.debug("Context cache hit for %d paths (%d files)", len(paths), len(files))
+            return cached_context
+    
+    # Cache miss - format context (files already collected)
+    context, skipped = format_file_context(files, add_line_numbers)
+    
+    if skipped:
+        logger.warning(
+            "Skipped %d files: %s",
+            len(skipped),
+            ", ".join(f"{f.name} ({reason})" for f, reason in skipped[:5]),
+        )
+    
+    # Evict old entries if cache is full
+    if len(_context_cache) >= _CONTEXT_CACHE_MAX_SIZE:
+        # Remove oldest entries
+        sorted_keys = sorted(_context_cache.keys(), key=lambda k: _context_cache[k][1])
+        for key in sorted_keys[:len(_context_cache) - _CONTEXT_CACHE_MAX_SIZE + 1]:
+            del _context_cache[key]
+    
+    # Store in cache
+    _context_cache[cache_key] = (context, now)
+    logger.debug("Context cached for %d paths (%d files, %d chars)", len(paths), len(files), len(context))
+    
+    return context
+
+
+def clear_context_cache() -> None:
+    """Clear the context cache."""
+    global _context_cache
+    _context_cache.clear()
+    logger.debug("Context cache cleared")
+
+
+def get_context_cache_stats() -> dict:
+    """Get context cache statistics."""
+    return {
+        "entries": len(_context_cache),
+        "max_size": _CONTEXT_CACHE_MAX_SIZE,
+        "max_age_seconds": _CONTEXT_CACHE_MAX_AGE,
+    }
