@@ -64,6 +64,8 @@ def _sanitize_secrets(text: str, extra_secrets: list[str] | None = None) -> str:
     Scans for common secret patterns and replaces them with masks.
     This prevents API keys from appearing in logs, trajectory, or answers.
     
+    Uses single-pass regex for O(N) performance instead of O(S*N).
+    
     Args:
         text: Text to sanitize
         extra_secrets: Additional secret values to mask (e.g., config.api_key)
@@ -73,19 +75,25 @@ def _sanitize_secrets(text: str, extra_secrets: list[str] | None = None) -> str:
     
     result = text
     
-    # Check for additional secrets passed explicitly (e.g., from config)
-    # Note: minimum length of 4 to avoid false positives on common short strings
+    # Collect all literal secrets to mask
+    secrets_to_mask = []
+    
+    # Add extra secrets (min length 4 to avoid false positives)
     if extra_secrets:
-        for secret in extra_secrets:
-            if secret and len(secret) >= 4 and secret in result:
-                result = result.replace(secret, "[REDACTED]")
+        secrets_to_mask.extend(s for s in extra_secrets if s and len(s) >= 4)
     
-    # Check for actual secret values from environment (cached)
-    for value in _get_env_secrets():
-        if value in result:
-            result = result.replace(value, "[REDACTED]")
+    # Add environment secrets (cached)
+    secrets_to_mask.extend(_get_env_secrets())
     
-    # Apply pre-compiled regex patterns
+    # Single-pass replacement for all literal secrets
+    if secrets_to_mask:
+        # Sort by length descending to match longer secrets first
+        secrets_to_mask.sort(key=len, reverse=True)
+        # Build single regex pattern
+        pattern = re.compile("|".join(re.escape(s) for s in secrets_to_mask))
+        result = pattern.sub("[REDACTED]", result)
+    
+    # Apply pre-compiled regex patterns for secret formats
     for pattern, replacement in _SECRET_PATTERNS:
         result = pattern.sub(replacement, result)
     

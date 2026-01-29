@@ -200,86 +200,88 @@ class CodeIndex:
         
         snippets = []
         
-        # Supported extensions (from LANGUAGE_MAP keys)
-        supported_extensions = set(LANGUAGE_MAP.keys())
+        # Directories to skip (check once, not per file)
+        SKIP_DIRS = {'__pycache__', 'node_modules', '.venv', 'venv', 'dist', 'build',
+                     '.git', '.hg', '.svn', 'eggs', '.eggs', '.tox', '.nox'}
         
-        for file_path in repo_path.rglob("*"):
-            # Skip hidden directories and common ignores
-            if any(part.startswith('.') for part in file_path.parts):
-                continue
-            if any(ignore in file_path.parts for ignore in 
-                   ['__pycache__', 'node_modules', '.venv', 'venv', 'dist', 'build']):
-                continue
+        # Use specific globs per extension for faster traversal
+        # This avoids processing binaries, images, etc.
+        for ext in LANGUAGE_MAP.keys():
+            pattern = f"**/*{ext}"
             
-            # Check extension
-            if file_path.suffix not in supported_extensions:
-                continue
-            
-            if not file_path.is_file():
-                continue
-            
-            try:
-                # Get language from extension (LANGUAGE_MAP: ext -> lang)
-                language = LANGUAGE_MAP.get(file_path.suffix)
-                
-                if not language:
+            for file_path in repo_path.glob(pattern):
+                # Skip hidden directories
+                if any(part.startswith('.') for part in file_path.parts):
+                    continue
+                # Skip common non-source directories
+                if SKIP_DIRS & set(file_path.parts):
                     continue
                 
-                # Skip files larger than 1MB to prevent OOM
+                if not file_path.is_file():
+                    continue
+                
                 try:
-                    if file_path.stat().st_size > 1_000_000:
-                        logger.debug("Skipping large file: %s", file_path)
+                    # Language is known from the glob pattern's extension
+                    language = LANGUAGE_MAP.get(ext)
+                    
+                    if not language:
                         continue
-                except OSError:
+                    
+                    # Skip files larger than 1MB to prevent OOM
+                    try:
+                        if file_path.stat().st_size > 1_000_000:
+                            logger.debug("Skipping large file: %s", file_path)
+                            continue
+                    except OSError:
+                        continue
+                    
+                    # Index the file (returns ASTIndex with .definitions)
+                    ast_index = index_file(str(file_path))
+                    
+                    # Read file content for snippet text
+                    try:
+                        content = file_path.read_text(encoding='utf-8')
+                        lines = content.splitlines()
+                    except UnicodeDecodeError:
+                        continue
+                    
+                    # Use relative path for consistent storage
+                    # Handle symlinks pointing outside repo gracefully
+                    try:
+                        rel_path = str(file_path.relative_to(repo_path))
+                    except ValueError:
+                        # Symlink points outside repo - use absolute path
+                        logger.debug("File outside repo (symlink?): %s", file_path)
+                        continue
+                    
+                    for defn in ast_index.definitions:
+                        # Extract text for the definition
+                        start_line = defn.line - 1  # 0-indexed
+                        end_line = defn.end_line
+                        
+                        # Get the text
+                        if start_line < len(lines):
+                            text_lines = lines[start_line:min(end_line, len(lines))]
+                            text = '\n'.join(text_lines)
+                        else:
+                            text = ""
+                        
+                        snippet_id = f"{rel_path}:{defn.name}:{defn.line}"
+                        
+                        snippets.append(CodeSnippet(
+                            id=snippet_id,
+                            text=text,
+                            file=rel_path,
+                            line=defn.line,
+                            end_line=end_line,
+                            type=defn.kind,  # Definition uses 'kind', not 'type'
+                            name=defn.name,
+                            language=language,
+                        ))
+                        
+                except Exception as e:
+                    logger.debug("Failed to index %s: %s", file_path, e)
                     continue
-                
-                # Index the file (returns ASTIndex with .definitions)
-                ast_index = index_file(str(file_path))
-                
-                # Read file content for snippet text
-                try:
-                    content = file_path.read_text(encoding='utf-8')
-                    lines = content.splitlines()
-                except UnicodeDecodeError:
-                    continue
-                
-                # Use relative path for consistent storage
-                # Handle symlinks pointing outside repo gracefully
-                try:
-                    rel_path = str(file_path.relative_to(repo_path))
-                except ValueError:
-                    # Symlink points outside repo - use absolute path
-                    logger.debug("File outside repo (symlink?): %s", file_path)
-                    continue
-                
-                for defn in ast_index.definitions:
-                    # Extract text for the definition
-                    start_line = defn.line - 1  # 0-indexed
-                    end_line = defn.end_line
-                    
-                    # Get the text
-                    if start_line < len(lines):
-                        text_lines = lines[start_line:min(end_line, len(lines))]
-                        text = '\n'.join(text_lines)
-                    else:
-                        text = ""
-                    
-                    snippet_id = f"{rel_path}:{defn.name}:{defn.line}"
-                    
-                    snippets.append(CodeSnippet(
-                        id=snippet_id,
-                        text=text,
-                        file=rel_path,
-                        line=defn.line,
-                        end_line=end_line,
-                        type=defn.kind,  # Definition uses 'kind', not 'type'
-                        name=defn.name,
-                        language=language,
-                    ))
-                    
-            except Exception as e:
-                logger.debug("Failed to index %s: %s", file_path, e)
-                continue
         
         return snippets
     

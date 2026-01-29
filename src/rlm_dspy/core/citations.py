@@ -8,10 +8,15 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import dspy
+
+# Cache for code_to_document results: (path, mtime) -> document
+_document_cache: dict[tuple[str, float], dict] = {}
+_DOCUMENT_CACHE_MAX_SIZE = 200
 
 
 @dataclass
@@ -102,17 +107,32 @@ class CitedAnalysisResult:
 def code_to_document(
     file_path: str | Path,
     content: str | None = None,
+    use_cache: bool = True,
 ) -> dict:
     """Convert a code file to a Document-like dict for citation.
+    
+    Results are cached by (path, mtime) for performance in recursive workflows.
     
     Args:
         file_path: Path to the file
         content: Optional content (reads from file if not provided)
+        use_cache: Whether to use caching (default True)
         
     Returns:
         Dict in DSPy Document format
     """
     file_path = Path(file_path)
+    
+    # Check cache if content not provided and caching enabled
+    if content is None and use_cache and file_path.exists():
+        try:
+            mtime = file_path.stat().st_mtime
+            cache_key = (str(file_path.resolve()), mtime)
+            
+            if cache_key in _document_cache:
+                return _document_cache[cache_key]
+        except OSError:
+            pass
     
     if content is None:
         content = file_path.read_text(encoding='utf-8')
@@ -123,12 +143,24 @@ def code_to_document(
         f"{i+1:4d} | {line}" for i, line in enumerate(lines)
     )
     
-    return {
+    result = {
         "data": numbered_content,
         "title": str(file_path),
         "media_type": "text/plain",
         "context": f"Source code file: {file_path.name}",
     }
+    
+    # Cache result if caching enabled
+    if use_cache and 'cache_key' in locals():
+        # Evict oldest entries if cache is full
+        if len(_document_cache) >= _DOCUMENT_CACHE_MAX_SIZE:
+            # Remove first 50 entries
+            keys_to_remove = list(_document_cache.keys())[:50]
+            for k in keys_to_remove:
+                del _document_cache[k]
+        _document_cache[cache_key] = result
+    
+    return result
 
 
 def files_to_documents(
