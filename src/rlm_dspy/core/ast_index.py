@@ -47,29 +47,80 @@ class Definition:
 class ASTIndex:
     """Index of code definitions extracted via tree-sitter."""
     definitions: list[Definition] = field(default_factory=list)
+    
+    # Lazy-built indexes for O(1) lookup
+    _by_name: dict[str, list[Definition]] = field(default_factory=dict, repr=False)
+    _by_kind: dict[str, list[Definition]] = field(default_factory=dict, repr=False)
+    _indexes_built: bool = field(default=False, repr=False)
+    
+    def _build_indexes(self) -> None:
+        """Build hash indexes for fast lookup."""
+        if self._indexes_built:
+            return
+        
+        self._by_name.clear()
+        self._by_kind.clear()
+        
+        for d in self.definitions:
+            # Index by lowercase name for case-insensitive lookup
+            name_lower = d.name.lower()
+            if name_lower not in self._by_name:
+                self._by_name[name_lower] = []
+            self._by_name[name_lower].append(d)
+            
+            # Index by kind
+            if d.kind not in self._by_kind:
+                self._by_kind[d.kind] = []
+            self._by_kind[d.kind].append(d)
+        
+        self._indexes_built = True
 
     def find(self, name: str | None = None, kind: str | None = None) -> list[Definition]:
-        """Find definitions matching criteria."""
-        results = self.definitions
-        if name:
-            results = [d for d in results if name.lower() in d.name.lower()]
-        if kind:
-            results = [d for d in results if d.kind == kind]
-        return results
+        """Find definitions matching criteria. Uses hash indexes for O(1) lookup."""
+        self._build_indexes()
+        
+        if name and kind:
+            # Both filters: intersect results
+            name_lower = name.lower()
+            name_matches = set()
+            for key in self._by_name:
+                if name_lower in key:
+                    name_matches.update(self._by_name[key])
+            kind_matches = set(self._by_kind.get(kind, []))
+            return list(name_matches & kind_matches)
+        elif name:
+            # Name filter only (substring match)
+            name_lower = name.lower()
+            results = []
+            for key in self._by_name:
+                if name_lower in key:
+                    results.extend(self._by_name[key])
+            return results
+        elif kind:
+            # Kind filter only - O(1) lookup
+            return list(self._by_kind.get(kind, []))
+        else:
+            return list(self.definitions)
 
     def classes(self) -> list[Definition]:
-        return self.find(kind="class")
+        self._build_indexes()
+        return list(self._by_kind.get("class", []))
 
     def functions(self) -> list[Definition]:
-        return self.find(kind="function")
+        self._build_indexes()
+        return list(self._by_kind.get("function", []))
 
     def methods(self) -> list[Definition]:
-        return self.find(kind="method")
+        self._build_indexes()
+        return list(self._by_kind.get("method", []))
 
     def get_line(self, name: str) -> int | None:
         """Get exact line number for a definition."""
-        for d in self.definitions:
-            if d.name == name:
+        self._build_indexes()
+        # Exact match lookup
+        matches = self._by_name.get(name.lower(), [])
+        for d in matches:
+            if d.name == name:  # Case-sensitive final check
                 return d.line
         return None
 
