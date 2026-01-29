@@ -75,6 +75,17 @@ def _get_config(
     - RLM_MAX_ITERATIONS: Max REPL iterations
     - RLM_MAX_LLM_CALLS: Max sub-LLM calls per execution
     """
+    # Validate numeric arguments
+    if budget is not None and budget <= 0:
+        console.print("[red]Error: --budget must be positive[/red]")
+        raise typer.Exit(1)
+    if timeout is not None and timeout <= 0:
+        console.print("[red]Error: --timeout must be positive[/red]")
+        raise typer.Exit(1)
+    if max_iterations is not None and max_iterations <= 0:
+        console.print("[red]Error: --max-iterations must be positive[/red]")
+        raise typer.Exit(1)
+    
     # RLMConfig reads from env by default, only override if CLI args provided
     config = RLMConfig()
 
@@ -125,7 +136,14 @@ def _load_context(
         # Warn if stdin appears to be a TTY (interactive, not piped)
         if sys.stdin.isatty():
             console.print("[yellow]Reading from stdin (press Ctrl+D when done, or Ctrl+C to cancel)...[/yellow]")
-        context = sys.stdin.read()
+        
+        # Read with size limit to prevent memory exhaustion (50MB max)
+        MAX_STDIN_SIZE = 50 * 1024 * 1024  # 50MB
+        context = sys.stdin.read(MAX_STDIN_SIZE + 1)
+        if len(context) > MAX_STDIN_SIZE:
+            console.print(f"[red]Error: stdin input too large (>{MAX_STDIN_SIZE // 1024 // 1024}MB)[/red]")
+            raise typer.Exit(1)
+        
         if not context.strip():
             console.print("[red]Error: No input received from stdin[/red]")
             raise typer.Exit(1)

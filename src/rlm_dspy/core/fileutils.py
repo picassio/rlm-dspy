@@ -150,7 +150,8 @@ def _recursive_hard_link(source: Path, target: Path) -> None:
     Recursively create hard links for a directory.
 
     Windows doesn't support directory symlinks well, so we
-    create hard links for each file.
+    create hard links for each file. Falls back to copy if
+    hardlink fails (e.g., cross-volume on Windows).
     """
     target.mkdir(parents=True, exist_ok=True)
 
@@ -159,7 +160,12 @@ def _recursive_hard_link(source: Path, target: Path) -> None:
         if item.is_dir():
             _recursive_hard_link(item, dest)
         else:
-            dest.hardlink_to(item)
+            try:
+                dest.hardlink_to(item)
+            except OSError:
+                # Hardlink failed (cross-volume, permissions, etc.) - fall back to copy
+                import shutil
+                shutil.copy2(item, dest)
 
 
 def smart_rmtree(path: Path, aggressive: bool = False) -> bool:
