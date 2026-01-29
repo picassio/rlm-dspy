@@ -15,11 +15,64 @@ Example:
     print(result.is_secure)        # bool
     print(result.severity)         # str
     ```
+
+Adding custom signatures:
+    ```python
+    from rlm_dspy.signatures import register_signature
+    import dspy
+    
+    @register_signature("my_analysis", aliases=["myalias"])
+    class MyAnalysis(dspy.Signature):
+        '''My custom analysis.'''
+        context: str = dspy.InputField()
+        query: str = dspy.InputField()
+        result: str = dspy.OutputField()
+    ```
 """
+
+from __future__ import annotations
+
+from typing import TypeVar
 
 import dspy
 
+# Internal registry
+_SIGNATURES: dict[str, type[dspy.Signature]] = {}
 
+T = TypeVar("T", bound=type[dspy.Signature])
+
+
+def register_signature(
+    name: str, 
+    aliases: list[str] | None = None,
+) -> "Callable[[T], T]":
+    """Decorator to register a signature in the registry.
+    
+    Args:
+        name: Primary name for the signature
+        aliases: Optional list of alias names
+        
+    Returns:
+        Decorator function
+        
+    Example:
+        @register_signature("security", aliases=["audit"])
+        class SecurityAudit(dspy.Signature):
+            ...
+    """
+    from typing import Callable
+    
+    def decorator(cls: T) -> T:
+        _SIGNATURES[name.lower()] = cls
+        if aliases:
+            for alias in aliases:
+                _SIGNATURES[alias.lower()] = cls
+        return cls
+    
+    return decorator
+
+
+@register_signature("security", aliases=["audit"])
 class SecurityAudit(dspy.Signature):
     """Analyze code for security vulnerabilities.
     
@@ -42,6 +95,7 @@ class SecurityAudit(dspy.Signature):
     )
 
 
+@register_signature("review")
 class CodeReview(dspy.Signature):
     """Comprehensive code review with quality scoring.
     
@@ -64,6 +118,7 @@ class CodeReview(dspy.Signature):
     )
 
 
+@register_signature("bugs")
 class BugFinder(dspy.Signature):
     """Find bugs and potential issues in code.
     
@@ -86,6 +141,7 @@ class BugFinder(dspy.Signature):
     )
 
 
+@register_signature("architecture", aliases=["arch"])
 class ArchitectureAnalysis(dspy.Signature):
     """Analyze code architecture and structure.
     
@@ -108,6 +164,7 @@ class ArchitectureAnalysis(dspy.Signature):
     )
 
 
+@register_signature("performance", aliases=["perf"])
 class PerformanceAnalysis(dspy.Signature):
     """Analyze code for performance issues.
     
@@ -130,6 +187,7 @@ class PerformanceAnalysis(dspy.Signature):
     )
 
 
+@register_signature("diff")
 class DiffReview(dspy.Signature):
     """Review a code diff/patch.
     
@@ -155,19 +213,8 @@ class DiffReview(dspy.Signature):
     )
 
 
-# Signature registry for CLI lookup
-SIGNATURES = {
-    "security": SecurityAudit,
-    "review": CodeReview,
-    "bugs": BugFinder,
-    "architecture": ArchitectureAnalysis,
-    "performance": PerformanceAnalysis,
-    "diff": DiffReview,
-    # Aliases
-    "audit": SecurityAudit,
-    "perf": PerformanceAnalysis,
-    "arch": ArchitectureAnalysis,
-}
+# Public alias for the registry (for backwards compatibility)
+SIGNATURES = _SIGNATURES
 
 
 def get_signature(name: str) -> type[dspy.Signature] | None:
@@ -179,29 +226,42 @@ def get_signature(name: str) -> type[dspy.Signature] | None:
     Returns:
         Signature class or None if not found
     """
-    return SIGNATURES.get(name.lower())
+    return _SIGNATURES.get(name.lower())
 
 
 def list_signatures() -> list[str]:
-    """List available signature names."""
+    """List available signature names (excluding aliases)."""
     # Return unique names (not aliases)
     seen = set()
     names = []
-    for name, sig in SIGNATURES.items():
+    for name, sig in _SIGNATURES.items():
         if sig not in seen:
             names.append(name)
             seen.add(sig)
     return sorted(names)
 
 
+def get_all_signatures() -> dict[str, type[dspy.Signature]]:
+    """Get all registered signatures including aliases.
+    
+    Returns:
+        Dictionary of name -> signature class
+    """
+    return dict(_SIGNATURES)
+
+
 __all__ = [
+    # Signature classes
     "SecurityAudit",
     "CodeReview", 
     "BugFinder",
     "ArchitectureAnalysis",
     "PerformanceAnalysis",
     "DiffReview",
+    # Registry
     "SIGNATURES",
+    "register_signature",
     "get_signature",
     "list_signatures",
+    "get_all_signatures",
 ]
