@@ -92,16 +92,19 @@ Or with uv:
 uv pip install rlm-dspy
 ```
 
-**Optional: Install code analysis tools:**
+**Optional: Install ripgrep for fast regex search:**
 ```bash
-# For tree-sitter based tools (find_definitions, find_imports, etc.)
-pip install rlm-dspy[tools]
+# macOS
+brew install ripgrep
 
-# For ripgrep tools (fast regex search)
-# macOS: brew install ripgrep
-# Ubuntu: sudo apt install ripgrep
-# Or: cargo install ripgrep
+# Ubuntu/Debian
+sudo apt install ripgrep
+
+# Or via cargo
+cargo install ripgrep
 ```
+
+Tree-sitter is included by default for AST-based code analysis.
 
 ## Quick Start
 
@@ -512,27 +515,31 @@ The interpreter must implement the CodeInterpreter protocol:
 
 ### Code Analysis Tools
 
-Enable powerful code analysis tools that run on the host (not in sandbox):
+Powerful code analysis tools are **enabled by default**. They run on the host (not in sandbox):
 
 ```bash
-# CLI: Enable tools with --tools flag
-rlm-dspy ask "Find all functions that call 'execute'" src/ --tools
+# Tools are enabled by default - LLM can use ripgrep, tree-sitter, etc.
+rlm-dspy ask "Find all functions that call 'execute'" src/
+rlm-dspy ask "Use index_code to find classes, then analyze them for bugs" src/
 
-# The LLM can now use ripgrep, tree-sitter, etc.
-rlm-dspy ask "Use ripgrep to find TODO comments" src/ --tools
+# Disable tools if needed
+rlm-dspy ask "Simple question" src/ --no-tools
 ```
 
 ```python
 from rlm_dspy import RLM
 
-# Enable built-in tools
-rlm = RLM(config=config, use_tools=True)
+# Tools enabled by default
+rlm = RLM(config=config)
 
-# Or enable all tools including shell (requires RLM_ALLOW_SHELL=1)
+# Enable all tools including shell (requires RLM_ALLOW_SHELL=1)
 rlm = RLM(config=config, use_tools="all")
 
+# Disable tools
+rlm = RLM(config=config, use_tools=False)
+
 result = rlm.query(
-    "Use find_definitions to list all functions, then use ripgrep to find TODOs",
+    "Use index_code to find all classes, then analyze them for bugs",
     context
 )
 ```
@@ -557,21 +564,14 @@ result = rlm.query(
 
 **Supported languages for AST tools:** Python, JavaScript, TypeScript, Go, Rust, Java, C, C++, Ruby, C#
 
-**Prerequisites for tools:**
+**Prerequisites:**
 
 ```bash
-# ripgrep (required for ripgrep, grep_context, find_files)
-# macOS
-brew install ripgrep
-# Ubuntu/Debian
-sudo apt install ripgrep
-# Or via cargo
-cargo install ripgrep
+# ripgrep (optional but recommended for fast regex search)
+# macOS: brew install ripgrep
+# Ubuntu: sudo apt install ripgrep
 
-# tree-sitter (required for AST tools)
-pip install rlm-dspy[tools]
-# Or manually:
-pip install tree-sitter tree-sitter-python
+# Tree-sitter is included by default (10+ languages supported)
 ```
 
 **How it works:**

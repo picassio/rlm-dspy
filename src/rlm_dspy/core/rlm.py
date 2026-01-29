@@ -366,7 +366,7 @@ class RLM:
         tools: dict[str, Callable[..., str]] | None = None,
         signature: str | type = "context, query -> answer",
         interpreter: Any | None = None,
-        use_tools: bool | str = False,
+        use_tools: bool | str = True,
     ):
         """
         Initialize RLM.
@@ -387,9 +387,9 @@ class RLM:
                         - shutdown() method
                         If None, uses dspy's default PythonInterpreter (Deno/Pyodide).
             use_tools: Enable built-in code analysis tools.
-                      - False: No extra tools (default)
-                      - True or "safe": Safe tools (ripgrep, tree-sitter, file ops)
+                      - True or "safe": Safe tools (default) - ripgrep, tree-sitter, file ops
                       - "all": All tools including shell (requires RLM_ALLOW_SHELL=1)
+                      - False: No extra tools
                       
         Available tools when enabled:
             - ripgrep(pattern, path, flags): Fast regex search

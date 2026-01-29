@@ -417,9 +417,9 @@ def ask(
         bool,
         typer.Option("--validate", "-V", help="Check output for hallucinations"),
     ] = False,
-    use_tools: Annotated[
+    no_tools: Annotated[
         bool,
-        typer.Option("--tools", "-T", help="Enable code analysis tools (ripgrep, tree-sitter)"),
+        typer.Option("--no-tools", help="Disable code analysis tools (ripgrep, tree-sitter)"),
     ] = False,
 ) -> None:
     """
@@ -474,7 +474,7 @@ def ask(
             raise typer.Exit(1)
         sig = sig_class
     
-    rlm = RLM(config=config, signature=sig, use_tools=use_tools)
+    rlm = RLM(config=config, signature=sig, use_tools=not no_tools)
 
     # Show debug info
     if is_debug():
