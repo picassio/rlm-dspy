@@ -7,6 +7,7 @@ without LLM hallucination.
 from __future__ import annotations
 
 import logging
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -152,7 +153,8 @@ def _extract_definitions(node, language: str, results: list[Definition], file: s
 
 
 # Cache for parsed AST indexes: {(path, mtime): ASTIndex}
-_index_cache: dict[tuple[str, float], ASTIndex] = {}
+# Using OrderedDict for efficient LRU eviction
+_index_cache: OrderedDict[tuple[str, float], ASTIndex] = OrderedDict()
 _MAX_CACHE_SIZE = 500  # Max files to cache
 
 
@@ -185,6 +187,8 @@ def index_file(path: Path | str, use_cache: bool = True) -> ASTIndex:
     if use_cache:
         cache_key = _get_cache_key(path)
         if cache_key and cache_key in _index_cache:
+            # Move to end for LRU (most recently used)
+            _index_cache.move_to_end(cache_key)
             return _index_cache[cache_key]
 
     parser = _get_parser(language)
@@ -192,7 +196,7 @@ def index_file(path: Path | str, use_cache: bool = True) -> ASTIndex:
         return ASTIndex()
 
     try:
-        code = path.read_text()
+        code = path.read_text(encoding='utf-8', errors='replace')
         tree = parser.parse(bytes(code, "utf8"))
 
         definitions: list[Definition] = []
@@ -204,12 +208,9 @@ def index_file(path: Path | str, use_cache: bool = True) -> ASTIndex:
         if use_cache:
             cache_key = _get_cache_key(path)
             if cache_key:
-                # Evict old entries if cache is full
-                if len(_index_cache) >= _MAX_CACHE_SIZE:
-                    # Remove oldest entries (first 100)
-                    keys_to_remove = list(_index_cache.keys())[:100]
-                    for k in keys_to_remove:
-                        del _index_cache[k]
+                # Evict oldest entries if cache is full (LRU)
+                while len(_index_cache) >= _MAX_CACHE_SIZE:
+                    _index_cache.popitem(last=False)  # Remove oldest (FIFO order)
                 _index_cache[cache_key] = result
         
         return result

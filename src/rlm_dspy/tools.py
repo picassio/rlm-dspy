@@ -88,8 +88,20 @@ def ripgrep(pattern: str, path: str = ".", flags: str = "") -> str:
         ripgrep("def\\s+\\w+", ".", "-l")    # List files with function definitions
     """
     try:
+        # Safety check on path
+        is_safe, error = _is_safe_path(path)
+        if not is_safe:
+            return f"(security: {error})"
+        
+        # Validate flags - only allow safe ripgrep flags
+        ALLOWED_FLAGS = {'-i', '-l', '-c', '-n', '-w', '-v', '-A', '-B', '-C', '-m', '-g', '--glob', '--type', '-t', '-F', '-s', '-S'}
         cmd = ["rg", "--color=never", "--line-number"]
         if flags:
+            for flag in flags.split():
+                # Check flag is allowed (strip numeric arguments like -C5)
+                flag_base = flag.lstrip('-').rstrip('0123456789')
+                if flag.startswith('-') and not any(flag.startswith(f) for f in ALLOWED_FLAGS):
+                    return f"(security: flag '{flag}' not allowed)"
             cmd.extend(flags.split())
         cmd.extend([pattern, path])
         
@@ -142,10 +154,18 @@ def find_files(pattern: str, path: str = ".", file_type: str = "") -> str:
         List of matching file paths
     """
     try:
+        # Safety check on path
+        is_safe, error = _is_safe_path(path)
+        if not is_safe:
+            return f"(security: {error})"
+        
         cmd = ["rg", "--files", "--color=never"]
         if file_type:
-            cmd.extend(["-t", file_type])
+            # Sanitize file_type to prevent injection
+            file_type_clean = re.sub(r'[^a-zA-Z0-9]', '', file_type)
+            cmd.extend(["-t", file_type_clean])
         if pattern and pattern != "*":
+            # Pattern is passed to -g, which is a glob, relatively safe
             cmd.extend(["-g", pattern])
         cmd.append(path)
         
