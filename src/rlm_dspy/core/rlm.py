@@ -432,7 +432,6 @@ class RLM:
             ```
         """
         self.config = config or RLMConfig()
-        self._signature = signature
         self._interpreter = interpreter
         
         # Initialize tools
@@ -447,6 +446,9 @@ class RLM:
         
         # Track if we have a custom signature with structured output
         self._is_structured = not isinstance(signature, str)
+        
+        # Wrap signature with tool-first instructions if tools are enabled
+        self._signature = self._wrap_signature_with_tool_instructions(signature, use_tools)
 
         # Validate API key early
         requires_api_key = not self.config.model.lower().startswith("ollama/")
@@ -465,6 +467,53 @@ class RLM:
 
         # Tracking
         self._start_time: float | None = None
+
+    def _wrap_signature_with_tool_instructions(
+        self, 
+        signature: str | type, 
+        use_tools: bool | str
+    ) -> str | type:
+        """Wrap signature with instructions to prioritize tool usage.
+        
+        When tools are enabled, this adds instructions telling the LLM to
+        use the provided tools (index_code, ripgrep, etc.) FIRST before
+        writing custom code. This improves accuracy for code analysis tasks.
+        """
+        if not use_tools or not self._tools:
+            return signature
+        
+        tool_instructions = """IMPORTANT: You have access to powerful code analysis tools. USE THEM FIRST before writing custom code:
+
+- For finding classes/functions/methods with EXACT line numbers: use `index_code(path, kind, name)` or `find_classes()`, `find_functions()`, `find_methods()`
+- For searching code patterns: use `ripgrep(pattern, path)` - much faster than regex on context
+- For reading specific files: use `read_file(path, start_line, end_line)`
+- For finding function calls: use `find_calls(path, function_name)`
+
+These tools provide 100% accurate results. Only fall back to manual parsing if tools don't meet your needs.
+
+"""
+        if isinstance(signature, str):
+            # Convert string signature to class with tool instructions
+            # Parse "context, query -> answer" format
+            base_sig = dspy.Signature(signature)
+            
+            class ToolFirstSignature(base_sig):
+                pass
+            
+            ToolFirstSignature.__doc__ = tool_instructions
+            return ToolFirstSignature
+        else:
+            # For class-based signatures, prepend to the docstring
+            original_doc = signature.__doc__ or ""
+            
+            # Create a new signature class with updated docstring
+            class WrappedSignature(signature):
+                pass
+            
+            WrappedSignature.__doc__ = tool_instructions + original_doc
+            WrappedSignature.__name__ = signature.__name__
+            WrappedSignature.__qualname__ = signature.__qualname__
+            return WrappedSignature
 
     def _setup_dspy(self) -> None:
         """Configure DSPy with the primary model (thread-safe).
