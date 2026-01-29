@@ -417,6 +417,10 @@ def ask(
         bool,
         typer.Option("--validate", "-V", help="Check output for hallucinations"),
     ] = False,
+    use_tools: Annotated[
+        bool,
+        typer.Option("--tools", "-T", help="Enable code analysis tools (ripgrep, tree-sitter)"),
+    ] = False,
 ) -> None:
     """
     Ask a question about files or piped content.
@@ -470,7 +474,7 @@ def ask(
             raise typer.Exit(1)
         sig = sig_class
     
-    rlm = RLM(config=config, signature=sig)
+    rlm = RLM(config=config, signature=sig, use_tools=use_tools)
 
     # Show debug info
     if is_debug():

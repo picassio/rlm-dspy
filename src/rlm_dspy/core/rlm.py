@@ -366,6 +366,7 @@ class RLM:
         tools: dict[str, Callable[..., str]] | None = None,
         signature: str | type = "context, query -> answer",
         interpreter: Any | None = None,
+        use_tools: bool | str = False,
     ):
         """
         Initialize RLM.
@@ -385,6 +386,22 @@ class RLM:
                         - execute(code, variables) method
                         - shutdown() method
                         If None, uses dspy's default PythonInterpreter (Deno/Pyodide).
+            use_tools: Enable built-in code analysis tools.
+                      - False: No extra tools (default)
+                      - True or "safe": Safe tools (ripgrep, tree-sitter, file ops)
+                      - "all": All tools including shell (requires RLM_ALLOW_SHELL=1)
+                      
+        Available tools when enabled:
+            - ripgrep(pattern, path, flags): Fast regex search
+            - grep_context(pattern, path, context_lines): Search with context
+            - find_files(pattern, path, file_type): Find files by pattern
+            - read_file(path, start_line, end_line): Read file contents
+            - file_stats(path): Get file/directory statistics
+            - ast_query(code, query, language): Tree-sitter AST queries
+            - find_definitions(path, name): Find function/class definitions
+            - find_imports(path): Find all imports
+            - find_calls(path, function_name): Find function call sites
+            - shell(command, timeout): Run shell commands (disabled by default)
                       
         Example with structured output:
             ```python
@@ -397,6 +414,16 @@ class RLM:
             print(result.has_critical)  # bool
             ```
             
+        Example with tools:
+            ```python
+            rlm = RLM(config=config, use_tools=True)
+            result = rlm.query(
+                "Find all functions that call 'execute' and check for bugs",
+                context
+            )
+            # LLM can now use ripgrep, find_calls, etc. to explore the codebase
+            ```
+            
         Example with custom interpreter:
             ```python
             from e2b_code_interpreter import CodeInterpreter
@@ -405,9 +432,18 @@ class RLM:
             ```
         """
         self.config = config or RLMConfig()
-        self._tools = tools or {}
         self._signature = signature
         self._interpreter = interpreter
+        
+        # Initialize tools
+        self._tools = tools.copy() if tools else {}
+        if use_tools:
+            from ..tools import BUILTIN_TOOLS, SAFE_TOOLS
+            builtin = BUILTIN_TOOLS if use_tools == "all" else SAFE_TOOLS
+            # User tools take precedence over built-in
+            for name, func in builtin.items():
+                if name not in self._tools:
+                    self._tools[name] = func
         
         # Track if we have a custom signature with structured output
         self._is_structured = not isinstance(signature, str)

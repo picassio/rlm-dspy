@@ -18,6 +18,20 @@ from .guards import (
     validate_completeness,
     semantic_f1,
 )
+from .tools import (
+    BUILTIN_TOOLS,
+    SAFE_TOOLS,
+    ripgrep,
+    grep_context,
+    find_files,
+    read_file,
+    file_stats,
+    ast_query,
+    find_definitions,
+    find_imports,
+    find_calls,
+    get_tool_descriptions,
+)
 
 __version__ = "0.1.0"
 __all__ = [
@@ -40,4 +54,17 @@ __all__ = [
     "validate_groundedness",
     "validate_completeness",
     "semantic_f1",
+    # Tools
+    "BUILTIN_TOOLS",
+    "SAFE_TOOLS",
+    "ripgrep",
+    "grep_context",
+    "find_files",
+    "read_file",
+    "file_stats",
+    "ast_query",
+    "find_definitions",
+    "find_imports",
+    "find_calls",
+    "get_tool_descriptions",
 ]
