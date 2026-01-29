@@ -199,6 +199,7 @@ def _run_dry_run(config: RLMConfig, context: str) -> None:
         console.print("\n[green]✓ Ready to run! Remove --dry-run to execute.[/green]")
         raise typer.Exit(0)
     else:
+        console.print("\n[red]✗ Preflight checks failed. Fix the issues above and try again.[/red]")
         raise typer.Exit(1)
 
 
@@ -295,7 +296,8 @@ def _output_result(
         if debug and result.trajectory:
             _print_trajectory(result.trajectory)
     else:
-        console.print(f"[red]Error: {result.error or 'Unknown error'}[/red]")
+        error_msg = result.error or "Unknown error (use --debug for more details)"
+        console.print(f"[red]Error: {error_msg}[/red]")
         if debug and result.trajectory:
             _print_trajectory(result.trajectory[-3:], "Partial trajectory before failure")
         raise typer.Exit(1)
