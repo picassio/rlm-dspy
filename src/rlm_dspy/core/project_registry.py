@@ -143,19 +143,36 @@ class ProjectRegistry:
         self._load()
     
     def _load(self) -> None:
-        """Load registry from disk."""
+        """Load registry from disk with file locking."""
         if not self.config.registry_file.exists():
             return
         
-        with self._lock:
-            try:
-                data = json.loads(self.config.registry_file.read_text(encoding='utf-8'))
-                self._default_project = data.get("default_project")
-                
-                for name, proj_data in data.get("projects", {}).items():
-                    self._projects[name] = Project.from_dict(proj_data)
-            except (json.JSONDecodeError, KeyError) as e:
-                logger.warning("Failed to load project registry: %s", e)
+        lock_file = self.config.registry_file.parent / ".registry.lock"
+        
+        with self._lock:  # Thread lock
+            with _file_lock(lock_file):  # Process lock
+                try:
+                    data = json.loads(self.config.registry_file.read_text(encoding='utf-8'))
+                    self._default_project = data.get("default_project")
+                    
+                    self._projects.clear()  # Clear before reload
+                    for name, proj_data in data.get("projects", {}).items():
+                        self._projects[name] = Project.from_dict(proj_data)
+                except (json.JSONDecodeError, KeyError) as e:
+                    logger.warning("Failed to load project registry: %s", e)
+    
+    def _reload_if_stale(self) -> None:
+        """Reload registry if file was modified by another process."""
+        if not self.config.registry_file.exists():
+            return
+        
+        try:
+            file_mtime = self.config.registry_file.stat().st_mtime
+            if not hasattr(self, '_last_load_time') or file_mtime > self._last_load_time:
+                self._load()
+                self._last_load_time = file_mtime
+        except OSError:
+            pass
     
     def _save(self) -> None:
         """Save registry to disk atomically with cross-process locking."""
@@ -317,6 +334,7 @@ class ProjectRegistry:
     
     def get(self, name: str) -> Project | None:
         """Get a project by name or alias."""
+        self._reload_if_stale()  # Check for external modifications
         with self._lock:
             if name in self._projects:
                 return self._projects[name]
@@ -340,8 +358,9 @@ class ProjectRegistry:
             sort_by: Sort by 'name', 'indexed_at', or 'snippet_count'
             
         Returns:
-            List of Project objects
+            List of projects matching criteria
         """
+        self._reload_if_stale()  # Check for external modifications
         with self._lock:
             projects = list(self._projects.values())
         
@@ -691,16 +710,24 @@ class ProjectRegistry:
         return name in self._projects
 
 
-# Global registry instance
+# Global registry instance (thread-safe singleton)
 _registry: ProjectRegistry | None = None
+_registry_lock = threading.Lock()
 
 
 def get_project_registry(config: RegistryConfig | None = None) -> ProjectRegistry:
-    """Get the global project registry instance."""
+    """Get the global project registry instance (thread-safe)."""
     global _registry
-    if _registry is None or config is not None:
-        _registry = ProjectRegistry(config)
-    return _registry
+    
+    # Fast path: already initialized
+    if _registry is not None and config is None:
+        return _registry
+    
+    # Slow path: need to initialize (with lock)
+    with _registry_lock:
+        if _registry is None or config is not None:
+            _registry = ProjectRegistry(config)
+        return _registry
 
 
 __all__ = [

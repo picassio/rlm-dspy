@@ -9,6 +9,7 @@ import hashlib
 import json
 import logging
 import os
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -975,16 +976,24 @@ class CodeIndex:
             return count
 
 
-# Global index manager instance
+# Global index manager instance (thread-safe singleton)
 _index_manager: CodeIndex | None = None
+_index_manager_lock = threading.Lock()
 
 
 def get_index_manager(config: IndexConfig | None = None) -> CodeIndex:
-    """Get the global index manager instance."""
+    """Get the global index manager instance (thread-safe)."""
     global _index_manager
-    if _index_manager is None or config is not None:
-        _index_manager = CodeIndex(config)
-    return _index_manager
+    
+    # Fast path: already initialized
+    if _index_manager is not None and config is None:
+        return _index_manager
+    
+    # Slow path: need to initialize (with lock)
+    with _index_manager_lock:
+        if _index_manager is None or config is not None:
+            _index_manager = CodeIndex(config)
+        return _index_manager
 
 
 def semantic_search(

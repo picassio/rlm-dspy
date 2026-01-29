@@ -300,7 +300,7 @@ def clear_index_cache() -> int:
     """
     global _index_cache
     count = len(_index_cache)
-    _index_cache = {}
+    _index_cache = OrderedDict()  # Must stay OrderedDict for LRU eviction
     return count
 
 
