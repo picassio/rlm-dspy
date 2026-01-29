@@ -208,140 +208,120 @@ def file_stats(path: str) -> str:
         return f"(file_stats error: {e})"
 
 
-def _find_nodes(node: Any, types: set[str]) -> list[Any]:
-    """Recursively find nodes of given types in AST."""
-    results = []
-    if node.type in types:
-        results.append(node)
-    for child in node.children:
-        results.extend(_find_nodes(child, types))
-    return results
-
-
-def _get_child_by_type(node: Any, child_type: str) -> Any | None:
-    """Get first child of a given type."""
-    for child in node.children:
-        if child.type == child_type:
-            return child
-    return None
-
-
-def ast_query(code: str, node_types: str, language: str = "python") -> str:
+def index_code(path: str, kind: str | None = None, name: str | None = None) -> str:
     """
-    Find AST nodes of specific types in code.
+    Index code to find classes, functions, and methods with EXACT line numbers.
+    
+    Uses tree-sitter for 100% accurate structural analysis - NO hallucination.
+    Supports: Python, JavaScript, TypeScript, Go, Rust, Java, C, C++, Ruby, C#
     
     Args:
-        code: Source code to analyze
-        node_types: Comma-separated node types to find (e.g., "function_definition,class_definition")
-        language: Programming language ("python" only currently)
+        path: File or directory to index
+        kind: Filter by type: "class", "function", "method", or None for all
+        name: Filter by name (case-insensitive substring match)
         
     Returns:
-        Matched AST nodes with locations
+        List of definitions with file:line and type
         
-    Common node types:
-        - function_definition: Function definitions
-        - class_definition: Class definitions  
-        - call: Function calls
-        - import_statement, import_from_statement: Imports
-        - assignment: Variable assignments
-        - if_statement, for_statement, while_statement: Control flow
+    Examples:
+        index_code("src/")                    # All definitions
+        index_code("src/", kind="class")      # Only classes
+        index_code("src/", name="query")      # Definitions containing 'query'
+        index_code("file.py", kind="method")  # Methods in a single file
     """
     try:
-        import tree_sitter_python as tspython
-        from tree_sitter import Language, Parser
+        from .core.ast_index import index_file, index_files, LANGUAGE_MAP
         
-        if language != "python":
-            return f"(ast_query: only 'python' language supported, got '{language}')"
+        p = Path(path)
+        if p.is_file():
+            idx = index_file(p)
+        else:
+            # Find all supported files
+            files = []
+            for ext in LANGUAGE_MAP.keys():
+                files.extend(p.rglob(f"*{ext}"))
+            files = files[:200]  # Limit
+            idx = index_files(files)
         
-        PY_LANGUAGE = Language(tspython.language())
-        parser = Parser(PY_LANGUAGE)
+        # Apply filters
+        defs = idx.find(name=name, kind=kind)
         
-        tree = parser.parse(bytes(code, "utf8"))
-        
-        types = {t.strip() for t in node_types.split(",")}
-        nodes = _find_nodes(tree.root_node, types)
+        if not defs:
+            return "(no definitions found)"
         
         results = []
-        for node in nodes[:200]:
-            start = node.start_point
-            text = code[node.start_byte:node.end_byte]
-            # Truncate long text
-            if len(text) > 100:
-                text = text[:97] + "..."
-            text = text.replace("\n", "\\n")
-            results.append(f"[{start[0]+1}:{start[1]}] {node.type}: {text}")
-        
-        if not results:
-            return "(no matches)"
+        for d in defs[:500]:
+            parent_info = f" (in {d.parent})" if d.parent else ""
+            results.append(f"{d.file}:{d.line}-{d.end_line}: {d.kind} {d.name}{parent_info}")
         
         return "\n".join(results)
-    except ImportError:
-        return "(tree-sitter not installed - pip install tree-sitter tree-sitter-python)"
+    except ImportError as e:
+        return f"(tree-sitter not installed: {e})"
     except Exception as e:
-        return f"(ast_query error: {e})"
+        return f"(index_code error: {e})"
 
 
 def find_definitions(path: str, name: str | None = None) -> str:
     """
-    Find function and class definitions in Python files.
+    Find function and class definitions (wrapper for index_code).
+    
+    Supports: Python, JavaScript, TypeScript, Go, Rust, Java, C, C++, Ruby, C#
     
     Args:
         path: File or directory to search
-        name: Optional name filter (regex)
+        name: Optional name filter (case-insensitive)
         
     Returns:
-        List of definitions with locations
+        List of definitions with file:line
     """
-    try:
-        import tree_sitter_python as tspython
-        from tree_sitter import Language, Parser
+    return index_code(path, name=name)
+
+
+def find_classes(path: str, name: str | None = None) -> str:
+    """
+    Find all class definitions.
+    
+    Args:
+        path: File or directory to search  
+        name: Optional name filter
         
-        PY_LANGUAGE = Language(tspython.language())
-        parser = Parser(PY_LANGUAGE)
+    Returns:
+        List of classes with file:line
+    """
+    return index_code(path, kind="class", name=name)
+
+
+def find_functions(path: str, name: str | None = None) -> str:
+    """
+    Find all function definitions (not methods).
+    
+    Args:
+        path: File or directory to search
+        name: Optional name filter
         
-        p = Path(path)
-        files = [p] if p.is_file() else list(p.rglob("*.py"))
+    Returns:
+        List of functions with file:line
+    """
+    return index_code(path, kind="function", name=name)
+
+
+def find_methods(path: str, name: str | None = None) -> str:
+    """
+    Find all method definitions (functions inside classes).
+    
+    Args:
+        path: File or directory to search
+        name: Optional name filter
         
-        results = []
-        name_re = re.compile(name) if name else None
-        
-        for f in files[:100]:  # Limit files
-            try:
-                code = f.read_text(encoding="utf-8", errors="replace")
-                tree = parser.parse(bytes(code, "utf8"))
-                
-                # Find function and class definitions
-                nodes = _find_nodes(tree.root_node, {"function_definition", "class_definition"})
-                
-                for node in nodes:
-                    # Get name from identifier child
-                    name_node = _get_child_by_type(node, "identifier")
-                    if not name_node:
-                        continue
-                    
-                    def_name = code[name_node.start_byte:name_node.end_byte]
-                    if name_re and not name_re.search(def_name):
-                        continue
-                    
-                    line = node.start_point[0] + 1
-                    kind = "function" if node.type == "function_definition" else "class"
-                    results.append(f"{f}:{line}: {kind} {def_name}")
-            except Exception:
-                continue
-        
-        if not results:
-            return "(no definitions found)"
-        
-        return "\n".join(results[:500])
-    except ImportError:
-        return "(tree-sitter not installed)"
-    except Exception as e:
-        return f"(find_definitions error: {e})"
+    Returns:
+        List of methods with file:line and parent class
+    """
+    return index_code(path, kind="method", name=name)
 
 
 def find_imports(path: str) -> str:
     """
-    Find all imports in Python files.
+    Find all imports in source files using ripgrep.
     
     Args:
         path: File or directory to analyze
@@ -349,45 +329,13 @@ def find_imports(path: str) -> str:
     Returns:
         List of imports with locations
     """
-    try:
-        import tree_sitter_python as tspython
-        from tree_sitter import Language, Parser
-        
-        PY_LANGUAGE = Language(tspython.language())
-        parser = Parser(PY_LANGUAGE)
-        
-        p = Path(path)
-        files = [p] if p.is_file() else list(p.rglob("*.py"))
-        
-        results = []
-        
-        for f in files[:100]:
-            try:
-                code = f.read_text(encoding="utf-8", errors="replace")
-                tree = parser.parse(bytes(code, "utf8"))
-                
-                nodes = _find_nodes(tree.root_node, {"import_statement", "import_from_statement"})
-                
-                for node in nodes:
-                    line = node.start_point[0] + 1
-                    text = code[node.start_byte:node.end_byte].split("\n")[0]
-                    results.append(f"{f}:{line}: {text}")
-            except Exception:
-                continue
-        
-        if not results:
-            return "(no imports found)"
-        
-        return "\n".join(results[:500])
-    except ImportError:
-        return "(tree-sitter not installed)"
-    except Exception as e:
-        return f"(find_imports error: {e})"
+    # Use ripgrep for imports - faster and works for all languages
+    return ripgrep(r"^(import |from .+ import |require\(|use |using )", path, "-n")
 
 
 def find_calls(path: str, function_name: str) -> str:
     """
-    Find all calls to a specific function or method.
+    Find all calls to a specific function or method using ripgrep.
     
     Args:
         path: File or directory to search
@@ -398,69 +346,11 @@ def find_calls(path: str, function_name: str) -> str:
         
     Examples:
         find_calls("src/", "print")     # Find print() calls
-        find_calls("src/", "append")    # Find .append() method calls
-        find_calls("src/", "query")     # Find query() or .query() calls
+        find_calls("src/", "query")     # Find query() calls
     """
-    try:
-        import tree_sitter_python as tspython
-        from tree_sitter import Language, Parser
-        
-        PY_LANGUAGE = Language(tspython.language())
-        parser = Parser(PY_LANGUAGE)
-        
-        p = Path(path)
-        files = [p] if p.is_file() else list(p.rglob("*.py"))
-        
-        results = []
-        
-        for f in files[:100]:
-            try:
-                code = f.read_text(encoding="utf-8", errors="replace")
-                tree = parser.parse(bytes(code, "utf8"))
-                
-                # Find all call nodes
-                call_nodes = _find_nodes(tree.root_node, {"call"})
-                
-                for call_node in call_nodes:
-                    # Get the function being called - could be:
-                    # 1. Direct call: func() -> identifier child
-                    # 2. Method call: obj.method() -> attribute child with identifier
-                    func_node = _get_child_by_type(call_node, "identifier")
-                    
-                    if not func_node:
-                        # Check for attribute access (obj.method)
-                        attr_node = _get_child_by_type(call_node, "attribute")
-                        if attr_node:
-                            # Get the last identifier (method name)
-                            identifiers = [c for c in attr_node.children if c.type == "identifier"]
-                            if identifiers:
-                                func_node = identifiers[-1]  # Last one is the method name
-                    
-                    if not func_node:
-                        continue
-                    
-                    name = code[func_node.start_byte:func_node.end_byte]
-                    if name != function_name:
-                        continue
-                    
-                    line = call_node.start_point[0] + 1
-                    call_text = code[call_node.start_byte:call_node.end_byte]
-                    # Truncate long calls
-                    if len(call_text) > 80:
-                        call_text = call_text[:77] + "..."
-                    call_text = call_text.replace("\n", " ")
-                    results.append(f"{f}:{line}: {call_text}")
-            except Exception:
-                continue
-        
-        if not results:
-            return f"(no calls to '{function_name}' found)"
-        
-        return "\n".join(results[:500])
-    except ImportError:
-        return "(tree-sitter not installed)"
-    except Exception as e:
-        return f"(find_calls error: {e})"
+    # Use ripgrep - matches function_name followed by (
+    pattern = rf"\b{re.escape(function_name)}\s*\("
+    return ripgrep(pattern, path, "-n")
 
 
 def shell(command: str, timeout: int = 30) -> str:
@@ -505,8 +395,11 @@ BUILTIN_TOOLS: dict[str, Any] = {
     "find_files": find_files,
     "read_file": read_file,
     "file_stats": file_stats,
-    "ast_query": ast_query,
+    "index_code": index_code,
     "find_definitions": find_definitions,
+    "find_classes": find_classes,
+    "find_functions": find_functions,
+    "find_methods": find_methods,
     "find_imports": find_imports,
     "find_calls": find_calls,
     "shell": shell,
