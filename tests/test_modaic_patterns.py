@@ -410,3 +410,86 @@ class TestContextCaching:
         
         stats = get_context_cache_stats()
         assert stats["entries"] == 0
+
+
+class TestContextTruncation:
+    """Test context truncation utilities."""
+
+    def test_estimate_tokens(self):
+        """Test token estimation."""
+        from rlm_dspy.core.fileutils import estimate_tokens
+        
+        # Default 4 chars per token
+        assert estimate_tokens("1234") == 1
+        assert estimate_tokens("12345678") == 2
+        assert estimate_tokens("x" * 100) == 25
+
+    def test_truncate_context_no_truncation_needed(self):
+        """Test that short context is not truncated."""
+        from rlm_dspy.core.fileutils import truncate_context
+        
+        context = "short context"
+        result, was_truncated = truncate_context(context, max_tokens=1000)
+        
+        assert result == context
+        assert was_truncated is False
+
+    def test_truncate_context_tail_strategy(self):
+        """Test tail truncation strategy."""
+        from rlm_dspy.core.fileutils import truncate_context
+        
+        context = "A" * 1000 + "B" * 1000  # 2000 chars = ~500 tokens
+        result, was_truncated = truncate_context(context, max_tokens=100, strategy="tail")
+        
+        assert was_truncated is True
+        assert "[TRUNCATED]" in result
+        assert result.endswith("B" * 100)  # Should keep end
+
+    def test_truncate_context_head_strategy(self):
+        """Test head truncation strategy."""
+        from rlm_dspy.core.fileutils import truncate_context
+        
+        context = "A" * 1000 + "B" * 1000
+        result, was_truncated = truncate_context(context, max_tokens=100, strategy="head")
+        
+        assert was_truncated is True
+        assert "[TRUNCATED]" in result
+        assert result.startswith("A" * 100)  # Should keep start
+
+    def test_smart_truncate_preserves_file_markers(self):
+        """Test smart truncation preserves file boundaries."""
+        from rlm_dspy.core.fileutils import smart_truncate_context
+        
+        # Create context with file markers
+        files = []
+        for i in range(10):
+            files.append(f"=== FILE: file{i}.py ===\ncontent {i}\n=== END FILE ===\n")
+        context = "".join(files)
+        
+        # Truncate to fit ~2 files
+        result, was_truncated = smart_truncate_context(
+            context, 
+            max_tokens=50,  # Very small to force truncation
+            chars_per_token=4.0
+        )
+        
+        assert was_truncated is True
+        assert "[TRUNCATED" in result
+
+    def test_rlm_load_context_with_max_tokens(self, tmp_path):
+        """Test RLM.load_context with max_tokens parameter."""
+        from rlm_dspy.core.rlm import RLM, RLMConfig
+        
+        # Create large test file
+        large_file = tmp_path / "large.py"
+        large_file.write_text("x" * 10000)  # ~2500 tokens
+        
+        config = RLMConfig(model="test/model")
+        rlm = RLM(config=config)
+        
+        # Load with small limit
+        context = rlm.load_context([tmp_path], max_tokens=100)
+        
+        # Should be truncated
+        assert len(context) < 10000
+        assert "[TRUNCATED" in context

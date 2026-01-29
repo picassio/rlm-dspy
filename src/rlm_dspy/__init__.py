@@ -1,6 +1,6 @@
 """RLM-DSPy: Recursive Language Models with DSPy optimization."""
 
-from .core.rlm import RLM, RLMConfig, RLMResult
+from .core.rlm import RLM, RLMConfig, RLMResult, ProgressCallback
 from .signatures import (
     ArchitectureAnalysis,
     BugFinder,
@@ -42,6 +42,7 @@ __all__ = [
     "RLM",
     "RLMConfig",
     "RLMResult",
+    "ProgressCallback",
     # Signatures
     "SecurityAudit",
     "CodeReview",

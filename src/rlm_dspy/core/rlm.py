@@ -279,6 +279,13 @@ class RLMConfig:
             "RLM_MAX_TIMEOUT", _get_user_config_default("max_timeout", 300.0)
         )
     )
+    
+    # Parallelism settings
+    max_workers: int = field(
+        default_factory=lambda: _env_get(
+            "RLM_MAX_WORKERS", _get_user_config_default("max_workers", 8)
+        )
+    )
 
     def __repr__(self) -> str:
         key_display = "***" if self.api_key else None
@@ -343,6 +350,76 @@ class RLMResult:
 
 
 # =============================================================================
+# Progress Callback
+# =============================================================================
+
+class ProgressCallback:
+    """Callback for RLM progress updates.
+    
+    Subclass this to receive progress updates during RLM execution.
+    
+    Example:
+        ```python
+        class MyCallback(ProgressCallback):
+            def on_iteration(self, iteration, max_iterations):
+                print(f"Iteration {iteration}/{max_iterations}")
+            
+            def on_lm_call(self, call_type, inputs):
+                print(f"LLM call: {call_type}")
+        
+        rlm = RLM(config=config, progress_callback=MyCallback())
+        ```
+    """
+    
+    def on_start(self, query: str, context_tokens: int) -> None:
+        """Called when RLM execution starts."""
+        pass
+    
+    def on_iteration(self, iteration: int, max_iterations: int) -> None:
+        """Called at the start of each REPL iteration."""
+        pass
+    
+    def on_lm_call(self, call_type: str, inputs: dict | None = None) -> None:
+        """Called when an LLM call is made.
+        
+        Args:
+            call_type: Type of call ("main", "sub", "tool")
+            inputs: Optional input data
+        """
+        pass
+    
+    def on_tool_use(self, tool_name: str, args: dict | None = None) -> None:
+        """Called when a tool is invoked."""
+        pass
+    
+    def on_complete(self, result: "RLMResult") -> None:
+        """Called when RLM execution completes."""
+        pass
+    
+    def on_error(self, error: Exception) -> None:
+        """Called when an error occurs."""
+        pass
+
+
+class DspyProgressCallback:
+    """DSPy-compatible callback that wraps our ProgressCallback.
+    
+    This bridges our callback interface with dspy's BaseCallback.
+    """
+    
+    def __init__(self, progress_callback: ProgressCallback):
+        self.progress = progress_callback
+        self._call_count = 0
+    
+    def on_lm_start(self, call_id: str, instance: Any, inputs: dict[str, Any]):
+        self._call_count += 1
+        self.progress.on_lm_call("main", inputs)
+    
+    def on_lm_end(self, call_id: str, outputs: dict[str, Any] | None, exception: Exception | None = None):
+        pass
+
+
+# =============================================================================
 # Main RLM Class
 # =============================================================================
 
@@ -382,6 +459,7 @@ class RLM:
         signature: str | type = "context, query -> answer",
         interpreter: Any | None = None,
         use_tools: bool | str = True,
+        progress_callback: ProgressCallback | None = None,
     ):
         """
         Initialize RLM.
@@ -405,6 +483,8 @@ class RLM:
                       - True or "safe": Safe tools (default) - ripgrep, tree-sitter, file ops
                       - "all": All tools including shell (requires RLM_ALLOW_SHELL=1)
                       - False: No extra tools
+            progress_callback: Optional callback for progress updates.
+                      Receives on_start, on_iteration, on_lm_call, on_complete events.
                       
         Available tools when enabled:
             - ripgrep(pattern, path, flags): Fast regex search
@@ -448,6 +528,7 @@ class RLM:
         """
         self.config = config or RLMConfig()
         self._interpreter = interpreter
+        self._progress_callback = progress_callback
         
         # Initialize tools
         self._tools = tools.copy() if tools else {}
@@ -545,7 +626,13 @@ These tools provide 100% accurate results. Only fall back to manual parsing if t
 
         # Store LM instance for thread-local configuration in query()
         self._lm = dspy.LM(**lm_kwargs)
-        # NOTE: No dspy.configure() call - we use context manager in query() instead
+        
+        # Configure parallelism settings (affects batch operations)
+        dspy.settings.configure(
+            async_max_workers=self.config.max_workers,
+            num_threads=self.config.max_workers,
+        )
+        # NOTE: No lm= in configure() - we use context manager in query() instead
 
     def _create_sub_lm(self) -> dspy.LM | None:
         """Create sub-LM for llm_query calls if different from primary."""
@@ -584,6 +671,7 @@ These tools provide 100% accurate results. Only fall back to manual parsing if t
         paths: list[str | Path],
         gitignore: bool = True,
         use_cache: bool = True,
+        max_tokens: int | None = None,
     ) -> str:
         """
         Load context from files or directories.
@@ -592,18 +680,33 @@ These tools provide 100% accurate results. Only fall back to manual parsing if t
             paths: List of file or directory paths
             gitignore: Whether to respect .gitignore patterns
             use_cache: Whether to use context caching (default True)
+            max_tokens: Optional max tokens (truncates if exceeded)
 
         Returns:
             Combined context string with file markers
         """
-        from .fileutils import load_context_from_paths, load_context_from_paths_cached
+        from .fileutils import (
+            load_context_from_paths, 
+            load_context_from_paths_cached,
+            smart_truncate_context,
+        )
         
         loader = load_context_from_paths_cached if use_cache else load_context_from_paths
-        return loader(
+        context = loader(
             paths=[Path(p) for p in paths],
             gitignore=gitignore,
             add_line_numbers=True,
         )
+        
+        # Optionally truncate to fit token limit
+        if max_tokens is not None:
+            context, was_truncated = smart_truncate_context(context, max_tokens)
+            if was_truncated:
+                _logger.warning(
+                    "Context truncated to fit %d token limit", max_tokens
+                )
+        
+        return context
 
     def _build_result(self, prediction: Any, elapsed: float) -> RLMResult:
         """Build RLMResult from dspy prediction, handling structured outputs."""
@@ -684,8 +787,14 @@ These tools provide 100% accurate results. Only fall back to manual parsing if t
             For custom signatures, structured outputs available via result.outputs dict.
         """
         import concurrent.futures
+        from .fileutils import estimate_tokens
 
         self._start_time = time.time()
+        
+        # Notify callback of start
+        if self._progress_callback:
+            context_tokens = estimate_tokens(context)
+            self._progress_callback.on_start(query, context_tokens)
 
         def _execute_rlm() -> Any:
             """Execute RLM with thread-local DSPy configuration."""
@@ -710,20 +819,31 @@ These tools provide 100% accurate results. Only fall back to manual parsing if t
             elapsed = time.time() - self._start_time
 
             # Build result from prediction
-            return self._build_result(prediction, elapsed)
+            result = self._build_result(prediction, elapsed)
+            
+            # Notify callback of completion
+            if self._progress_callback:
+                self._progress_callback.on_complete(result)
+            
+            return result
 
         except TimeoutExceededError:
             elapsed = time.time() - self._start_time if self._start_time else 0
             _logger.warning("RLM execution timed out after %.1fs", elapsed)
-            return RLMResult(
+            error_result = RLMResult(
                 answer="",
                 success=False,
                 error=f"Query timed out after {elapsed:.1f}s (limit: {self.config.max_timeout}s)",
                 elapsed_time=elapsed,
             )
+            if self._progress_callback:
+                self._progress_callback.on_error(TimeoutExceededError(self.config.max_timeout, elapsed))
+            return error_result
 
         except Exception as e:
             elapsed = time.time() - self._start_time if self._start_time else 0
+            if self._progress_callback:
+                self._progress_callback.on_error(e)
             _logger.exception("RLM execution failed")
             return RLMResult(
                 answer="",

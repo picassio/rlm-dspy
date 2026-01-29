@@ -767,3 +767,152 @@ def get_context_cache_stats() -> dict:
         "max_size": _CONTEXT_CACHE_MAX_SIZE,
         "max_age_seconds": _CONTEXT_CACHE_MAX_AGE,
     }
+
+
+def estimate_tokens(text: str, chars_per_token: float = 4.0) -> int:
+    """Estimate token count for text.
+    
+    Uses a simple heuristic (4 chars per token on average for code).
+    For more accurate counts, use tiktoken directly.
+    
+    Args:
+        text: Text to estimate
+        chars_per_token: Average characters per token (default 4.0 for code)
+        
+    Returns:
+        Estimated token count
+    """
+    return int(len(text) / chars_per_token)
+
+
+def truncate_context(
+    context: str,
+    max_tokens: int = 100_000,
+    strategy: str = "tail",
+    chars_per_token: float = 4.0,
+) -> tuple[str, bool]:
+    """Truncate context to fit within token limit.
+    
+    Args:
+        context: Context string to truncate
+        max_tokens: Maximum tokens allowed
+        strategy: Truncation strategy:
+            - "tail": Keep end (most recent code)
+            - "head": Keep start
+            - "middle": Keep start and end, remove middle
+        chars_per_token: Chars per token for estimation
+        
+    Returns:
+        Tuple of (truncated_context, was_truncated)
+    """
+    estimated_tokens = estimate_tokens(context, chars_per_token)
+    
+    if estimated_tokens <= max_tokens:
+        return context, False
+    
+    max_chars = int(max_tokens * chars_per_token)
+    
+    if strategy == "tail":
+        # Keep the end (most recent files)
+        truncated = "...[TRUNCATED]...\n" + context[-max_chars:]
+    elif strategy == "head":
+        # Keep the start
+        truncated = context[:max_chars] + "\n...[TRUNCATED]..."
+    elif strategy == "middle":
+        # Keep start and end, remove middle
+        half = max_chars // 2
+        truncated = context[:half] + "\n...[TRUNCATED]...\n" + context[-half:]
+    else:
+        raise ValueError(f"Unknown strategy: {strategy}")
+    
+    return truncated, True
+
+
+def smart_truncate_context(
+    context: str,
+    max_tokens: int = 100_000,
+    chars_per_token: float = 4.0,
+) -> tuple[str, bool]:
+    """Intelligently truncate context preserving file boundaries.
+    
+    Removes complete files from the middle to preserve context coherence.
+    
+    Args:
+        context: Context with file markers (=== FILE: ... ===)
+        max_tokens: Maximum tokens allowed
+        chars_per_token: Chars per token for estimation
+        
+    Returns:
+        Tuple of (truncated_context, was_truncated)
+    """
+    import re
+    
+    estimated_tokens = estimate_tokens(context, chars_per_token)
+    
+    if estimated_tokens <= max_tokens:
+        return context, False
+    
+    # Split by file markers
+    file_pattern = re.compile(r'(=== FILE: .+? ===\n.*?=== END FILE ===\n)', re.DOTALL)
+    files = file_pattern.findall(context)
+    
+    if not files:
+        # No file markers, use simple truncation
+        return truncate_context(context, max_tokens, "tail", chars_per_token)
+    
+    # Calculate tokens per file
+    file_tokens = [(f, estimate_tokens(f, chars_per_token)) for f in files]
+    total_tokens = sum(t for _, t in file_tokens)
+    
+    # Remove files from middle until under limit
+    # Keep first 25% and last 25% of files, remove from middle
+    target_tokens = max_tokens - 100  # Buffer for truncation message
+    
+    result_files = []
+    current_tokens = 0
+    
+    # Always include first and last files
+    if len(files) >= 2:
+        first_quarter = max(1, len(files) // 4)
+        last_quarter = max(1, len(files) // 4)
+        
+        # Add first files
+        for f, t in file_tokens[:first_quarter]:
+            result_files.append(f)
+            current_tokens += t
+        
+        # Add truncation marker
+        result_files.append("\n...[TRUNCATED: removed middle files to fit context limit]...\n\n")
+        
+        # Add last files (as many as fit)
+        for f, t in reversed(file_tokens[-last_quarter:]):
+            if current_tokens + t <= target_tokens:
+                result_files.insert(-1, f)  # Insert before truncation marker... wait, need to fix
+                current_tokens += t
+        
+        # Fix order - rebuild properly
+        result_files = []
+        current_tokens = 0
+        
+        # First quarter
+        for f, t in file_tokens[:first_quarter]:
+            if current_tokens + t <= target_tokens * 0.5:
+                result_files.append(f)
+                current_tokens += t
+        
+        result_files.append("\n...[TRUNCATED: removed middle files to fit context limit]...\n\n")
+        
+        # Last quarter
+        last_files = []
+        last_tokens = 0
+        for f, t in reversed(file_tokens[-last_quarter:]):
+            if last_tokens + t <= target_tokens * 0.5:
+                last_files.insert(0, f)
+                last_tokens += t
+        
+        result_files.extend(last_files)
+    else:
+        # Only one file, use simple truncation
+        return truncate_context(context, max_tokens, "tail", chars_per_token)
+    
+    return "".join(result_files), True
