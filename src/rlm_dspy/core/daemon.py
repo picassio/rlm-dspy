@@ -112,6 +112,10 @@ class IndexEventHandler(FileSystemEventHandler):
         if event.is_directory:
             return
         
+        # Only care about actual content changes (ignore open/close/access events)
+        if event.event_type not in ('modified', 'created', 'deleted', 'moved'):
+            return
+        
         path = event.src_path
         
         if self._should_ignore(path):
@@ -122,8 +126,8 @@ class IndexEventHandler(FileSystemEventHandler):
         
         # Queue the project for re-indexing
         self.queue.put((self.project_name, time.time()))
-        logger.debug("Queued %s for re-indexing (event: %s on %s)", 
-                    self.project_name, event.event_type, path)
+        logger.info("[%s] %s: %s", 
+                   self.project_name, event.event_type.upper(), Path(path).name)
 
 
 class IndexWorker(threading.Thread):
@@ -192,7 +196,7 @@ class IndexWorker(threading.Thread):
             logger.info("Re-indexing project: %s", project_name)
             
             manager = get_index_manager()
-            count = manager.build(project.path, force=True)
+            count = manager.build(project.path, force=False)
             
             logger.info("Indexed %s: %d snippets", project_name, count)
             
@@ -419,16 +423,36 @@ class IndexDaemon:
             self.stop()
     
     def _setup_logging(self) -> None:
-        """Setup logging to file."""
+        """Setup logging to file and configure daemon loggers."""
         self.config.log_file.parent.mkdir(parents=True, exist_ok=True)
         
-        file_handler = logging.FileHandler(self.config.log_file)
+        # Create file handler
+        file_handler = logging.FileHandler(self.config.log_file, mode='a')
+        file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+            '%(asctime)s - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
         ))
         
-        # Add handler to root logger
-        logging.getLogger().addHandler(file_handler)
+        # Configure daemon logger to use file handler
+        daemon_logger = logging.getLogger('rlm_dspy.core.daemon')
+        daemon_logger.setLevel(logging.DEBUG)
+        daemon_logger.addHandler(file_handler)
+        daemon_logger.propagate = False
+        
+        # Also log vector_index messages for indexing progress
+        index_logger = logging.getLogger('rlm_dspy.core.vector_index')
+        index_logger.setLevel(logging.INFO)
+        index_logger.addHandler(file_handler)
+        index_logger.propagate = False
+        
+        # Store reference
+        self._log_handler = file_handler
+        
+        # Write startup marker
+        daemon_logger.info("=" * 50)
+        daemon_logger.info("Daemon started (PID: %d)", os.getpid())
+        daemon_logger.info("Log file: %s", self.config.log_file)
     
     def _daemonize(self) -> None:
         """Fork to background (Unix only)."""

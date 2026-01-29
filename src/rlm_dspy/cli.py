@@ -1957,5 +1957,80 @@ def daemon_list() -> None:
     console.print(table)
 
 
+@daemon_app.command("log")
+def daemon_log(
+    lines: Annotated[
+        int,
+        typer.Option("--lines", "-n", help="Number of lines to show"),
+    ] = 50,
+    follow: Annotated[
+        bool,
+        typer.Option("--follow", "-f", help="Follow log output (like tail -f)"),
+    ] = False,
+    clear: Annotated[
+        bool,
+        typer.Option("--clear", help="Clear the log file"),
+    ] = False,
+) -> None:
+    """View the daemon log file.
+    
+    Examples:
+        rlm-dspy daemon log              # Show last 50 lines
+        rlm-dspy daemon log -n 100       # Show last 100 lines
+        rlm-dspy daemon log -f           # Follow log output
+        rlm-dspy daemon log --clear      # Clear the log
+    """
+    from .core.daemon import DaemonConfig
+    
+    config = DaemonConfig.from_user_config()
+    log_file = config.log_file
+    
+    if clear:
+        if log_file.exists():
+            log_file.write_text("")
+            console.print(f"[green]✓[/green] Cleared log file: {log_file}")
+        else:
+            console.print("[dim]Log file doesn't exist[/dim]")
+        return
+    
+    if not log_file.exists():
+        console.print(f"[dim]No log file found at {log_file}[/dim]")
+        console.print("[dim]Start the daemon to create logs[/dim]")
+        return
+    
+    if follow:
+        import subprocess
+        console.print(f"[dim]Following {log_file} (Ctrl+C to stop)...[/dim]\n")
+        try:
+            subprocess.run(["tail", "-f", str(log_file)])
+        except KeyboardInterrupt:
+            pass
+        return
+    
+    # Read last N lines
+    content = log_file.read_text()
+    all_lines = content.splitlines()
+    
+    if not all_lines:
+        console.print("[dim]Log file is empty[/dim]")
+        return
+    
+    # Show last N lines
+    display_lines = all_lines[-lines:] if len(all_lines) > lines else all_lines
+    
+    console.print(f"[dim]Showing last {len(display_lines)} of {len(all_lines)} lines from {log_file}[/dim]\n")
+    
+    for line in display_lines:
+        # Colorize based on log level
+        if " - ERROR - " in line or "ERROR" in line:
+            console.print(f"[red]{line}[/red]")
+        elif " - WARNING - " in line or "WARNING" in line:
+            console.print(f"[yellow]{line}[/yellow]")
+        elif " - INFO - " in line:
+            console.print(line)
+        else:
+            console.print(f"[dim]{line}[/dim]")
+
+
 if __name__ == "__main__":
     app()
