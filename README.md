@@ -887,6 +887,22 @@ rlm-dspy daemon unwatch my-app
 
 # List watched projects
 rlm-dspy daemon list
+
+# View daemon logs
+rlm-dspy daemon log              # Show last 50 lines
+rlm-dspy daemon log -n 100       # Show last 100 lines  
+rlm-dspy daemon log -f           # Follow log (tail -f)
+rlm-dspy daemon log --clear      # Clear log file
+```
+
+**Example log output:**
+```
+2026-01-29 09:12:42 - INFO - Daemon started (PID: 12345)
+2026-01-29 09:12:43 - INFO - Watching project: my-app
+2026-01-29 09:12:45 - INFO - [my-app] MODIFIED: api.py
+2026-01-29 09:12:50 - INFO - Re-indexing project: my-app
+2026-01-29 09:12:51 - INFO - Incremental update: 1 new/modified, 0 deleted
+2026-01-29 09:12:52 - INFO - Incremental update complete: 450 snippets
 ```
 
 ```python
@@ -906,7 +922,9 @@ daemon.stop()
 **Features:**
 - **File watching**: Uses `watchdog` for cross-platform file monitoring
 - **Debouncing**: Waits 5s after last change before re-indexing
+- **Incremental indexing**: Only re-embeds changed files (91% API cost reduction)
 - **Auto-watch**: Projects with `auto_watch=True` are watched on daemon start
+- **Logging**: Full activity log with `daemon log` command
 - **Resource limits**: Configurable max concurrent index builds
 - **Idle timeout**: Optional auto-stop after period of inactivity
 
