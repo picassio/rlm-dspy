@@ -6,7 +6,6 @@ for file changes and automatically updates their indexes.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import signal
@@ -14,7 +13,6 @@ import sys
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 from queue import Queue, Empty
 from typing import Callable
