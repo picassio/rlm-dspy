@@ -93,15 +93,40 @@ def ripgrep(pattern: str, path: str = ".", flags: str = "") -> str:
         if not is_safe:
             return f"(security: {error})"
         
-        # Validate flags - only allow safe ripgrep flags
-        ALLOWED_FLAGS = {'-i', '-l', '-c', '-n', '-w', '-v', '-A', '-B', '-C', '-m', '-g', '--glob', '--type', '-t', '-F', '-s', '-S'}
+        # Validate flags - only allow safe ripgrep flags (strict matching)
+        # Short flags that take optional numeric args
+        SHORT_FLAGS_WITH_NUM = {'-A', '-B', '-C', '-m'}
+        # Short flags without args
+        SHORT_FLAGS = {'-i', '-l', '-c', '-n', '-w', '-v', '-F', '-s', '-S'}
+        # Long flags (exact match or with =value)
+        LONG_FLAGS = {'--glob', '--type', '-t', '-g'}
+        
         cmd = ["rg", "--color=never", "--line-number"]
         if flags:
             for flag in flags.split():
-                # Check flag is allowed (strip numeric arguments like -C5)
-                flag_base = flag.lstrip('-').rstrip('0123456789')
-                if flag.startswith('-') and not any(flag.startswith(f) for f in ALLOWED_FLAGS):
-                    return f"(security: flag '{flag}' not allowed)"
+                if not flag.startswith('-'):
+                    # Not a flag, skip validation
+                    continue
+                
+                # Check if it's a known short flag with numeric arg (e.g., -C5, -A3)
+                if len(flag) >= 2 and flag[:2] in SHORT_FLAGS_WITH_NUM:
+                    # Verify rest is numeric
+                    if flag[2:] and not flag[2:].isdigit():
+                        return f"(security: invalid flag '{flag}')"
+                    continue
+                
+                # Check exact short flag match
+                if flag in SHORT_FLAGS or flag in SHORT_FLAGS_WITH_NUM:
+                    continue
+                
+                # Check long flags (exact or with =)
+                flag_name = flag.split('=')[0]
+                if flag_name in LONG_FLAGS:
+                    continue
+                
+                # Not in allowlist
+                return f"(security: flag '{flag}' not allowed)"
+            
             cmd.extend(flags.split())
         cmd.extend([pattern, path])
         
