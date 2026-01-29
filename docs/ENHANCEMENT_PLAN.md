@@ -583,6 +583,268 @@ embeddings = [
 
 ---
 
+## 5. Future Work
+
+### Phase 5: Index Daemon Service
+
+**Goal:** Background service that automatically keeps indexes up-to-date.
+
+#### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                      RLM Index Daemon                                │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  ┌──────────────┐     ┌──────────────┐     ┌──────────────────┐    │
+│  │   Watcher    │────▶│    Queue     │────▶│  Index Worker    │    │
+│  │  (inotify/   │     │  (debounced  │     │  (background     │    │
+│  │   fsevents)  │     │   changes)   │     │   embedding)     │    │
+│  └──────────────┘     └──────────────┘     └──────────────────┘    │
+│         │                                           │               │
+│         ▼                                           ▼               │
+│  ┌──────────────┐                          ┌──────────────────┐    │
+│  │  Project     │                          │  ~/.rlm/indexes/ │    │
+│  │  Registry    │                          │  (persistent)    │    │
+│  │  (watched    │                          └──────────────────┘    │
+│  │   paths)     │                                                   │
+│  └──────────────┘                                                   │
+│                                                                      │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+#### CLI Commands
+
+```bash
+# Start daemon
+rlm-dspy daemon start
+rlm-dspy daemon start --foreground  # Run in foreground
+
+# Stop daemon
+rlm-dspy daemon stop
+
+# Check status
+rlm-dspy daemon status
+
+# Register project for auto-indexing
+rlm-dspy daemon watch ~/projects/my-app
+rlm-dspy daemon watch .  # Current directory
+
+# Unregister project
+rlm-dspy daemon unwatch ~/projects/my-app
+
+# List watched projects
+rlm-dspy daemon list
+```
+
+#### Configuration
+
+```yaml
+# ~/.rlm/config.yaml
+
+# Daemon settings
+daemon:
+  enabled: true
+  pid_file: ~/.rlm/daemon.pid
+  log_file: ~/.rlm/daemon.log
+  
+  # File watching
+  watch_debounce: 5          # Seconds to wait after file change
+  watch_ignore:              # Patterns to ignore
+    - "*.pyc"
+    - "__pycache__"
+    - ".git"
+    - "node_modules"
+    - ".venv"
+  
+  # Resource limits
+  max_concurrent_indexes: 2  # Max parallel index builds
+  idle_timeout: 3600         # Stop after 1 hour of no activity (0 = never)
+  
+  # Startup
+  auto_start: false          # Start daemon on first `rlm-dspy` command
+```
+
+#### Implementation Notes
+
+1. **File Watcher**: Use `watchdog` library (cross-platform)
+2. **Debouncing**: Wait 5s after last change before re-indexing
+3. **Incremental**: Only re-embed changed files
+4. **Resource-aware**: Limit concurrent index builds
+5. **Persistence**: Store watched projects in `~/.rlm/projects.json`
+
+---
+
+### Phase 6: Multi-Project Index Management
+
+**Problem:** How to handle multiple projects efficiently?
+
+#### Current Behavior
+
+```
+~/.rlm/indexes/
+├── a1b2c3d4e5f6/     # Hash of /home/user/project-a
+│   ├── index.npy
+│   ├── metadata.json
+│   ├── corpus_idx_map.json
+│   └── manifest.json
+├── 7890abcdef12/     # Hash of /home/user/project-b
+│   └── ...
+└── ...
+```
+
+**Issues:**
+1. Hard to know which hash belongs to which project
+2. No cross-project search
+3. Orphaned indexes when projects are deleted/moved
+4. No project naming/aliasing
+
+#### Solution: Project Registry
+
+```
+~/.rlm/
+├── config.yaml
+├── projects.json          # NEW: Project registry
+└── indexes/
+    ├── project-a/         # Named instead of hash
+    │   └── ...
+    └── project-b/
+        └── ...
+```
+
+**projects.json:**
+```json
+{
+  "projects": {
+    "project-a": {
+      "path": "/home/user/projects/project-a",
+      "alias": "my-app",
+      "indexed_at": "2025-01-28T12:00:00Z",
+      "snippet_count": 450,
+      "auto_watch": true,
+      "tags": ["python", "web"]
+    },
+    "project-b": {
+      "path": "/home/user/projects/project-b",
+      "alias": null,
+      "indexed_at": "2025-01-27T10:00:00Z",
+      "snippet_count": 120,
+      "auto_watch": false,
+      "tags": ["rust", "cli"]
+    }
+  },
+  "default_project": "project-a"
+}
+```
+
+#### CLI Commands
+
+```bash
+# Register a project with a name
+rlm-dspy project add my-app ~/projects/my-app
+rlm-dspy project add . --name current-project
+
+# List all projects
+rlm-dspy project list
+# Output:
+# NAME          PATH                         SNIPPETS  UPDATED
+# my-app        ~/projects/my-app            450       2 hours ago
+# backend       ~/projects/backend           120       1 day ago
+# * current     .                            89        just now
+
+# Set default project (for search without -p)
+rlm-dspy project default my-app
+
+# Remove project (keeps files, removes from registry)
+rlm-dspy project remove my-app
+
+# Remove project and delete index
+rlm-dspy project remove my-app --delete-index
+
+# Search across multiple projects
+rlm-dspy index search "auth" --projects my-app,backend
+rlm-dspy index search "auth" --all-projects
+
+# Tag projects for grouping
+rlm-dspy project tag my-app python web
+rlm-dspy index search "database" --tags python
+
+# Cleanup orphaned indexes
+rlm-dspy project cleanup
+# Found 3 orphaned indexes (paths no longer exist)
+# Delete? [y/N]
+```
+
+#### Cross-Project Search
+
+```python
+from rlm_dspy.core import CodeIndex, get_project_registry
+
+# Search single project
+index = CodeIndex()
+results = index.search("my-app", "authentication", k=5)
+
+# Search multiple projects
+registry = get_project_registry()
+results = registry.search_all(
+    query="authentication",
+    projects=["my-app", "backend"],  # or tags=["python"]
+    k=10,
+)
+
+# Results include project info
+for r in results:
+    print(f"[{r.project}] {r.snippet.file}:{r.snippet.line}")
+```
+
+#### Migration Path
+
+1. **Auto-migrate**: On first run, scan existing hash-based indexes
+2. **Infer names**: Use directory name from manifest's `repo_path`
+3. **Keep hashes**: Store hash in project metadata for deduplication
+
+```python
+# Migration logic
+def migrate_legacy_indexes():
+    for hash_dir in index_dir.iterdir():
+        manifest = load_manifest(hash_dir)
+        repo_path = manifest.get("repo_path")
+        project_name = Path(repo_path).name  # e.g., "my-project"
+        
+        # Rename directory
+        hash_dir.rename(index_dir / project_name)
+        
+        # Register in projects.json
+        registry.add(project_name, repo_path)
+```
+
+#### Configuration
+
+```yaml
+# ~/.rlm/config.yaml
+
+# Project settings
+projects:
+  default: null                    # Default project for search
+  auto_register: true              # Auto-register on first index
+  name_from_path: true             # Use directory name as project name
+  max_projects: 50                 # Warn if more than this
+  cleanup_orphaned_days: 30        # Auto-cleanup after 30 days
+```
+
+---
+
+### Phase 7: Additional Enhancements (Backlog)
+
+- [ ] **MCP Tool Integration** - External service support via Model Context Protocol
+- [ ] **KNNFewShot** - Dynamic example selection for better prompts
+- [ ] **SIMBA** - Self-improving optimization
+- [ ] **Index Compression** - Reduce disk usage for large indexes
+- [ ] **Distributed Search** - Search across remote indexes (team sharing)
+- [ ] **IDE Integration** - VS Code extension for inline search
+
+---
+
 ## 6. Summary
 
 | Feature | Config Key | Env Var | Default |
