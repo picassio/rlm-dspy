@@ -246,6 +246,7 @@ class IndexDaemon:
         self._watches: dict[str, any] = {}  # project_name -> watch handle
         self._running = False
         self._lock = threading.Lock()
+        self._pid_fd: int | None = None  # File descriptor for PID file lock
         
         # Stats
         self._start_time: float | None = None
@@ -314,9 +315,19 @@ class IndexDaemon:
         self._observer.stop()
         self._observer.join(timeout=5.0)
         
-        # Remove PID file
+        # Close PID file descriptor (releases lock) and remove file
+        if hasattr(self, '_pid_fd') and self._pid_fd is not None:
+            try:
+                os.close(self._pid_fd)
+            except OSError:
+                pass
+            self._pid_fd = None
+        
         if self.config.pid_file.exists():
-            self.config.pid_file.unlink()
+            try:
+                self.config.pid_file.unlink()
+            except OSError:
+                pass
         
         self._running = False
         logger.info("Index daemon stopped")
@@ -552,7 +563,8 @@ class IndexDaemon:
                 # Try to get exclusive lock (non-blocking)
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 os.write(fd, str(os.getpid()).encode())
-                # Keep lock held - will be released when process exits
+                # Store fd so lock is held and can be closed on shutdown
+                self._pid_fd = fd
             except BlockingIOError:
                 os.close(fd)
                 raise RuntimeError("Another daemon instance is already running")
