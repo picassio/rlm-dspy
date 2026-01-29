@@ -575,6 +575,7 @@ class RLM:
         """
         self.config = config or RLMConfig()
         self._interpreter = interpreter
+        self._persistent_interpreter = None  # Lazy-created for reuse
         self._progress_callback = progress_callback
 
         # Initialize tools
@@ -707,8 +708,33 @@ Use structural tools for exact lookups, semantic search for exploratory queries.
 
         return dspy.LM(**lm_kwargs)
 
-    def _create_rlm(self) -> dspy.RLM:
-        """Create the dspy.RLM instance."""
+    def _get_or_create_interpreter(self):
+        """Get or create a persistent interpreter for reuse.
+
+        Reusing the interpreter avoids the ~3s Pyodide startup cost on each query.
+        Note: Not thread-safe - use separate RLM instances for concurrent queries.
+        """
+        if self._interpreter is not None:
+            return self._interpreter
+
+        if self._persistent_interpreter is None:
+            try:
+                from dspy.primitives.python_interpreter import PythonInterpreter
+                self._persistent_interpreter = PythonInterpreter()
+                _logger.debug("Created persistent interpreter for reuse")
+            except Exception as e:
+                _logger.warning("Failed to create persistent interpreter: %s", e)
+                return None
+
+        return self._persistent_interpreter
+
+    def _create_rlm(self, use_persistent_interpreter: bool = True) -> dspy.RLM:
+        """Create the dspy.RLM instance.
+
+        Args:
+            use_persistent_interpreter: If True, reuse interpreter across calls
+                to avoid ~3s Pyodide startup cost. Set False for thread-safe usage.
+        """
         kwargs: dict[str, Any] = {
             "signature": self._signature,
             "max_iterations": self.config.max_iterations,
@@ -719,11 +745,43 @@ Use structural tools for exact lookups, semantic search for exploratory queries.
             "sub_lm": self._create_sub_lm(),
         }
 
-        # Add custom interpreter if provided
-        if self._interpreter is not None:
+        # Use persistent interpreter for faster sequential queries
+        if use_persistent_interpreter:
+            interpreter = self._get_or_create_interpreter()
+            if interpreter is not None:
+                kwargs["interpreter"] = interpreter
+        elif self._interpreter is not None:
             kwargs["interpreter"] = self._interpreter
 
         return dspy.RLM(**kwargs)
+
+    def shutdown(self) -> None:
+        """Shutdown the RLM instance and release resources.
+
+        Call this when done using the RLM to clean up the persistent interpreter.
+        """
+        if self._persistent_interpreter is not None:
+            try:
+                self._persistent_interpreter.shutdown()
+            except Exception as e:
+                _logger.debug("Error shutting down interpreter: %s", e)
+            self._persistent_interpreter = None
+
+    def __del__(self):
+        """Cleanup on garbage collection."""
+        try:
+            self.shutdown()
+        except Exception:
+            pass
+
+    def __enter__(self):
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - shutdown interpreter."""
+        self.shutdown()
+        return False
 
     def load_context(
         self,
