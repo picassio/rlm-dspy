@@ -110,9 +110,11 @@ When analyzing large codebases, RLM automatically uses built-in tools for **100%
 ```bash
 # Install Deno
 curl -fsSL https://deno.land/install.sh | sh
-# Add to PATH
+# Add to PATH (add to your shell profile for persistence)
 export PATH="$HOME/.deno/bin:$PATH"
 ```
+
+> ⚠️ **Important**: Without Deno in PATH, code execution fails and LLM outputs hallucinated results.
 
 ### Install RLM-DSPy
 
@@ -125,7 +127,22 @@ Or with uv:
 uv pip install rlm-dspy
 ```
 
-**Optional: Install ripgrep for fast regex search:**
+### Optional Dependencies
+
+```bash
+# Local embeddings (no API key required)
+pip install rlm-dspy[local]
+
+# LSP-powered code intelligence  
+pip install rlm-dspy[lsp]
+
+# All optional features
+pip install rlm-dspy[all]
+```
+
+### External Tools (Optional)
+
+**ripgrep** - Fast regex search (highly recommended):
 ```bash
 # macOS
 brew install ripgrep
@@ -135,6 +152,21 @@ sudo apt install ripgrep
 
 # Or via cargo
 cargo install ripgrep
+```
+
+**LSP Servers** - For IDE-quality code intelligence (optional):
+```bash
+# Python (pyright)
+npm install -g pyright
+
+# TypeScript/JavaScript
+npm install -g typescript-language-server typescript
+
+# Rust
+rustup component add rust-analyzer
+
+# Go
+go install golang.org/x/tools/gopls@latest
 ```
 
 Tree-sitter is included by default for AST-based code analysis.
@@ -348,18 +380,39 @@ env_file: ~/.env
 
 ### Environment Variables
 
+**Core Settings:**
+
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `RLM_API_KEY` | - | API key (or use provider-specific) |
 | `RLM_MODEL` | `openai/gpt-4o-mini` | Model to use |
 | `RLM_SUB_MODEL` | same as RLM_MODEL | Model for sub-LLM calls |
 | `RLM_API_BASE` | - | Custom API endpoint (optional) |
-| `RLM_MAX_ITERATIONS` | `20` | Max REPL iterations |
+| `RLM_MAX_ITERATIONS` | `20` | Max REPL iterations (min: 20) |
 | `RLM_MAX_LLM_CALLS` | `50` | Max sub-LLM calls per query |
 | `RLM_MAX_OUTPUT_CHARS` | `100000` | Max chars in REPL output |
 | `RLM_MAX_WORKERS` | `8` | Parallel workers for batch ops |
 | `RLM_MAX_BUDGET` | `1.0` | Maximum cost in USD |
 | `RLM_MAX_TIMEOUT` | `300` | Maximum time in seconds |
+
+**Embedding Settings:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RLM_EMBEDDING_MODEL` | `openai/text-embedding-3-small` | Embedding model |
+| `RLM_EMBEDDING_API_KEY` | - | Embedding API key (if different) |
+| `RLM_EMBEDDING_API_BASE` | - | Custom embedding endpoint |
+| `RLM_EMBEDDING_BATCH_SIZE` | `100` | Embeddings per API call |
+| `RLM_INDEX_DIR` | `~/.rlm/indexes` | Index storage directory |
+
+**Debug/Feature Flags:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RLM_DEBUG` | `false` | Enable debug output |
+| `RLM_VERBOSE` | `false` | Enable verbose output |
+| `RLM_QUIET` | `false` | Suppress non-essential output |
+| `RLM_ALLOW_SHELL` | `false` | Enable shell tool (security risk) |
 
 ### Provider-Specific API Keys
 
@@ -1206,6 +1259,50 @@ print(metrics.get_summary())
 - `llm_call`
 - `validation`
 - `error`
+
+## Background Services
+
+### Index Daemon (Optional)
+
+The Index Daemon provides automatic index updates when files change. It's **optional** - indexes work fine without it, just need manual rebuilds.
+
+```bash
+# Start daemon (runs in background)
+rlm-dspy daemon start
+
+# Check status
+rlm-dspy daemon status
+
+# Stop daemon
+rlm-dspy daemon stop
+```
+
+See [Index Daemon](#index-daemon-auto-indexing) section for full details.
+
+### LSP Servers (Optional)
+
+For LSP-powered tools (`find_references`, `go_to_definition`, `get_type_info`), you need language servers running. RLM-DSPy manages them automatically via `solidlsp`, but they must be installed:
+
+| Language | Server | Install Command |
+|----------|--------|-----------------|
+| Python | pyright | `npm i -g pyright` |
+| TypeScript/JS | typescript-language-server | `npm i -g typescript-language-server typescript` |
+| Rust | rust-analyzer | `rustup component add rust-analyzer` |
+| Go | gopls | `go install golang.org/x/tools/gopls@latest` |
+
+If LSP tools return "(LSP not available)", install `solidlsp`:
+```bash
+pip install rlm-dspy[lsp]
+```
+
+### Summary: What Needs Manual Start
+
+| Service | Required? | When Needed |
+|---------|-----------|-------------|
+| **Deno** | ✅ Yes | Always - for sandboxed REPL |
+| **Index Daemon** | ❌ No | Only if you want auto-indexing |
+| **LSP Servers** | ❌ No | Only for LSP tools |
+| **ripgrep** | ❌ No | Only for `ripgrep` tool (fallback: grep) |
 
 ## Documentation
 

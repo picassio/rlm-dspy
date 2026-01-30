@@ -26,6 +26,10 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "pathspec>=0.12.0",
     "pyyaml>=6.0.0",
+    # NumPy for vector operations (embeddings, compression)
+    "numpy>=1.24.0",
+    # JSON repair for handling malformed LLM output
+    "json_repair>=0.30.0",
     # Tree-sitter for AST-based code indexing (100% accurate line numbers)
     "tree-sitter>=0.23.0",
     # Core languages
@@ -62,6 +66,15 @@ dev = [
 # For local embeddings (no API key required)
 local = [
     "sentence-transformers>=2.0.0",
+]
+# For LSP-powered code intelligence (go to definition, find references, etc.)
+lsp = [
+    "solidlsp>=0.1.0",
+]
+# All optional features
+all = [
+    "sentence-transformers>=2.0.0",
+    "solidlsp>=0.1.0",
 ]
 
 [project.scripts]
