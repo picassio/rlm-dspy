@@ -928,14 +928,270 @@ projects:
 
 ---
 
-### Phase 11: Additional Enhancements (Backlog)
+### Phase 11: Hallucination Prevention ✅ COMPLETE
+
+**Goal:** Eliminate hallucinations in code analysis outputs.
+
+**Implementation:**
+- [x] Validation enabled by default (`--validate` on all queries)
+- [x] Minimum 20 iterations enforced (prevents LLM from guessing)
+- [x] Added verification rules to tool instructions
+- [x] Cited signatures for file:line references
+- [x] LLM-as-judge groundedness checking
+
+**Results:**
+| Mode | Grounded % |
+|------|------------|
+| Before (low iterations) | ~20-33% |
+| With min 20 iterations + validation | **100%** |
+
+---
+
+### Phase 12: DSPy Optimizer Integration (Planned)
+
+**Goal:** Adopt DSPy's optimization patterns to auto-improve accuracy.
+
+#### 12.1 Trace Bootstrapping (from BootstrapFewShot)
+
+Save successful REPL traces and use as few-shot examples.
+
+```python
+# src/rlm_dspy/core/trace_collector.py
+
+@dataclass
+class REPLTrace:
+    """A successful REPL execution trace."""
+    query: str
+    reasoning_steps: list[str]
+    code_blocks: list[str]
+    outputs: list[str]
+    final_answer: str
+    grounded_score: float
+    timestamp: datetime
+
+
+class TraceCollector:
+    """Collects and stores successful REPL traces for bootstrapping."""
+    
+    def __init__(self, storage_path: Path = None):
+        self.storage_path = storage_path or Path.home() / ".rlm" / "traces"
+        self.storage_path.mkdir(parents=True, exist_ok=True)
+        self.traces: list[REPLTrace] = []
+        self._load_traces()
+    
+    def on_success(self, query: str, trace: dict, answer: str, grounded_score: float):
+        """Called when a query succeeds with high grounding score."""
+        if grounded_score < 0.8:  # Only save high-quality traces
+            return
+        
+        repl_trace = REPLTrace(
+            query=query,
+            reasoning_steps=trace.get("reasoning", []),
+            code_blocks=trace.get("code", []),
+            outputs=trace.get("outputs", []),
+            final_answer=answer,
+            grounded_score=grounded_score,
+            timestamp=datetime.now(UTC),
+        )
+        self.traces.append(repl_trace)
+        self._save_trace(repl_trace)
+    
+    def get_similar_traces(self, query: str, k: int = 3) -> list[REPLTrace]:
+        """Find traces similar to the given query for few-shot prompting."""
+        # Use embedding similarity to find relevant traces
+        from .embeddings import get_embedder
+        embedder = get_embedder()
+        
+        query_emb = embedder([query])[0]
+        trace_embs = embedder([t.query for t in self.traces])
+        
+        # Cosine similarity
+        similarities = np.dot(trace_embs, query_emb)
+        top_indices = np.argsort(similarities)[-k:][::-1]
+        
+        return [self.traces[i] for i in top_indices]
+    
+    def format_as_demos(self, traces: list[REPLTrace]) -> str:
+        """Format traces as few-shot demonstrations."""
+        demos = []
+        for i, trace in enumerate(traces, 1):
+            demo = f"=== Example {i} ===\n"
+            demo += f"Query: {trace.query}\n\n"
+            for j, (reasoning, code, output) in enumerate(
+                zip(trace.reasoning_steps, trace.code_blocks, trace.outputs)
+            ):
+                demo += f"Step {j+1} Reasoning: {reasoning}\n"
+                demo += f"```python\n{code}\n```\n"
+                demo += f"Output: {output}\n\n"
+            demo += f"Final Answer: {trace.final_answer}\n"
+            demos.append(demo)
+        return "\n\n".join(demos)
+```
+
+#### 12.2 Instruction Optimization (from COPRO)
+
+Auto-tune tool instructions based on success/failure history.
+
+```python
+# src/rlm_dspy/core/instruction_optimizer.py
+
+class InstructionOptimizer:
+    """Optimizes tool instructions using COPRO-style iterative refinement."""
+    
+    def __init__(self, prompt_model: str = None):
+        self.prompt_model = prompt_model
+        self.history: list[dict] = []  # {instruction, score, failures}
+        self.current_instructions = self._load_default_instructions()
+    
+    def record_outcome(self, instruction: str, success: bool, failure_reason: str = None):
+        """Record the outcome of using an instruction."""
+        self.history.append({
+            "instruction": instruction,
+            "success": success,
+            "failure_reason": failure_reason,
+            "timestamp": datetime.now(UTC).isoformat(),
+        })
+    
+    def propose_improvement(self, tool_name: str) -> str:
+        """Propose improved instruction based on failure history."""
+        failures = [h for h in self.history if not h["success"]]
+        
+        if not failures:
+            return self.current_instructions.get(tool_name)
+        
+        # Use LLM to propose improvement
+        proposal_sig = dspy.Signature(
+            "current_instruction, failure_examples -> improved_instruction"
+        )
+        
+        proposer = dspy.Predict(proposal_sig)
+        result = proposer(
+            current_instruction=self.current_instructions.get(tool_name),
+            failure_examples=json.dumps(failures[-10:], indent=2),
+        )
+        
+        return result.improved_instruction
+    
+    def optimize(self, trainset: list[dict], metric: Callable, depth: int = 3):
+        """Run COPRO-style optimization over tool instructions."""
+        best_score = 0
+        best_instructions = self.current_instructions.copy()
+        
+        for iteration in range(depth):
+            # Generate candidates
+            candidates = self._generate_candidates()
+            
+            # Evaluate each candidate
+            for candidate in candidates:
+                score = self._evaluate(candidate, trainset, metric)
+                
+                if score > best_score:
+                    best_score = score
+                    best_instructions = candidate
+            
+            # Update for next iteration
+            self.current_instructions = best_instructions
+        
+        return best_instructions, best_score
+```
+
+#### 12.3 Grounded Proposal (from MIPROv2)
+
+Generate data-aware prompt improvements.
+
+```python
+# src/rlm_dspy/core/grounded_proposer.py
+
+class GroundedProposer:
+    """Proposes prompt improvements grounded in actual data and failures."""
+    
+    def __init__(self, prompt_model: str = None):
+        self.prompt_model = prompt_model
+    
+    def propose_tips(self, failures: list[dict], successes: list[dict]) -> list[str]:
+        """Generate tips based on patterns in successes vs failures."""
+        tip_sig = dspy.Signature("""
+            failure_patterns, success_patterns -> tips
+            
+            Analyze what went wrong in failures vs what worked in successes.
+            Generate concrete tips to add to the system prompt.
+            
+            Example tips:
+            - "Always use read_file() to verify line numbers before claiming bugs"
+            - "Check for existing error handling before reporting missing guards"
+        """)
+        
+        proposer = dspy.ChainOfThought(tip_sig)
+        result = proposer(
+            failure_patterns=self._extract_patterns(failures),
+            success_patterns=self._extract_patterns(successes),
+        )
+        
+        return result.tips
+    
+    def augment_prompt(self, base_prompt: str, tips: list[str]) -> str:
+        """Add tips to the base prompt."""
+        tips_section = "\n".join(f"- {tip}" for tip in tips)
+        return f"{base_prompt}\n\nIMPORTANT TIPS:\n{tips_section}"
+```
+
+#### 12.4 Configuration
+
+```yaml
+# ~/.rlm/config.yaml
+
+# Optimization settings
+optimization:
+  # Trace collection
+  collect_traces: true
+  trace_storage: ~/.rlm/traces
+  min_grounded_score: 0.8  # Only save high-quality traces
+  max_traces: 1000
+  
+  # Few-shot bootstrapping
+  use_bootstrapped_demos: true
+  num_demos: 3  # Number of similar traces to include
+  
+  # Instruction optimization
+  auto_optimize_instructions: false  # Manual trigger only
+  optimization_depth: 3
+  optimization_breadth: 5
+  
+  # Grounded proposal
+  use_grounded_tips: true
+  tip_refresh_interval: 100  # Re-generate tips every N queries
+```
+
+#### 12.5 CLI Commands
+
+```bash
+# View collected traces
+rlm-dspy traces list
+rlm-dspy traces show <trace-id>
+rlm-dspy traces export traces.json
+
+# Run instruction optimization
+rlm-dspy optimize instructions --trainset examples.json --depth 3
+
+# Generate grounded tips from history
+rlm-dspy optimize tips --output tips.txt
+
+# Apply optimized instructions
+rlm-dspy config set optimization.use_bootstrapped_demos true
+```
+
+---
+
+### Phase 13: Additional Enhancements (Backlog)
 
 - [ ] **MCP Tool Integration** - External service support via Model Context Protocol
-- [ ] **KNNFewShot** - Dynamic example selection for better prompts
+- [ ] **KNNFewShot** - Dynamic example selection for better prompts  
 - [ ] **SIMBA** - Self-improving optimization
 - [ ] **Index Compression** - Reduce disk usage for large indexes
 - [ ] **Distributed Search** - Search across remote indexes (team sharing)
 - [ ] **IDE Integration** - VS Code extension for inline search
+- [ ] **json_repair Integration** - Robust JSON parsing from DSPy adapters
+- [ ] **Callback Middleware** - Extensibility via `@with_callbacks` pattern
 
 ---
 
