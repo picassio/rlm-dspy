@@ -226,6 +226,116 @@ def check_for_exposed_secrets(data: dict[str, Any], source: str = "config") -> N
         )
 
 
+# =============================================================================
+# Text-based secret sanitization (for LLM output, logs, etc.)
+# =============================================================================
+
+import re
+
+# Pre-compiled regex patterns for common secret formats
+_SECRET_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r'sk-[a-zA-Z0-9]{20,}'), '[REDACTED_SK]'),  # OpenAI style
+    (re.compile(r'sk-ant-[a-zA-Z0-9-]{20,}'), '[REDACTED_ANTHROPIC]'),  # Anthropic
+    (re.compile(r'sk-or-v1-[a-zA-Z0-9]{20,}'), '[REDACTED_OPENROUTER]'),  # OpenRouter
+    (re.compile(r'gsk_[a-zA-Z0-9]{20,}'), '[REDACTED_GROQ]'),  # Groq
+    (re.compile(r'AIza[a-zA-Z0-9_-]{35}'), '[REDACTED_GOOGLE]'),  # Google
+]
+
+# Cache for environment secrets and compiled patterns
+_cached_env_secrets: list[str] | None = None
+_secret_pattern_cache: dict[frozenset, re.Pattern] = {}
+
+
+def _get_cached_env_secrets() -> list[str]:
+    """Get secret values from environment (cached)."""
+    global _cached_env_secrets
+    if _cached_env_secrets is None:
+        # Get values for common secret env vars
+        secret_env_vars = [
+            "RLM_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", "GROQ_API_KEY",
+            "GEMINI_API_KEY", "HF_TOKEN",
+        ]
+        _cached_env_secrets = [
+            os.environ.get(key, "")
+            for key in secret_env_vars
+            if os.environ.get(key) and len(os.environ.get(key, "")) > 8
+        ]
+    return _cached_env_secrets
+
+
+def _get_secret_pattern(secrets: list[str]) -> re.Pattern | None:
+    """Get or create cached regex pattern for secrets."""
+    if not secrets:
+        return None
+    cache_key = frozenset(secrets)
+    if cache_key not in _secret_pattern_cache:
+        sorted_secrets = sorted(secrets, key=len, reverse=True)
+        _secret_pattern_cache[cache_key] = re.compile(
+            "|".join(re.escape(s) for s in sorted_secrets)
+        )
+    return _secret_pattern_cache[cache_key]
+
+
+def sanitize_text(text: str, extra_secrets: list[str] | None = None) -> str:
+    """Remove any leaked secrets from text.
+    
+    Scans for common secret patterns (API keys) and replaces them with masks.
+    Use this for sanitizing LLM output, logs, or any text that might contain secrets.
+    
+    Args:
+        text: Text to sanitize
+        extra_secrets: Additional secret values to mask (e.g., config.api_key)
+    
+    Returns:
+        Sanitized text with secrets masked
+    """
+    if not text:
+        return text
+    
+    result = text
+    
+    # Collect all literal secrets to mask
+    secrets_to_mask = []
+    if extra_secrets:
+        secrets_to_mask.extend(s for s in extra_secrets if s and len(s) >= 4)
+    secrets_to_mask.extend(_get_cached_env_secrets())
+    
+    # Single-pass replacement using cached regex pattern
+    if secrets_to_mask:
+        pattern = _get_secret_pattern(secrets_to_mask)
+        if pattern:
+            result = pattern.sub("[REDACTED]", result)
+    
+    # Apply pre-compiled regex patterns for secret formats
+    for pattern, replacement in _SECRET_PATTERNS:
+        result = pattern.sub(replacement, result)
+    
+    return result
+
+
+def sanitize_value(value: Any, extra_secrets: list[str] | None = None) -> Any:
+    """Recursively sanitize a value, handling nested structures.
+    
+    Args:
+        value: Any value (str, dict, list, etc.)
+        extra_secrets: Additional secret values to mask
+    
+    Returns:
+        Sanitized value with secrets masked in all strings
+    """
+    if isinstance(value, str):
+        return sanitize_text(value, extra_secrets)
+    elif isinstance(value, dict):
+        return {k: sanitize_value(v, extra_secrets) for k, v in value.items()}
+    elif isinstance(value, list):
+        return [sanitize_value(item, extra_secrets) for item in value]
+    elif isinstance(value, tuple):
+        return tuple(sanitize_value(item, extra_secrets) for item in value)
+    else:
+        return value
+
+
 def get_api_key(
     key_name: str = "api_key",
     env_vars: list[str] | None = None,

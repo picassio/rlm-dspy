@@ -18,7 +18,7 @@ from typing import Any, Callable, TypeVar
 
 import dspy
 
-from .secrets import COMMON_SECRETS
+from .secrets import sanitize_text, sanitize_value
 
 _logger = logging.getLogger(__name__)
 
@@ -32,106 +32,9 @@ def _env(key: str, default: str) -> str:
     return os.environ.get(key, default)
 
 
-# Pre-compiled regex patterns for secret detection (compiled once at import)
-_SECRET_PATTERNS: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r'sk-[a-zA-Z0-9]{20,}'), '[REDACTED_SK]'),  # OpenAI style
-    (re.compile(r'sk-ant-[a-zA-Z0-9-]{20,}'), '[REDACTED_ANTHROPIC]'),  # Anthropic
-    (re.compile(r'sk-or-v1-[a-zA-Z0-9]{20,}'), '[REDACTED_OPENROUTER]'),  # OpenRouter
-    (re.compile(r'gsk_[a-zA-Z0-9]{20,}'), '[REDACTED_GROQ]'),  # Groq
-    (re.compile(r'AIza[a-zA-Z0-9_-]{35}'), '[REDACTED_GOOGLE]'),  # Google
-]
-
-
-# Cache resolved secret values (lazy initialization)
-_cached_env_secrets: list[str] | None = None
-
-# Cache compiled regex patterns for secret masking
-# Key: frozenset of secrets, Value: compiled regex
-_secret_pattern_cache: dict[frozenset, re.Pattern] = {}
-
-
-def _get_secret_pattern(secrets: list[str]) -> re.Pattern | None:
-    """Get or create cached regex pattern for secrets."""
-    if not secrets:
-        return None
-
-    # Create hashable key
-    cache_key = frozenset(secrets)
-
-    if cache_key not in _secret_pattern_cache:
-        # Sort by length descending to match longer secrets first
-        sorted_secrets = sorted(secrets, key=len, reverse=True)
-        _secret_pattern_cache[cache_key] = re.compile(
-            "|".join(re.escape(s) for s in sorted_secrets)
-        )
-
-    return _secret_pattern_cache[cache_key]
-
-
-def _get_env_secrets() -> list[str]:
-    """Get secret values from environment (cached for performance)."""
-    global _cached_env_secrets
-    if _cached_env_secrets is None:
-        _cached_env_secrets = [
-            os.environ.get(key, "")
-            for key in COMMON_SECRETS
-            if os.environ.get(key) and len(os.environ.get(key, "")) > 8
-        ]
-    return _cached_env_secrets
-
-
-def _sanitize_secrets(text: str, extra_secrets: list[str] | None = None) -> str:
-    """Remove any leaked secrets from output text.
-
-    Scans for common secret patterns and replaces them with masks.
-    This prevents API keys from appearing in logs, trajectory, or answers.
-
-    Uses single-pass regex for O(N) performance instead of O(S*N).
-
-    Args:
-        text: Text to sanitize
-        extra_secrets: Additional secret values to mask (e.g., config.api_key)
-    """
-    if not text:
-        return text
-
-    result = text
-
-    # Collect all literal secrets to mask
-    secrets_to_mask = []
-
-    # Add extra secrets (min length 4 to avoid false positives)
-    if extra_secrets:
-        secrets_to_mask.extend(s for s in extra_secrets if s and len(s) >= 4)
-
-    # Add environment secrets (cached)
-    secrets_to_mask.extend(_get_env_secrets())
-
-    # Single-pass replacement using cached regex pattern
-    if secrets_to_mask:
-        pattern = _get_secret_pattern(secrets_to_mask)
-        if pattern:
-            result = pattern.sub("[REDACTED]", result)
-
-    # Apply pre-compiled regex patterns for secret formats
-    for pattern, replacement in _SECRET_PATTERNS:
-        result = pattern.sub(replacement, result)
-
-    return result
-
-
-def _sanitize_value(value: Any, extra_secrets: list[str] | None = None) -> Any:
-    """Recursively sanitize a value, handling nested structures."""
-    if isinstance(value, str):
-        return _sanitize_secrets(value, extra_secrets)
-    elif isinstance(value, dict):
-        return {k: _sanitize_value(v, extra_secrets) for k, v in value.items()}
-    elif isinstance(value, list):
-        return [_sanitize_value(item, extra_secrets) for item in value]
-    elif isinstance(value, tuple):
-        return tuple(_sanitize_value(item, extra_secrets) for item in value)
-    else:
-        return value
+# Aliases for backward compatibility - now use centralized secrets module
+_sanitize_secrets = sanitize_text
+_sanitize_value = sanitize_value
 
 
 def _sanitize_trajectory(trajectory: list, extra_secrets: list[str] | None = None) -> list:
@@ -367,6 +270,25 @@ class RLMConfig:
     max_workers: int = field(
         default_factory=lambda: _env_get(
             "RLM_MAX_WORKERS", _get_user_config_default("max_workers", 8)
+        )
+    )
+
+    # Validation settings
+    validate: bool = field(
+        default_factory=lambda: _env_get(
+            "RLM_VALIDATE", _get_user_config_default("validate", True)
+        )
+    )
+
+    # Callback settings
+    enable_logging: bool = field(
+        default_factory=lambda: _env_get(
+            "RLM_ENABLE_LOGGING", _get_user_config_default("enable_logging", False)
+        )
+    )
+    enable_metrics: bool = field(
+        default_factory=lambda: _env_get(
+            "RLM_ENABLE_METRICS", _get_user_config_default("enable_metrics", False)
         )
     )
 
@@ -739,6 +661,37 @@ class RLM:
 
         # Tracking
         self._start_time: float | None = None
+        self._metrics_callback: Any = None  # MetricsCallback if enabled
+
+        # Register optional callbacks
+        self._setup_callbacks()
+
+    def _setup_callbacks(self) -> None:
+        """Register optional callbacks based on config."""
+        from .callbacks import get_callback_manager, LoggingCallback, MetricsCallback
+        
+        manager = get_callback_manager()
+        
+        if self.config.enable_logging:
+            import logging
+            level = logging.DEBUG if self.config.verbose else logging.INFO
+            manager.register(LoggingCallback(level=level))
+            _logger.debug("Registered LoggingCallback")
+        
+        if self.config.enable_metrics:
+            self._metrics_callback = MetricsCallback()
+            manager.register(self._metrics_callback)
+            _logger.debug("Registered MetricsCallback")
+
+    def get_metrics(self) -> dict[str, Any] | None:
+        """Get collected metrics if metrics collection is enabled.
+        
+        Returns:
+            Metrics summary dict or None if metrics not enabled
+        """
+        if self._metrics_callback:
+            return self._metrics_callback.get_summary()
+        return None
 
     def _wrap_tools_with_counter(self, tools: dict[str, Callable]) -> dict[str, Callable]:
         """Wrap tools to count invocations.
@@ -1117,6 +1070,20 @@ ANTI-PATTERNS:
             raise ValueError("Query cannot be empty")
         if not context or not context.strip():
             raise ValueError("Context cannot be empty")
+
+        # Run preflight validation if enabled
+        if self.config.validate:
+            from .validation import preflight_check
+            result = preflight_check(
+                api_key_required=True,
+                model=self.config.model,
+                budget=self.config.max_budget,
+                context=context,
+                check_network=False,  # Skip network check for speed
+            )
+            if not result.passed:
+                errors = [e.message for e in result.errors]
+                raise ValueError(f"Preflight check failed: {'; '.join(errors)}")
 
         # Rebuild RLM if tools were added (lazy rebuild)
         if self._rlm_dirty:
