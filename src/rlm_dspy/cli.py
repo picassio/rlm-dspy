@@ -1543,6 +1543,88 @@ def index_search(
         console.print()
 
 
+@index_app.command("compress")
+def index_compress(
+    path: Annotated[
+        Optional[Path],
+        typer.Argument(help="Project path to compress (or all if not specified)"),
+    ] = None,
+    decompress: Annotated[
+        bool,
+        typer.Option("--decompress", "-d", help="Decompress instead of compress"),
+    ] = False,
+) -> None:
+    """Compress indexes to reduce disk usage.
+
+    Uses float16 quantization + gzip for ~4x compression ratio.
+
+    Examples:
+        rlm-dspy index compress           # Compress all indexes
+        rlm-dspy index compress .         # Compress current project
+        rlm-dspy index compress -d .      # Decompress current project
+    """
+    from .core.index_compression import (
+        compress_index,
+        decompress_index,
+        get_index_size,
+        is_compressed,
+        CompressionStats,
+    )
+    from .core.project_registry import get_project_registry
+
+    registry = get_project_registry()
+
+    if path:
+        # Single project
+        projects = [(path.resolve(), registry.get_index_path(path.resolve()))]
+    else:
+        # All projects
+        projects = [
+            (Path(p.path), registry.get_index_path(Path(p.path)))
+            for p in registry.list_projects()
+        ]
+
+    if not projects:
+        console.print("[dim]No indexed projects found[/dim]")
+        return
+
+    total_original = 0
+    total_compressed = 0
+
+    for project_path, index_path in projects:
+        if not index_path.exists():
+            continue
+
+        name = project_path.name
+
+        if decompress:
+            if not is_compressed(index_path):
+                console.print(f"[dim]{name}: not compressed[/dim]")
+                continue
+
+            console.print(f"[dim]Decompressing {name}...[/dim]")
+            count = decompress_index(index_path)
+            console.print(f"[green]✓[/green] {name}: decompressed {count} files")
+        else:
+            if is_compressed(index_path):
+                console.print(f"[dim]{name}: already compressed[/dim]")
+                continue
+
+            original_size = get_index_size(index_path)
+            console.print(f"[dim]Compressing {name}...[/dim]")
+            stats = compress_index(index_path)
+            
+            total_original += stats.original_size
+            total_compressed += stats.compressed_size
+            
+            console.print(f"[green]✓[/green] {name}: {stats}")
+
+    if not decompress and total_original > 0:
+        total_saved = total_original - total_compressed
+        total_ratio = total_original / total_compressed if total_compressed > 0 else 1
+        console.print(f"\n[bold]Total:[/bold] {CompressionStats._format_size(total_saved)} saved ({total_ratio:.1f}x ratio)")
+
+
 # =============================================================================
 # Project Commands (for multi-project management)
 # =============================================================================

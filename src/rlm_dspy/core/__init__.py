@@ -78,6 +78,27 @@ _LAZY_IMPORTS = {
     "repair_json": ".json_utils",
     "extract_json": ".json_utils",
     "ensure_json_serializable": ".json_utils",
+    # Index Compression (lightweight)
+    "compress_index": ".index_compression",
+    "decompress_index": ".index_compression",
+    "compress_numpy_array": ".index_compression",
+    "load_numpy_array": ".index_compression",
+    "compress_json": ".index_compression",
+    "load_json": ".index_compression",
+    "get_index_size": ".index_compression",
+    "is_compressed": ".index_compression",
+    "CompressionStats": ".index_compression",
+    # Callbacks (lightweight)
+    "Callback": ".callbacks",
+    "CallbackContext": ".callbacks",
+    "CallbackManager": ".callbacks",
+    "LoggingCallback": ".callbacks",
+    "MetricsCallback": ".callbacks",
+    "ProgressCallback": ".callbacks",
+    "get_callback_manager": ".callbacks",
+    "clear_callback_manager": ".callbacks",
+    "with_callbacks": ".callbacks",
+    "emit_event": ".callbacks",
 }
 
 
