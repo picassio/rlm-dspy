@@ -923,6 +923,10 @@ def setup(
         Optional[float],
         typer.Option("--budget", "-b", help="Default max budget in USD"),
     ] = None,
+    install_lsp: Annotated[
+        bool,
+        typer.Option("--install-lsp/--no-lsp", help="Install all available LSP servers"),
+    ] = False,
     interactive: Annotated[
         bool,
         typer.Option("--interactive/--no-interactive", "-i", help="Interactive setup wizard"),
@@ -937,6 +941,7 @@ def setup(
         rlm-dspy setup                           # Interactive wizard
         rlm-dspy setup --env-file ~/.claude/.env # Set env file location
         rlm-dspy setup --model deepseek/deepseek-chat --budget 0.50
+        rlm-dspy setup --install-lsp             # Also install all LSP servers
     """
     from .core.rlm import PROVIDER_API_KEYS
     from .core.user_config import (
@@ -1067,6 +1072,36 @@ def setup(
         console.print("[dim]Try: rlm-dspy ask 'What does this code do?' ./src[/dim]")
     else:
         console.print(f"\n[yellow]⚠ Set {status['api_key_env_var']} to complete setup.[/yellow]")
+    
+    # Install LSP servers if requested
+    if install_lsp:
+        console.print("\n[bold]Installing LSP servers...[/bold]")
+        from .core.lsp_installer import SERVERS, install_server, check_requirements
+        
+        success = 0
+        failed = 0
+        skipped = 0
+        
+        for server_id, info in SERVERS.items():
+            reqs_met, missing = check_requirements(server_id)
+            if not reqs_met:
+                console.print(f"  [dim]○ {info.name} - skipped (missing: {', '.join(missing)})[/dim]")
+                skipped += 1
+                continue
+            
+            console.print(f"  Installing {info.name}...", end=" ")
+            if install_server(server_id):
+                console.print("[green]✓[/green]")
+                success += 1
+            else:
+                console.print("[red]✗[/red]")
+                failed += 1
+        
+        console.print(f"\n[green]LSP servers installed: {success}[/green]")
+        if failed:
+            console.print(f"[red]Failed: {failed}[/red]")
+        if skipped:
+            console.print(f"[dim]Skipped (missing requirements): {skipped}[/dim]")
 
 
 @app.command()

@@ -202,8 +202,10 @@ SERVERS: dict[str, ServerInfo] = {
     "ruby-lsp": ServerInfo(
         name="Ruby LSP",
         languages=["ruby"],
-        check_cmd=["ruby-lsp", "--version"],
+        check_cmd=lambda: shutil.which("ruby-lsp") is not None,
         install_methods={
+            "linux": "sudo gem install ruby-lsp || gem install --user-install ruby-lsp",
+            "darwin": "gem install ruby-lsp",
             "any": "gem install ruby-lsp",
         },
         server_class="rlm_dspy.vendor.solidlsp.language_servers.ruby_lsp.RubyLsp",
@@ -213,8 +215,10 @@ SERVERS: dict[str, ServerInfo] = {
     "solargraph": ServerInfo(
         name="Solargraph",
         languages=["ruby"],
-        check_cmd=["solargraph", "--version"],
+        check_cmd=lambda: shutil.which("solargraph") is not None,
         install_methods={
+            "linux": "sudo gem install solargraph || gem install --user-install solargraph",
+            "darwin": "gem install solargraph",
             "any": "gem install solargraph",
         },
         server_class="rlm_dspy.vendor.solidlsp.language_servers.solargraph.Solargraph",
@@ -282,9 +286,10 @@ SERVERS: dict[str, ServerInfo] = {
     "haskell-language-server": ServerInfo(
         name="Haskell Language Server",
         languages=["haskell"],
-        check_cmd=["haskell-language-server-wrapper", "--version"],
+        check_cmd=lambda: shutil.which("haskell-language-server-wrapper") is not None or 
+                         (Path.home() / ".ghcup" / "bin" / "haskell-language-server-wrapper").exists(),
         install_methods={
-            "any": "ghcup install hls",
+            "any": "export PATH=\"$HOME/.ghcup/bin:$PATH\" && ghcup install hls",
         },
         server_class="rlm_dspy.vendor.solidlsp.language_servers.haskell_language_server.HaskellLanguageServer",
         requires=[],  # ghcup handles installation
@@ -442,6 +447,17 @@ def install_server(server_id: str, force: bool = False) -> bool:
         # Ensure LSP install directory exists
         LSP_INSTALL_DIR.mkdir(parents=True, exist_ok=True)
         
+        # Set up environment with common tool paths
+        env = os.environ.copy()
+        extra_paths = [
+            str(Path.home() / ".ghcup" / "bin"),  # Haskell
+            str(Path.home() / ".local" / "share" / "coursier" / "bin"),  # Scala
+            str(Path.home() / ".cargo" / "bin"),  # Rust
+            str(Path.home() / ".local" / "bin"),  # User-installed tools
+            "/usr/local/bin",
+        ]
+        env["PATH"] = ":".join(extra_paths) + ":" + env.get("PATH", "")
+        
         # Run install command
         result = subprocess.run(
             cmd,
@@ -449,6 +465,7 @@ def install_server(server_id: str, force: bool = False) -> bool:
             capture_output=True,
             text=True,
             timeout=300,  # 5 minute timeout
+            env=env,
         )
         
         if result.returncode == 0:
