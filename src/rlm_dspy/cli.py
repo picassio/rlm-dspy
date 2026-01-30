@@ -1575,13 +1575,25 @@ def index_compress(
     registry = get_project_registry()
 
     if path:
-        # Single project
-        projects = [(path.resolve(), registry.get_index_path(path.resolve()))]
+        # Single project - find by path
+        resolved = path.resolve()
+        # Find project by matching path
+        project = None
+        for p in registry.list():
+            if Path(p.path).resolve() == resolved:
+                project = p
+                break
+        if project:
+            projects = [(resolved, registry.get_index_path(project.name))]
+        else:
+            console.print(f"[yellow]Project not found in registry: {path}[/yellow]")
+            console.print("[dim]Use 'rlm-dspy index build' first[/dim]")
+            return
     else:
         # All projects
         projects = [
-            (Path(p.path), registry.get_index_path(Path(p.path)))
-            for p in registry.list_projects()
+            (Path(p.path), registry.get_index_path(p.name))
+            for p in registry.list()
         ]
 
     if not projects:
