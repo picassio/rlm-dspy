@@ -8,6 +8,7 @@ requirements for large codebases.
 import gzip
 import json
 import logging
+import pickle
 import shutil
 from dataclasses import dataclass
 from pathlib import Path

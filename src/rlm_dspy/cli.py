@@ -36,6 +36,50 @@ app = typer.Typer(
 console = Console()
 
 
+# Common CLI option factories to reduce duplication
+def _opt_model() -> Annotated[Optional[str], typer.Option]:
+    return Annotated[
+        Optional[str],
+        typer.Option("--model", "-m", help="Model to use for reasoning"),
+    ]
+
+def _opt_sub_model() -> Annotated[Optional[str], typer.Option]:
+    return Annotated[
+        Optional[str],
+        typer.Option("--sub-model", "-s", help="Model for llm_query() calls (cheaper)"),
+    ]
+
+def _opt_budget() -> Annotated[Optional[float], typer.Option]:
+    return Annotated[
+        Optional[float],
+        typer.Option("--budget", "-b", help="Max budget in USD"),
+    ]
+
+def _opt_timeout() -> Annotated[Optional[float], typer.Option]:
+    return Annotated[
+        Optional[float],
+        typer.Option("--timeout", "-t", help="Max timeout in seconds"),
+    ]
+
+def _opt_verbose() -> Annotated[bool, typer.Option]:
+    return Annotated[
+        bool,
+        typer.Option("--verbose", "-v", help="Show detailed progress"),
+    ]
+
+def _opt_output_format() -> Annotated[Optional[str], typer.Option]:
+    return Annotated[
+        Optional[str],
+        typer.Option("--format", "-f", help="Output format: text, json, markdown"),
+    ]
+
+def _opt_output_file() -> Annotated[Optional[Path], typer.Option]:
+    return Annotated[
+        Optional[Path],
+        typer.Option("--output", "-o", help="Write output to file"),
+    ]
+
+
 # Type aliases for common options (use these in function signatures)
 ModelOpt = Annotated[Optional[str], typer.Option("--model", "-m", help="Model to use for reasoning")]
 SubModelOpt = Annotated[Optional[str], typer.Option("--sub-model", "-s", help="Model for llm_query() calls")]
