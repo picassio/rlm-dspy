@@ -25,11 +25,11 @@ class TestRLMConfig:
         """Test custom configuration values."""
         config = RLMConfig(
             model="test/model",
-            max_iterations=10,
+            max_iterations=25,
             max_budget=0.5,
         )
         assert config.model == "test/model"
-        assert config.max_iterations == 10
+        assert config.max_iterations == 25
         assert config.max_budget == 0.5
 
     def test_env_override(self):

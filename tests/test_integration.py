@@ -273,13 +273,13 @@ class TestRLMConfigIntegration:
         from rlm_dspy import RLM, RLMConfig
 
         config = RLMConfig(
-            max_iterations=5,
+            max_iterations=25,
             max_llm_calls=10,
         )
 
         rlm = RLM(config=config)
 
-        assert rlm.config.max_iterations == 5
+        assert rlm.config.max_iterations == 25
         assert rlm.config.max_llm_calls == 10
 
 

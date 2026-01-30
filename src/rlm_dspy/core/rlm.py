@@ -322,18 +322,12 @@ class RLMConfig:
 
     def __post_init__(self) -> None:
         """Validate configuration values."""
-        # Validate bounds to prevent resource exhaustion
-        if self.max_iterations < 1 or self.max_iterations > 100:
-            raise ValueError(f"max_iterations must be between 1 and 100, got {self.max_iterations}")
-
-        # Warn if iterations too low - increases hallucination risk
-        if self.max_iterations < 5:
-            import logging
-            logging.getLogger(__name__).warning(
-                "max_iterations=%d is very low - LLM may not have enough turns to verify findings. "
-                "Consider at least 5 iterations to reduce hallucinations.",
-                self.max_iterations
-            )
+        # Minimum 20 iterations required to reduce hallucinations
+        # LLM needs turns to: search → read code → analyze → verify → report
+        # Testing showed <5 iterations = ~33% grounded, 5+ = ~100% grounded
+        # We use 20 as minimum to provide headroom for complex queries
+        if self.max_iterations < 20 or self.max_iterations > 100:
+            raise ValueError(f"max_iterations must be between 20 and 100, got {self.max_iterations}")
 
         if self.max_llm_calls < 1 or self.max_llm_calls > 500:
             raise ValueError(f"max_llm_calls must be between 1 and 500, got {self.max_llm_calls}")

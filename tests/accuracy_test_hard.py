@@ -68,7 +68,7 @@ HARD_TEST_CASES = [
 ]
 
 
-def run_rlm_query(question: str, max_iterations: int = 4) -> str:
+def run_rlm_query(question: str, max_iterations: int = 20) -> str:
     """Run an rlm-dspy query and return the answer."""
     cmd = [
         "rlm-dspy", "ask", question,
