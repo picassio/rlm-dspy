@@ -1192,8 +1192,6 @@ rlm-dspy config set optimization.use_bootstrapped_demos true
 
 #### Backlog (Lower Priority)
 - [ ] **SIMBA** - Self-improving optimization
-- [ ] **Distributed Search** - Search across remote indexes (team sharing)
-- [ ] **IDE Integration** - VS Code extension for inline search
 
 ---
 
