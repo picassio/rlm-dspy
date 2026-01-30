@@ -695,6 +695,9 @@ class RLM:
         self._interpreter = interpreter
         self._persistent_interpreter = None  # Lazy-created for reuse
         self._progress_callback = progress_callback
+        
+        # Tool call counter (reset per query)
+        self._tool_call_counts: dict[str, int] = {}
 
         # Initialize tools
         self._tools = tools.copy() if tools else {}
@@ -705,6 +708,9 @@ class RLM:
             for name, func in builtin.items():
                 if name not in self._tools:
                     self._tools[name] = func
+
+        # Wrap tools to count invocations
+        self._tools = self._wrap_tools_with_counter(self._tools)
 
         # Validate all tools
         self._validate_tools(self._tools)
@@ -733,6 +739,29 @@ class RLM:
 
         # Tracking
         self._start_time: float | None = None
+
+    def _wrap_tools_with_counter(self, tools: dict[str, Callable]) -> dict[str, Callable]:
+        """Wrap tools to count invocations.
+        
+        DSPy's callbacks don't track our interpreter tools, so we wrap them
+        to count how many times each tool is called during a query.
+        """
+        import functools
+        
+        wrapped = {}
+        for name, func in tools.items():
+            @functools.wraps(func)
+            def wrapper(*args, _tool_name=name, _original=func, **kwargs):
+                # Increment counter
+                self._tool_call_counts[_tool_name] = self._tool_call_counts.get(_tool_name, 0) + 1
+                # Call original
+                return _original(*args, **kwargs)
+            wrapped[name] = wrapper
+        return wrapped
+
+    def get_tool_call_counts(self) -> dict[str, int]:
+        """Get tool call counts from last query."""
+        return dict(self._tool_call_counts)
 
     def _get_optimized_instructions(self) -> str:
         """Get tool instructions from optimizer (with fallback to defaults).
@@ -1088,6 +1117,9 @@ ANTI-PATTERNS:
             self._rlm = self._create_rlm()
             self._rlm_dirty = False
 
+        # Reset tool call counters for this query
+        self._tool_call_counts.clear()
+        
         self._start_time = time.time()
 
         # Notify callback of start
@@ -1105,14 +1137,23 @@ ANTI-PATTERNS:
             with dspy.settings.context(lm=self._lm, callbacks=[dspy_callback]):
                 result = self._rlm(context=context, query=query)
                 
-                # Log DSPy-level stats if verbose
+                # Log stats if verbose
                 if self.config.verbose:
-                    stats = dspy_callback.get_stats()
+                    dspy_stats = dspy_callback.get_stats()
+                    tool_counts = self._tool_call_counts
+                    total_tool_calls = sum(tool_counts.values())
+                    
                     _logger.info(
                         "DSPy stats: %d LLM calls, %d tool calls",
-                        stats["lm_calls"],
-                        stats["tool_calls"],
+                        dspy_stats["lm_calls"],
+                        total_tool_calls,
                     )
+                    
+                    # Show tool breakdown if any tools were used
+                    if tool_counts:
+                        top_tools = sorted(tool_counts.items(), key=lambda x: -x[1])[:5]
+                        tool_summary = ", ".join(f"{name}:{count}" for name, count in top_tools)
+                        _logger.debug("Tool breakdown: %s", tool_summary)
                 
                 return result
 
