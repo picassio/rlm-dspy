@@ -482,7 +482,10 @@ def ask(
     ] = None,
     signature: Annotated[
         Optional[str],
-        typer.Option("--signature", "-S", help="Output signature: security, bugs, review, architecture, performance, diff"),
+        typer.Option(
+            "--signature", "-S",
+            help="Output signature: security, bugs, review, architecture, performance, diff"
+        ),
     ] = None,
     output_format: Annotated[
         Optional[str],
@@ -1075,7 +1078,12 @@ def _print_stats(result: RLMResult) -> None:
     if result.total_cost > 0:
         table.add_row("Cost", f"${result.total_cost:.4f}")
     if result.final_reasoning:
-        table.add_row("Final Reasoning", result.final_reasoning[:100] + "..." if len(result.final_reasoning) > 100 else result.final_reasoning)
+        reasoning_display = (
+            result.final_reasoning[:100] + "..."
+            if len(result.final_reasoning) > 100
+            else result.final_reasoning
+        )
+        table.add_row("Final Reasoning", reasoning_display)
 
     console.print(table)
 
@@ -1391,7 +1399,9 @@ def index_status(
             console.print(f"  Snippets: {status['snippet_count']}")
             console.print(f"  Files: {status['file_count']}")
             if status["needs_update"]:
-                console.print(f"  [yellow]Needs update: {status['new_or_modified']} changed, {status['deleted']} deleted[/yellow]")
+                changed = status['new_or_modified']
+                deleted = status['deleted']
+                console.print(f"  [yellow]Needs update: {changed} changed, {deleted} deleted[/yellow]")
             else:
                 console.print("  [green]Up to date[/green]")
 

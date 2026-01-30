@@ -630,7 +630,8 @@ class RLM:
         if not use_tools or not self._tools:
             return signature
 
-        tool_instructions = """IMPORTANT: You have access to powerful code analysis tools. USE THEM FIRST before writing custom code:
+        tool_instructions = """IMPORTANT: You have access to powerful code analysis tools. \
+USE THEM FIRST before writing custom code:
 
 STRUCTURAL SEARCH (100% accurate, use for exact matches):
 - `index_code(path, kind, name)` - Find classes/functions/methods with EXACT line numbers
@@ -1218,12 +1219,7 @@ Use structural tools for exact lookups, semantic search for exploratory queries.
     def close(self) -> None:
         """Clean up resources."""
         pass  # dspy.RLM handles its own cleanup
-
-    def __enter__(self) -> "RLM":
-        return self
-
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        self.close()
+    # Note: __enter__ and __exit__ are defined earlier in the class for context manager support
 
 
 # =============================================================================

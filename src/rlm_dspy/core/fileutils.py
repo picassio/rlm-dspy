@@ -858,8 +858,6 @@ def smart_truncate_context(
     Returns:
         Tuple of (truncated_context, was_truncated)
     """
-    import re
-
     estimated_tokens = estimate_tokens(context, chars_per_token)
 
     if estimated_tokens <= max_tokens:
