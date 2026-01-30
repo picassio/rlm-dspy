@@ -84,23 +84,38 @@ class OptimizerConfig:
 
 # Default tool instructions
 DEFAULT_INSTRUCTIONS = {
-    "tool_instructions": """IMPORTANT: You have access to powerful code analysis tools. \
-USE THEM FIRST before writing custom code:
+    "tool_instructions": """CONTEXT: You are exploring a LARGE CODEBASE (potentially thousands of files).
+You CANNOT read everything - use tools strategically to find what matters.
 
-STRUCTURAL SEARCH (100% accurate, use for exact matches):
+EXPLORATION STRATEGY (follow this order):
+1. GET THE BIG PICTURE FIRST:
+   - `file_stats(".")` - Understand project size and structure
+   - `find_files("*.py", ".")` or `find_files("*.ts", ".")` - See all relevant files
+   - `semantic_search("your topic")` - Find conceptually related code across the project
+
+2. NARROW DOWN TO RELEVANT AREAS:
+   - `index_code("src/", kind="class")` - Find all classes in a directory
+   - `find_functions("src/")` - Find all functions in a directory
+   - `ripgrep("keyword", ".")` - Search for specific patterns across all files
+
+3. THEN READ SPECIFIC CODE:
+   - `read_file(path, start_line, end_line)` - Read only what you need
+   - Don't read entire files - use line ranges from index_code results
+
+AVAILABLE TOOLS:
+- `file_stats(path)` - Get file/directory size, line counts, structure
+- `find_files(pattern, path)` - Find files by name pattern (*.py, *test*, etc.)
+- `semantic_search(query)` - Conceptual search across indexed project
 - `index_code(path, kind, name)` - Find classes/functions/methods with EXACT line numbers
-- `find_classes()`, `find_functions()`, `find_methods()` - Quick structural queries
+- `find_classes(path)`, `find_functions(path)`, `find_methods(path)` - Structural queries
 - `find_calls(path, function_name)` - Find where functions are called
-- `ripgrep(pattern, path)` - Fast text/regex pattern search
+- `ripgrep(pattern, path)` - Fast regex search across files
+- `read_file(path, start_line, end_line)` - Read specific sections
 
-SEMANTIC SEARCH (conceptual similarity, finds related code):
-- `semantic_search(query)` - Search current project by concept (no path needed)
-
-FILE OPERATIONS:
-- `read_file(path, start_line, end_line)` - Read specific file sections
-- `find_files(pattern, path)` - Find files by name pattern
-
-Use structural tools for exact lookups, semantic search for exploratory queries.""",
+ANTI-PATTERNS (avoid these):
+- DON'T analyze files one by one - search across the project first
+- DON'T guess at file locations - use find_files or ripgrep
+- DON'T claim issues exist without reading the actual code""",
 
     "verification_rules": """CRITICAL VERIFICATION RULES:
 1. NEVER claim a bug/issue exists without using read_file() to see the actual code
@@ -109,12 +124,24 @@ Use structural tools for exact lookups, semantic search for exploratory queries.
 4. Check for existing protections before claiming vulnerabilities (guards, validation, etc.)
 5. When reporting issues, quote the actual problematic code you found""",
 
-    "iteration_guidance": """ITERATION STRATEGY:
-1. Start with broad search (semantic_search or ripgrep) to find relevant areas
-2. Use structural tools (find_classes, find_functions) to get exact locations
-3. Read the actual code with read_file() before making any claims
-4. Verify your findings by reading surrounding context
-5. Only SUBMIT when you have verified evidence for your claims""",
+    "iteration_guidance": """ITERATION STRATEGY FOR LARGE CODEBASES:
+Iteration 1-2: EXPLORE (understand the project structure)
+  - file_stats(".") to see project size
+  - find_files() to see what files exist
+  - semantic_search() or ripgrep() to find relevant areas
+
+Iteration 3-5: LOCATE (find specific code)
+  - index_code() on relevant directories
+  - find_classes(), find_functions() for structure
+  - Narrow down to specific files and line ranges
+
+Iteration 6+: VERIFY (read and confirm)
+  - read_file() with specific line ranges
+  - Quote actual code in your findings
+  - Only SUBMIT when you have verified evidence
+
+REMEMBER: You're exploring a codebase that may have 100+ files.
+Use search tools to find relevant code, don't try to read everything.""",
 }
 
 

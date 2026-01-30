@@ -766,30 +766,30 @@ class RLM:
         except Exception as e:
             logger.debug("Failed to get optimized instructions, using defaults: %s", e)
             # Fallback to hardcoded defaults
-            return """IMPORTANT: You have access to powerful code analysis tools. \
-USE THEM FIRST before writing custom code:
+            return """CONTEXT: You are exploring a LARGE CODEBASE (potentially thousands of files).
+You CANNOT read everything - use tools strategically to find what matters.
 
-STRUCTURAL SEARCH (100% accurate, use for exact matches):
-- `index_code(path, kind, name)` - Find classes/functions/methods with EXACT line numbers
-- `find_classes()`, `find_functions()`, `find_methods()` - Quick structural queries
-- `find_calls(path, function_name)` - Find where functions are called
-- `ripgrep(pattern, path)` - Fast text/regex pattern search
+EXPLORATION STRATEGY (follow this order):
+1. GET THE BIG PICTURE FIRST:
+   - `file_stats(".")` - Understand project size
+   - `find_files("*.py", ".")` - See all relevant files
+   - `semantic_search("your topic")` - Find related code across the project
 
-SEMANTIC SEARCH (conceptual similarity, finds related code):
-- `semantic_search(query)` - Search current project by concept (no path needed)
+2. NARROW DOWN:
+   - `index_code("src/", kind="class")` - Find all classes in a directory
+   - `ripgrep("keyword", ".")` - Search patterns across all files
 
-FILE OPERATIONS:
-- `read_file(path, start_line, end_line)` - Read specific file sections
-- `find_files(pattern, path)` - Find files by name pattern
+3. THEN READ SPECIFIC CODE:
+   - `read_file(path, start_line, end_line)` - Read only what you need
 
-CRITICAL VERIFICATION RULES:
-1. NEVER claim a bug/issue exists without using read_file() to see the actual code
-2. ALWAYS verify line numbers by reading the file - don't guess or assume
-3. If you claim "file.py:123 has bug X", you MUST have read lines 120-130 to verify
-4. Check for existing protections before claiming vulnerabilities (guards, validation, etc.)
-5. When reporting issues, quote the actual problematic code you found
+VERIFICATION RULES:
+1. NEVER claim issues without using read_file() to see actual code
+2. ALWAYS verify line numbers by reading the file
+3. Quote actual code in your findings
 
-Use structural tools for exact lookups, semantic search for exploratory queries.
+ANTI-PATTERNS:
+- DON'T analyze files one by one - search across project first
+- DON'T guess file locations - use find_files or ripgrep
 
 """
 

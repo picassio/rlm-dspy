@@ -119,7 +119,7 @@ class TestInstructionOptimizer:
     def test_get_instruction(self, optimizer):
         """Test getting instructions."""
         instruction = optimizer.get_instruction("tool_instructions")
-        assert "IMPORTANT" in instruction
+        assert "LARGE CODEBASE" in instruction
         assert "read_file" in instruction
 
     def test_get_all_instructions(self, optimizer):
