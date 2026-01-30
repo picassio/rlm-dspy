@@ -140,7 +140,9 @@ ANTI-PATTERNS (avoid these):
 2. ALWAYS verify line numbers by reading the file - don't guess or assume
 3. If you claim "file.py:123 has bug X", you MUST have read lines 120-130 to verify
 4. Check for existing protections before claiming vulnerabilities (guards, validation, etc.)
-5. When reporting issues, quote the actual problematic code you found""",
+5. When reporting issues, quote the actual problematic code you found
+6. After using find_usages(), VERIFY with read_file() if "INTERNAL ONLY" - check the actual usage
+7. Don't trust tool summaries blindly - write Python to analyze results when needed""",
 
     "iteration_guidance": """ITERATION STRATEGY FOR LARGE CODEBASES:
 Iteration 1-2: EXPLORE (understand the project structure)

@@ -570,24 +570,43 @@ def find_usages(file_path: str, symbol_name: str | None = None) -> str:
             
             # Search for usages using exact name (with word boundaries)
             pattern = rf"\b{re.escape(name)}\b"
-            usage_result = ripgrep(pattern, search_path, "-l")  # -l = files only
             
-            # Count files and exclude the definition file
-            if "(no matches found)" in usage_result or not usage_result.strip():
-                usage_files = []
+            # Get INTERNAL usages (within the same file)
+            internal_result = ripgrep(pattern, str(file_path), "-c")  # -c = count only
+            if "(no matches" in internal_result or not internal_result.strip():
+                internal_count = 0
             else:
-                usage_files = [f for f in usage_result.strip().split("\n") 
-                              if f and not f.endswith(Path(file_path).name)]
+                # Parse count from output like "file.py:5"
+                try:
+                    internal_count = int(internal_result.strip().split(":")[-1])
+                except (ValueError, IndexError):
+                    internal_count = 0
+            # Subtract 1 for the definition itself
+            internal_usages = max(0, internal_count - 1)
             
-            # Format result
-            status = f"({len(usage_files)} files)" if usage_files else "⚠ NO EXTERNAL USAGES"
-            results.append(f"{kind} {name} (line {line}): {status}")
-            if usage_files:
-                # Show shortened paths
-                short_files = [Path(f).name for f in usage_files[:5]]
+            # Get EXTERNAL usages (other files)
+            usage_result = ripgrep(pattern, search_path, "-l")  # -l = files only
+            if "(no matches found)" in usage_result or not usage_result.strip():
+                external_files = []
+            else:
+                external_files = [f for f in usage_result.strip().split("\n") 
+                                 if f and not f.endswith(Path(file_path).name)]
+            
+            # Format result with BOTH internal and external counts
+            if external_files:
+                status = f"USED: {internal_usages} internal, {len(external_files)} external files"
+                results.append(f"{kind} {name} (line {line}): {status}")
+                short_files = [Path(f).name for f in external_files[:5]]
                 results.append(f"  → {', '.join(short_files)}")
-                if len(usage_files) > 5:
-                    results.append(f"  ... and {len(usage_files) - 5} more files")
+                if len(external_files) > 5:
+                    results.append(f"  ... and {len(external_files) - 5} more files")
+            elif internal_usages > 0:
+                status = f"INTERNAL ONLY: {internal_usages} usages within same file"
+                results.append(f"{kind} {name} (line {line}): {status}")
+                results.append(f"  ℹ Used internally but not imported elsewhere")
+            else:
+                results.append(f"{kind} {name} (line {line}): ⚠ DEAD CODE (0 usages)")
+                results.append(f"  ⚠ Never used - candidate for removal")
         
         if not results:
             return f"(no top-level classes/functions found in {file_path})"
