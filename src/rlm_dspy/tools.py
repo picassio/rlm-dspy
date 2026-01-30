@@ -105,32 +105,36 @@ def ripgrep(pattern: str, path: str = ".", flags: str = "") -> str:
         LONG_FLAGS = {'--glob', '--type', '-t', '-g'}
 
         cmd = ["rg", "--color=never", "--line-number"]
+        validated_flags = []
         if flags:
             for flag in flags.split():
                 if not flag.startswith('-'):
-                    # Not a flag, skip validation
-                    continue
+                    # Non-flag arguments not allowed - could be injection
+                    return f"(security: unexpected argument '{flag}' - only flags allowed)"
 
                 # Check if it's a known short flag with numeric arg (e.g., -C5, -A3)
                 if len(flag) >= 2 and flag[:2] in SHORT_FLAGS_WITH_NUM:
                     # Verify rest is numeric
                     if flag[2:] and not flag[2:].isdigit():
                         return f"(security: invalid flag '{flag}')"
+                    validated_flags.append(flag)
                     continue
 
                 # Check exact short flag match
                 if flag in SHORT_FLAGS or flag in SHORT_FLAGS_WITH_NUM:
+                    validated_flags.append(flag)
                     continue
 
                 # Check long flags (exact or with =)
                 flag_name = flag.split('=')[0]
                 if flag_name in LONG_FLAGS:
+                    validated_flags.append(flag)
                     continue
 
                 # Not in allowlist
                 return f"(security: flag '{flag}' not allowed)"
 
-            cmd.extend(flags.split())
+            cmd.extend(validated_flags)
         # Use -- to separate flags from pattern (prevents pattern injection)
         cmd.extend(["--", pattern, path])
 
@@ -167,7 +171,7 @@ def grep_context(pattern: str, path: str = ".", context_lines: int = 3) -> str:
     Returns:
         Matches with surrounding context
     """
-    return ripgrep(pattern, path, f"-C {context_lines}")
+    return ripgrep(pattern, path, f"-C{context_lines}")
 
 
 def find_files(pattern: str, path: str = ".", file_type: str = "") -> str:
