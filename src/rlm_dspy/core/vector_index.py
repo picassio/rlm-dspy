@@ -270,6 +270,18 @@ class CodeIndex:
     def _get_manifest_path(self, index_path: Path) -> Path:
         return index_path / "manifest.json"
 
+    def _ensure_decompressed(self, index_path: Path) -> None:
+        """Ensure index files are decompressed for DSPy compatibility.
+        
+        DSPy's Embeddings.from_saved() requires uncompressed .npy files.
+        This method decompresses on-the-fly if needed.
+        """
+        from .index_compression import is_compressed, decompress_index
+        
+        if is_compressed(index_path):
+            logger.debug("Decompressing index for loading: %s", index_path)
+            decompress_index(index_path)
+
     def _load_manifest(self, index_path: Path) -> dict:
         """Load manifest file."""
         manifest_path = self._get_manifest_path(index_path)
@@ -527,6 +539,8 @@ class CodeIndex:
                 if not needs_update:
                     # Load existing index
                     try:
+                        # Decompress if needed (DSPy requires uncompressed .npy)
+                        self._ensure_decompressed(index_path)
                         index = Embeddings.from_saved(str(index_path), self.embedder)
                         metadata, corpus_idx_to_id = self._load_metadata(index_path)
 
@@ -672,13 +686,20 @@ class CodeIndex:
         # Load existing metadata and embeddings
         old_metadata, old_corpus_idx_map = self._load_metadata(index_path)
 
-        # Load embeddings saved by DSPy (corpus_embeddings.npy)
+        # Load embeddings saved by DSPy (corpus_embeddings.npy or .npz if compressed)
         embeddings_path = index_path / "corpus_embeddings.npy"
-        if not embeddings_path.exists():
+        compressed_path = index_path / "corpus_embeddings.npz"
+        
+        if compressed_path.exists():
+            # Load compressed embeddings
+            from .index_compression import load_numpy_array
+            old_embeddings = load_numpy_array(compressed_path)
+            logger.debug("Loaded compressed embeddings from %s", compressed_path)
+        elif embeddings_path.exists():
+            old_embeddings = np.load(embeddings_path)
+        else:
             logger.debug("No cached embeddings, falling back to full rebuild")
             return 0
-
-        old_embeddings = np.load(embeddings_path)
 
         # Build set of files that were deleted or modified
         # Note: new_or_modified contains absolute paths, deleted contains absolute paths from manifest
@@ -932,20 +953,33 @@ class CodeIndex:
         if cache_key in self._metadata and cache_key in self._corpus_idx_map:
             return self._metadata[cache_key], self._corpus_idx_map[cache_key]
 
+        # Support both compressed and uncompressed metadata
         metadata_path = index_path / "metadata.json"
-        if not metadata_path.exists():
+        compressed_metadata = index_path / "metadata.json.gz"
+        
+        if compressed_metadata.exists():
+            from .index_compression import load_json
+            data = load_json(compressed_metadata)
+        elif metadata_path.exists():
+            data = json.loads(metadata_path.read_text(encoding='utf-8'))
+        else:
             return {}, {}
 
-        data = json.loads(metadata_path.read_text(encoding='utf-8'))
         metadata = {
             id_: CodeSnippet(**info)
             for id_, info in data.items()
         }
 
-        # Load corpus index mapping
+        # Load corpus index mapping (support both compressed and uncompressed)
         idx_map_path = index_path / "corpus_idx_map.json"
+        compressed_idx_map = index_path / "corpus_idx_map.json.gz"
         corpus_idx_to_id = {}
-        if idx_map_path.exists():
+        
+        if compressed_idx_map.exists():
+            from .index_compression import load_json
+            idx_data = load_json(compressed_idx_map)
+            corpus_idx_to_id = {int(k): v for k, v in idx_data.items()}
+        elif idx_map_path.exists():
             idx_data = json.loads(idx_map_path.read_text(encoding='utf-8'))
             # Convert string keys back to int
             corpus_idx_to_id = {int(k): v for k, v in idx_data.items()}
