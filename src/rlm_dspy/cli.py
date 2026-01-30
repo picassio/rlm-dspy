@@ -478,7 +478,7 @@ def ask(
     ] = None,
     max_iterations: Annotated[
         Optional[int],
-        typer.Option("--max-iterations", "-i", help="Max REPL iterations"),
+        typer.Option("--max-iterations", "-i", help="Max REPL iterations (default 20, <5 increases hallucination risk)"),
     ] = None,
     signature: Annotated[
         Optional[str],

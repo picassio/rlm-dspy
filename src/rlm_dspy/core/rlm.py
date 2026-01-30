@@ -326,6 +326,15 @@ class RLMConfig:
         if self.max_iterations < 1 or self.max_iterations > 100:
             raise ValueError(f"max_iterations must be between 1 and 100, got {self.max_iterations}")
 
+        # Warn if iterations too low - increases hallucination risk
+        if self.max_iterations < 5:
+            import logging
+            logging.getLogger(__name__).warning(
+                "max_iterations=%d is very low - LLM may not have enough turns to verify findings. "
+                "Consider at least 5 iterations to reduce hallucinations.",
+                self.max_iterations
+            )
+
         if self.max_llm_calls < 1 or self.max_llm_calls > 500:
             raise ValueError(f"max_llm_calls must be between 1 and 500, got {self.max_llm_calls}")
 
