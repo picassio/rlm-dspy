@@ -2617,26 +2617,40 @@ def optimize_simba(
         console.print("[dim]Run queries with validation to collect traces first[/dim]")
         raise typer.Exit(1)
 
-    # Count available traces
-    trace_files = list(traces_dir.glob("*.json"))
-    if not trace_files:
-        console.print("[yellow]No trace files found[/yellow]")
+    # Load traces from traces.json (new format) or individual files (legacy)
+    traces_file = traces_dir / "traces.json"
+    all_traces = []
+    
+    if traces_file.exists():
+        # New format: all traces in single file
+        try:
+            data = json.loads(traces_file.read_text())
+            all_traces = data.get("traces", [])
+        except Exception:
+            pass
+    
+    # Also check for individual trace files (legacy format)
+    for f in traces_dir.glob("trace_*.json"):
+        try:
+            all_traces.append(json.loads(f.read_text()))
+        except Exception:
+            pass
+
+    if not all_traces:
+        console.print("[yellow]No traces found[/yellow]")
         console.print("[dim]Run queries with validation to collect traces[/dim]")
         raise typer.Exit(1)
 
     # Filter and count qualifying traces
     qualifying = 0
-    for f in trace_files:
-        try:
-            data = json.loads(f.read_text())
-            score = data.get("validation_score", data.get("score", 0))
-            if score >= min_score:
-                qualifying += 1
-        except Exception:
-            pass
+    for trace in all_traces:
+        # Support both grounded_score (new) and validation_score (old)
+        score = trace.get("grounded_score", trace.get("validation_score", trace.get("score", 0)))
+        if isinstance(score, (int, float)) and score >= min_score:
+            qualifying += 1
 
     console.print(f"[bold]SIMBA Optimization[/bold]")
-    console.print(f"  Traces found: {len(trace_files)}")
+    console.print(f"  Traces found: {len(all_traces)}")
     console.print(f"  Qualifying (score >= {min_score}): {qualifying}")
     console.print(f"  Batch size: {batch_size}")
     console.print(f"  Steps: {steps}")

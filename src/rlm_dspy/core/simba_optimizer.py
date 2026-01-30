@@ -304,28 +304,45 @@ class SIMBAOptimizer:
         if not traces_dir.exists():
             raise ValueError(f"Traces directory not found: {traces_dir}")
 
-        # Load traces and convert to examples
-        examples = []
-        for trace_file in sorted(traces_dir.glob("*.json"))[:max_examples * 2]:
+        # Load traces from traces.json (new format) or individual files (legacy)
+        all_traces = []
+        traces_file = traces_dir / "traces.json"
+        
+        if traces_file.exists():
             try:
-                data = json.loads(trace_file.read_text())
+                data = json.loads(traces_file.read_text())
+                all_traces = data.get("traces", [])
+            except Exception as e:
+                logger.debug("Failed to load traces.json: %s", e)
+        
+        # Also check for individual trace files (legacy format)
+        for trace_file in sorted(traces_dir.glob("trace_*.json"))[:max_examples * 2]:
+            try:
+                all_traces.append(json.loads(trace_file.read_text()))
+            except Exception as e:
+                logger.debug("Failed to load trace %s: %s", trace_file, e)
 
-                # Filter by score
-                score = data.get("validation_score", data.get("score", 0))
-                if score < min_score:
+        # Convert traces to examples
+        examples = []
+        for trace in all_traces:
+            try:
+                # Support both grounded_score (new) and validation_score (old)
+                score = trace.get("grounded_score", trace.get("validation_score", trace.get("score", 0)))
+                if not isinstance(score, (int, float)) or score < min_score:
                     continue
 
                 # Create example
                 example = dspy.Example(
-                    query=data.get("query", ""),
-                    context=data.get("context", ""),
+                    query=trace.get("query", ""),
+                    context=trace.get("context", ""),
                 ).with_inputs("query", "context")
 
                 # Add expected output if available
-                if "answer" in data:
-                    example.answer = data["answer"]
-                if "citations" in data:
-                    example.citations = data["citations"]
+                answer = trace.get("final_answer", trace.get("answer", ""))
+                if answer:
+                    example.answer = answer
+                if "citations" in trace:
+                    example.citations = trace["citations"]
 
                 examples.append(example)
 
@@ -333,7 +350,7 @@ class SIMBAOptimizer:
                     break
 
             except Exception as e:
-                logger.debug("Failed to load trace %s: %s", trace_file, e)
+                logger.debug("Failed to process trace: %s", e)
 
         if len(examples) < self.batch_size:
             raise ValueError(
