@@ -422,39 +422,8 @@ class CitedCodeAnalysis(dspy.Signature):
     )
 
 
-class CitedSecurityAudit(dspy.Signature):
-    """Security audit with precise source citations.
-
-    Identify security vulnerabilities and reference exact locations.
-    Format: [SEVERITY] Description - filename.py:line
-    """
-    context: str = dspy.InputField(desc="Source code with line numbers")
-
-    vulnerabilities: str = dspy.OutputField(
-        desc="List of vulnerabilities with [CRITICAL/HIGH/MEDIUM/LOW] severity and file:line citations"
-    )
-    summary: str = dspy.OutputField(
-        desc="Overall security assessment"
-    )
-    risk_score: int = dspy.OutputField(
-        desc="Risk score from 0 (safe) to 100 (critical)"
-    )
-
-
-class CitedBugFinder(dspy.Signature):
-    """Find bugs with precise source citations.
-
-    Identify potential bugs and reference exact locations.
-    Format: [BUG] Description - filename.py:line
-    """
-    context: str = dspy.InputField(desc="Source code with line numbers")
-
-    bugs: str = dspy.OutputField(
-        desc="List of bugs with descriptions and file:line citations"
-    )
-    summary: str = dspy.OutputField(
-        desc="Overall code quality assessment"
-    )
+# Note: CitedSecurityAudit and CitedBugFinder are defined in signatures.py
+# to avoid duplication. Import from there if needed.
 
 
 # Export
@@ -468,6 +437,4 @@ __all__ = [
     "citations_to_locations",
     "parse_findings_from_text",
     "CitedCodeAnalysis",
-    "CitedSecurityAudit",
-    "CitedBugFinder",
 ]
