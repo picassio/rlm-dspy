@@ -293,6 +293,28 @@ class GroundedProposer:
         
         try:
             import dspy
+            from .user_config import load_config
+            
+            # Configure LM from user config
+            config = load_config()
+            model = config.get("model", "openrouter/google/gemini-2.0-flash-001")
+            api_key = config.get("api_key")
+            api_base = config.get("api_base")
+            
+            if not api_key:
+                # Try environment
+                import os
+                api_key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENAI_API_KEY")
+            
+            if not api_key:
+                logger.debug("No API key for tip generation, using heuristics")
+                return self._generate_heuristic_tips(failure_patterns, success_patterns)
+            
+            lm_kwargs = {"model": model, "api_key": api_key}
+            if api_base:
+                lm_kwargs["api_base"] = api_base
+            
+            lm = dspy.LM(**lm_kwargs)
             
             class GenerateTips(dspy.Signature):
                 """Analyze failure and success patterns to generate actionable tips.
@@ -307,10 +329,11 @@ class GroundedProposer:
             
             generator = dspy.ChainOfThought(GenerateTips)
             
-            result = generator(
-                failure_patterns=json.dumps(failure_patterns, indent=2),
-                success_patterns=json.dumps(success_patterns, indent=2),
-            )
+            with dspy.settings.context(lm=lm):
+                result = generator(
+                    failure_patterns=json.dumps(failure_patterns, indent=2),
+                    success_patterns=json.dumps(success_patterns, indent=2),
+                )
             
             # Ensure we have valid tips
             tips = result.tips if isinstance(result.tips, list) else []
