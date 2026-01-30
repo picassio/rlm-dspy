@@ -508,24 +508,6 @@ class ProgressCallback:
         pass
 
 
-class DspyProgressCallback:
-    """DSPy-compatible callback that wraps our ProgressCallback.
-
-    This bridges our callback interface with dspy's BaseCallback.
-    """
-
-    def __init__(self, progress_callback: ProgressCallback):
-        self.progress = progress_callback
-        self._call_count = 0
-
-    def on_lm_start(self, call_id: str, instance: Any, inputs: dict[str, Any]):
-        self._call_count += 1
-        self.progress.on_lm_call("main", inputs)
-
-    def on_lm_end(self, call_id: str, outputs: dict[str, Any] | None, exception: Exception | None = None):
-        pass
-
-
 # =============================================================================
 # Main RLM Class
 # =============================================================================
