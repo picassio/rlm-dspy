@@ -675,12 +675,12 @@ class RLM:
         if self.config.enable_logging:
             import logging
             level = logging.DEBUG if self.config.verbose else logging.INFO
-            manager.register(LoggingCallback(level=level))
+            manager.add(LoggingCallback(level=level))
             _logger.debug("Registered LoggingCallback")
         
         if self.config.enable_metrics:
             self._metrics_callback = MetricsCallback()
-            manager.register(self._metrics_callback)
+            manager.add(self._metrics_callback)
             _logger.debug("Registered MetricsCallback")
 
     def get_metrics(self) -> dict[str, Any] | None:
