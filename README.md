@@ -586,13 +586,25 @@ print(result.fix_suggestions)   # list[str]
 print(result.outputs)  # {"bugs": [...], "has_critical": True, ...}
 ```
 
-Available signatures:
-- `SecurityAudit` - vulnerabilities, severity, is_secure, recommendations
-- `CodeReview` - summary, issues, suggestions, quality_score (1-10)
-- `BugFinder` - bugs, has_critical, affected_functions, fix_suggestions
-- `ArchitectureAnalysis` - summary, components, dependencies, patterns
-- `PerformanceAnalysis` - issues, hotspots, optimizations, complexity_concerns
-- `DiffReview` - summary, change_type, is_breaking, risks, suggestions
+**Standard Signatures:**
+
+| Signature | Output Fields |
+|-----------|---------------|
+| `SecurityAudit` | `vulnerabilities`, `severity` (none/low/medium/high/critical), `is_secure`, `recommendations` |
+| `CodeReview` | `summary`, `issues`, `suggestions`, `quality_score` (1-10) |
+| `BugFinder` | `bugs`, `has_critical`, `affected_functions`, `fix_suggestions` |
+| `ArchitectureAnalysis` | `summary`, `components`, `dependencies`, `patterns` |
+| `PerformanceAnalysis` | `issues`, `hotspots`, `optimizations`, `complexity_concerns` |
+| `DiffReview` | `summary`, `change_type`, `is_breaking`, `risks`, `suggestions` |
+
+**Cited Signatures** (include `file:line` references):
+
+| Signature | Output Fields |
+|-----------|---------------|
+| `CitedAnalysis` | `summary`, `findings`, `locations` |
+| `CitedSecurityAudit` | `vulnerabilities`, `risk_level`, `locations`, `remediation` |
+| `CitedBugFinder` | `bugs`, `severity`, `locations`, `fixes` |
+| `CitedCodeReview` | `issues`, `quality_score`, `locations`, `improvements` |
 
 CLI usage:
 ```bash
@@ -698,21 +710,26 @@ result = rlm.query(
 
 **Available tools:**
 
-| Tool | Description |
-|------|-------------|
-| `ripgrep(pattern, path, flags)` | Fast regex search via `rg` |
-| `grep_context(pattern, path, lines)` | Search with surrounding context |
-| `find_files(pattern, path, type)` | Find files by glob pattern |
-| `read_file(path, start, end)` | Read file with line numbers |
-| `file_stats(path)` | Get file/directory statistics (JSON) |
-| `index_code(path, kind, name)` | **AST index with EXACT line numbers** (10+ languages) |
-| `find_definitions(path, name)` | Find all definitions (classes, functions, methods) |
-| `find_classes(path, name)` | Find class definitions |
-| `find_functions(path, name)` | Find top-level functions |
-| `find_methods(path, name)` | Find methods (shows parent class) |
-| `find_imports(path)` | Find all import statements |
-| `find_calls(path, func_name)` | Find function/method call sites |
-| `shell(cmd, timeout)` | Run shell commands (disabled by default, see security note) |
+| Category | Tool | Description |
+|----------|------|-------------|
+| **Text Search** | `ripgrep(pattern, path, flags)` | Fast regex search via `rg` |
+| | `grep_context(pattern, path, lines)` | Search with surrounding context |
+| **File Operations** | `find_files(pattern, path, type)` | Find files by glob pattern |
+| | `read_file(path, start, end)` | Read file with line numbers |
+| | `file_stats(path)` | Get file/directory statistics (JSON) |
+| **AST Analysis** | `index_code(path, kind, name)` | **AST index with EXACT line numbers** (10+ languages) |
+| | `find_definitions(path, name)` | Find all definitions (classes, functions, methods) |
+| | `find_classes(path, name)` | Find class definitions |
+| | `find_functions(path, name)` | Find top-level functions |
+| | `find_methods(path, name)` | Find methods (shows parent class) |
+| | `find_imports(path)` | Find all import statements |
+| | `find_calls(path, func_name)` | Find function/method call sites |
+| **Semantic Search** | `semantic_search(query, path, k)` | Search by concept similarity |
+| **LSP (IDE-quality)** | `find_references(file, line, col)` | Find all usages of symbol |
+| | `go_to_definition(file, line, col)` | Jump to definition |
+| | `get_type_info(file, line, col)` | Get type signatures (hover) |
+| | `get_symbol_hierarchy(file)` | Get file's symbol tree |
+| **Shell** | `shell(cmd, timeout)` | Run shell commands (disabled by default) |
 
 **Shell Security:**
 - Disabled by default - requires `RLM_ALLOW_SHELL=1` environment variable
