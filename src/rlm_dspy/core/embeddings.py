@@ -132,6 +132,9 @@ def _resolve_embedding_api_key(config: dict) -> str | None:
 # Cached embedder instance
 _embedder_cache: dict[str, Any] = {}
 
+# Cached embedding dimensions (to avoid expensive probe calls)
+_dimension_cache: dict[str, int] = {}
+
 
 def get_embedder(config: EmbeddingConfig | None = None) -> Any:
     """Get configured embedder instance.
@@ -152,10 +155,14 @@ def get_embedder(config: EmbeddingConfig | None = None) -> Any:
 
     config = config or EmbeddingConfig.from_user_config()
 
-    # Check cache
-    cache_key = f"{config.model}:{config.local_model}:{config.batch_size}"
+    # Check cache - batch_size excluded since model loading is the expensive part
+    # and batch_size only affects execution, not the model itself
+    cache_key = f"{config.model}:{config.local_model}"
     if cache_key in _embedder_cache:
-        return _embedder_cache[cache_key]
+        cached = _embedder_cache[cache_key]
+        # If batch_size changed, we can still use the cached embedder
+        # (DSPy Embedder's batch_size is set at call time, not construction)
+        return cached
 
     if config.model.lower() == "local":
         # Use local sentence-transformers model
@@ -207,11 +214,12 @@ def _create_hosted_embedder(config: EmbeddingConfig) -> Any:
 
 
 def clear_embedder_cache() -> None:
-    """Clear the embedder and config caches."""
-    global _embedder_cache
+    """Clear the embedder, dimension, and config caches."""
+    global _embedder_cache, _dimension_cache
     _embedder_cache.clear()
+    _dimension_cache.clear()
     EmbeddingConfig._cached_config = None
-    logger.debug("Embedder and config caches cleared")
+    logger.debug("Embedder, dimension, and config caches cleared")
 
 
 def embed_texts(
@@ -255,10 +263,11 @@ def get_embedding_dim(config: EmbeddingConfig | None = None) -> int:
 
     config = config or EmbeddingConfig.from_user_config()
 
+    # Check known dimensions first (hardcoded for common models)
     if config.model in KNOWN_DIMS:
         return KNOWN_DIMS[config.model]
 
-    # For local models, we need to check
+    # For local models, check common patterns
     if config.model.lower() == "local":
         # Common sentence-transformer dimensions
         if "MiniLM" in config.local_model:
@@ -266,10 +275,19 @@ def get_embedding_dim(config: EmbeddingConfig | None = None) -> int:
         if "mpnet" in config.local_model.lower():
             return 768
 
-    # Default fallback - embed a sample to find out
+    # Check dimension cache (persists across calls)
+    cache_key = f"{config.model}:{config.local_model}"
+    if cache_key in _dimension_cache:
+        return _dimension_cache[cache_key]
+
+    # Default fallback - embed a sample to find out (expensive, cache result)
     logger.debug("Unknown embedding dim for %s, computing...", config.model)
     sample_embedding = embed_texts(["test"], config)
-    return sample_embedding.shape[-1]
+    dim = sample_embedding.shape[-1]
+
+    # Cache for future lookups
+    _dimension_cache[cache_key] = dim
+    return dim
 
 
 # Export
