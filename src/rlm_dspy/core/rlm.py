@@ -511,19 +511,59 @@ class ProgressCallback:
 class DspyProgressCallback:
     """DSPy-compatible callback that wraps our ProgressCallback.
 
-    This bridges our callback interface with dspy's BaseCallback.
+    This bridges our callback interface with dspy's BaseCallback, providing
+    visibility into DSPy's internal operations:
+    - Every LLM call (main model + sub-queries)
+    - Every tool execution
+    - Module-level execution flow
+    
+    Usage:
+        Register with DSPy via dspy.configure(callbacks=[callback])
     """
 
-    def __init__(self, progress_callback: ProgressCallback):
+    def __init__(self, progress_callback: ProgressCallback | None = None):
         self.progress = progress_callback
-        self._call_count = 0
+        self.lm_calls = 0
+        self.tool_calls = 0
+        self.module_calls = 0
+        self._timings: list[dict] = []
 
     def on_lm_start(self, call_id: str, instance: Any, inputs: dict[str, Any]):
-        self._call_count += 1
-        self.progress.on_lm_call("main", inputs)
+        """Called when any LLM call starts (main or sub-queries)."""
+        self.lm_calls += 1
+        if self.progress:
+            self.progress.on_lm_call("lm", {"call_id": call_id, "count": self.lm_calls})
 
     def on_lm_end(self, call_id: str, outputs: dict[str, Any] | None, exception: Exception | None = None):
+        """Called when any LLM call completes."""
         pass
+
+    def on_tool_start(self, call_id: str, instance: Any, inputs: dict[str, Any]):
+        """Called when a tool (ripgrep, read_file, etc.) starts."""
+        self.tool_calls += 1
+        if self.progress:
+            tool_name = inputs.get("tool_name", "unknown")
+            self.progress.on_lm_call("tool", {"tool": tool_name, "count": self.tool_calls})
+
+    def on_tool_end(self, call_id: str, outputs: dict[str, Any] | None, exception: Exception | None = None):
+        """Called when a tool completes."""
+        pass
+
+    def on_module_start(self, call_id: str, instance: Any, inputs: dict[str, Any]):
+        """Called when a DSPy module (like RLM) starts."""
+        self.module_calls += 1
+
+    def on_module_end(self, call_id: str, outputs: Any | None, exception: Exception | None = None):
+        """Called when a DSPy module completes."""
+        pass
+
+    def get_stats(self) -> dict[str, int]:
+        """Get callback statistics."""
+        return {
+            "lm_calls": self.lm_calls,
+            "tool_calls": self.tool_calls,
+            "module_calls": self.module_calls,
+        }
 
 
 # =============================================================================
@@ -1039,9 +1079,24 @@ Use structural tools for exact lookups, semantic search for exploratory queries.
 
         def _execute_rlm() -> Any:
             """Execute RLM with thread-local DSPy configuration."""
+            # Create DSPy callback to track internal operations
+            dspy_callback = DspyProgressCallback(self._progress_callback)
+            
             # Use thread-local configuration to avoid global state pollution
-            with dspy.settings.context(lm=self._lm):
-                return self._rlm(context=context, query=query)
+            # Include callback to get visibility into DSPy's internal operations
+            with dspy.settings.context(lm=self._lm, callbacks=[dspy_callback]):
+                result = self._rlm(context=context, query=query)
+                
+                # Log DSPy-level stats if verbose
+                if self.config.verbose:
+                    stats = dspy_callback.get_stats()
+                    _logger.info(
+                        "DSPy stats: %d LLM calls, %d tool calls",
+                        stats["lm_calls"],
+                        stats["tool_calls"],
+                    )
+                
+                return result
 
         try:
             # Execute with timeout if configured
