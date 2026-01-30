@@ -513,12 +513,8 @@ def ask(
     ] = False,
     validate: Annotated[
         bool,
-        typer.Option("--validate", "-V", help="Check output for hallucinations (auto-enabled for cited-* signatures)"),
-    ] = False,
-    no_validate: Annotated[
-        bool,
-        typer.Option("--no-validate", help="Disable hallucination check (overrides auto-enable)"),
-    ] = False,
+        typer.Option("--validate/--no-validate", "-V", help="Check output for hallucinations (enabled by default)"),
+    ] = True,
     no_tools: Annotated[
         bool,
         typer.Option("--no-tools", help="Disable code analysis tools (ripgrep, tree-sitter)"),
@@ -605,17 +601,6 @@ def ask(
             console.print(f"[dim]Available: {', '.join(list_signatures())}[/dim]")
             raise typer.Exit(1)
         sig = sig_class
-
-        # Auto-enable validation for cited signatures (they make specific claims)
-        # User can disable with explicit --no-validate
-        if signature.startswith("cited") and not validate and not no_validate:
-            validate = True
-            if verbose:
-                console.print("[dim]Auto-enabled validation for cited signature[/dim]")
-
-    # --no-validate overrides --validate
-    if no_validate:
-        validate = False
 
     # Lazy import RLM to avoid 3s DSPy startup for non-query commands
     from .core.rlm import RLM
