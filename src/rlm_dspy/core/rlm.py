@@ -516,6 +516,7 @@ class DspyProgressCallback:
     - Every LLM call (main model + sub-queries)
     - Every tool execution
     - Module-level execution flow
+    - Adapter formatting/parsing
     
     Usage:
         Register with DSPy via dspy.configure(callbacks=[callback])
@@ -555,6 +556,23 @@ class DspyProgressCallback:
 
     def on_module_end(self, call_id: str, outputs: Any | None, exception: Exception | None = None):
         """Called when a DSPy module completes."""
+        pass
+
+    # Adapter callbacks (required by DSPy BaseCallback interface)
+    def on_adapter_format_start(self, call_id: str, instance: Any, inputs: dict[str, Any]):
+        """Called when adapter starts formatting."""
+        pass
+
+    def on_adapter_format_end(self, call_id: str, outputs: dict[str, Any] | None, exception: Exception | None = None):
+        """Called when adapter finishes formatting."""
+        pass
+
+    def on_adapter_parse_start(self, call_id: str, instance: Any, inputs: dict[str, Any]):
+        """Called when adapter starts parsing."""
+        pass
+
+    def on_adapter_parse_end(self, call_id: str, outputs: dict[str, Any] | None, exception: Exception | None = None):
+        """Called when adapter finishes parsing."""
         pass
 
     def get_stats(self) -> dict[str, int]:
