@@ -36,51 +36,7 @@ app = typer.Typer(
 console = Console()
 
 
-# Common CLI option factories to reduce duplication
-def _opt_model() -> Annotated[Optional[str], typer.Option]:
-    return Annotated[
-        Optional[str],
-        typer.Option("--model", "-m", help="Model to use for reasoning"),
-    ]
-
-def _opt_sub_model() -> Annotated[Optional[str], typer.Option]:
-    return Annotated[
-        Optional[str],
-        typer.Option("--sub-model", "-s", help="Model for llm_query() calls (cheaper)"),
-    ]
-
-def _opt_budget() -> Annotated[Optional[float], typer.Option]:
-    return Annotated[
-        Optional[float],
-        typer.Option("--budget", "-b", help="Max budget in USD"),
-    ]
-
-def _opt_timeout() -> Annotated[Optional[float], typer.Option]:
-    return Annotated[
-        Optional[float],
-        typer.Option("--timeout", "-t", help="Max timeout in seconds"),
-    ]
-
-def _opt_verbose() -> Annotated[bool, typer.Option]:
-    return Annotated[
-        bool,
-        typer.Option("--verbose", "-v", help="Show detailed progress"),
-    ]
-
-def _opt_output_format() -> Annotated[Optional[str], typer.Option]:
-    return Annotated[
-        Optional[str],
-        typer.Option("--format", "-f", help="Output format: text, json, markdown"),
-    ]
-
-def _opt_output_file() -> Annotated[Optional[Path], typer.Option]:
-    return Annotated[
-        Optional[Path],
-        typer.Option("--output", "-o", help="Write output to file"),
-    ]
-
-
-# Type aliases for common options (use these in function signatures)
+# Type aliases for common CLI options - use these in function signatures to reduce duplication
 ModelOpt = Annotated[Optional[str], typer.Option("--model", "-m", help="Model to use for reasoning")]
 SubModelOpt = Annotated[Optional[str], typer.Option("--sub-model", "-s", help="Model for llm_query() calls")]
 BudgetOpt = Annotated[Optional[float], typer.Option("--budget", "-b", help="Max budget in USD")]
@@ -460,22 +416,10 @@ def ask(
         bool,
         typer.Option("--stdin", "-", help="Read context from stdin"),
     ] = False,
-    model: Annotated[
-        Optional[str],
-        typer.Option("--model", "-m", help="Model to use for reasoning"),
-    ] = None,
-    sub_model: Annotated[
-        Optional[str],
-        typer.Option("--sub-model", "-s", help="Model for llm_query() calls (cheaper)"),
-    ] = None,
-    budget: Annotated[
-        Optional[float],
-        typer.Option("--budget", "-b", help="Max budget in USD"),
-    ] = None,
-    timeout: Annotated[
-        Optional[float],
-        typer.Option("--timeout", "-t", help="Max timeout in seconds"),
-    ] = None,
+    model: ModelOpt = None,
+    sub_model: SubModelOpt = None,
+    budget: BudgetOpt = None,
+    timeout: TimeoutOpt = None,
     max_iterations: Annotated[
         Optional[int],
         typer.Option("--max-iterations", "-i", help="Max REPL iterations (default 20, min 20, max 100)"),
@@ -487,22 +431,13 @@ def ask(
             help="Output signature: security, bugs, review, architecture, performance, diff"
         ),
     ] = None,
-    output_format: Annotated[
-        Optional[str],
-        typer.Option("--format", "-f", help="Output format: text, json, markdown"),
-    ] = None,
+    output_format: FormatOpt = None,
     output_json: Annotated[
         bool,
         typer.Option("--json", "-j", help="Shorthand for --format json"),
     ] = False,
-    output_file: Annotated[
-        Optional[Path],
-        typer.Option("--output", "-o", help="Write output to file"),
-    ] = None,
-    verbose: Annotated[
-        bool,
-        typer.Option("--verbose", "-v", help="Show detailed progress"),
-    ] = False,
+    output_file: OutputFileOpt = None,
+    verbose: VerboseOpt = False,
     debug: Annotated[
         bool,
         typer.Option("--debug", "-d", help="Show full debug output with API calls"),
@@ -735,14 +670,8 @@ def analyze(
         list[Path],
         typer.Argument(help="Files or directories to analyze"),
     ],
-    output: Annotated[
-        Optional[Path],
-        typer.Option("--output", "-o", help="Output file for analysis"),
-    ] = None,
-    model: Annotated[
-        Optional[str],
-        typer.Option("--model", "-m", help="Model to use"),
-    ] = None,
+    output: OutputFileOpt = None,
+    model: ModelOpt = None,
     format: Annotated[
         str,
         typer.Option("--format", "-f", help="Output format: markdown|json"),
@@ -862,10 +791,7 @@ def diff(
         Optional[Path],
         typer.Option("--file", "-f", help="Diff file to analyze"),
     ] = None,
-    model: Annotated[
-        Optional[str],
-        typer.Option("--model", "-m", help="Model to use"),
-    ] = None,
+    model: ModelOpt = None,
 ) -> None:
     """
     Analyze a git diff.
