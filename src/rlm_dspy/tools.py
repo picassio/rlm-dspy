@@ -631,19 +631,44 @@ def _resolve_project_path(path: str | None) -> str:
     if not path or path == ".":
         return _current_project_path or "."
 
-    # If path is relative and we have a project path, resolve relative to project
-    if _current_project_path and not Path(path).is_absolute():
-        project_path = Path(_current_project_path)
-        resolved = (project_path / path).resolve()
-        # Only use resolved path if it exists within the project
-        try:
-            resolved.relative_to(project_path)
-            return str(resolved)
-        except ValueError:
-            # Path escapes project - use as-is (will be caught by safety check)
-            pass
+    # If already absolute and exists, use as-is
+    if Path(path).is_absolute():
+        return path
 
-    return path
+    # Try multiple resolution strategies for relative paths
+    if _current_project_path:
+        project_path = Path(_current_project_path)
+
+        # Strategy 1: Resolve relative to project path
+        resolved = (project_path / path).resolve()
+        if resolved.exists():
+            return str(resolved)
+
+        # Strategy 2: Maybe the path is relative to CWD (common when LLM
+        # sees paths like "src/rlm_dspy/cli.py" in the context)
+        cwd_resolved = Path(path).resolve()
+        if cwd_resolved.exists():
+            return str(cwd_resolved)
+
+        # Strategy 3: Try stripping common prefixes if path duplicates project structure
+        # e.g., project=/a/b/src/pkg, path=src/pkg/file.py -> /a/b/src/pkg/file.py
+        path_parts = Path(path).parts
+        proj_parts = project_path.parts
+        for i in range(len(path_parts)):
+            # Check if path_parts[i:] starts with a suffix of proj_parts
+            for j in range(len(proj_parts)):
+                if path_parts[i:i+1] == proj_parts[j:j+1]:
+                    # Found overlap - try resolving from project parent
+                    overlap_start = j
+                    candidate = Path(*proj_parts[:overlap_start], *path_parts[i:])
+                    if candidate.exists():
+                        return str(candidate)
+
+        # Fallback: return project-relative (may not exist)
+        return str(resolved)
+
+    # No project path set - resolve relative to CWD
+    return str(Path(path).resolve())
 
 
 def list_projects(include_empty: bool = False) -> str:
