@@ -1563,6 +1563,37 @@ def index_compress(
         console.print(f"\n[bold]Total:[/bold] {CompressionStats._format_size(total_saved)} saved ({total_ratio:.1f}x ratio)")
 
 
+@index_app.command("cache")
+def index_cache(
+    clear: Annotated[
+        bool,
+        typer.Option("--clear", "-c", help="Clear all caches"),
+    ] = False,
+) -> None:
+    """Show or clear AST index cache statistics.
+    
+    The AST index uses caches for performance:
+    - Index cache: Parsed AST indexes for files
+    - Parser cache: Tree-sitter language parsers
+    
+    Examples:
+        rlm-dspy index cache          # Show cache stats
+        rlm-dspy index cache --clear  # Clear all caches
+    """
+    from .core.ast_index import clear_index_cache, clear_parser_cache, get_cache_stats
+    
+    if clear:
+        index_count = clear_index_cache()
+        parser_count = clear_parser_cache()
+        console.print(f"[green]✓[/green] Cleared {index_count} index entries, {parser_count} parsers")
+    else:
+        stats = get_cache_stats()
+        console.print("[bold]AST Cache Statistics[/bold]\n")
+        console.print(f"  Index cache:  {stats['index_cache_size']} / {stats['max_index_cache_size']} entries")
+        console.print(f"  Parser cache: {stats['parser_cache_size']} parsers loaded")
+        console.print(f"\n[dim]Use --clear to free memory[/dim]")
+
+
 # =============================================================================
 # Project Commands (for multi-project management)
 # =============================================================================
