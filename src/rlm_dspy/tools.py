@@ -148,6 +148,9 @@ def ripgrep(pattern: str, path: str = ".", flags: str = "") -> str:
         if result.returncode == 0:
             return result.stdout[:50000]  # Limit output size
         elif result.returncode == 1:
+            # No matches - check if pattern looks like an identifier and suggest -i
+            if "-i" not in flags and re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', pattern):
+                return f"(no matches found for '{pattern}' - try with '-i' flag for case-insensitive search)"
             return "(no matches found)"
         else:
             return f"(ripgrep error: {result.stderr})"
@@ -477,10 +480,122 @@ def find_calls(path: str, function_name: str) -> str:
     Examples:
         find_calls("src/", "print")     # Find print() calls
         find_calls("src/", "query")     # Find query() calls
+    
+    Note: If no matches found, automatically tries case-insensitive search.
     """
     # Use ripgrep - matches function_name followed by (
     pattern = rf"\b{re.escape(function_name)}\s*\("
-    return ripgrep(pattern, path, "-n")
+    result = ripgrep(pattern, path, "-n")
+    
+    # Smart fallback: if no matches, try case-insensitive
+    if "(no matches found)" in result:
+        result_ci = ripgrep(pattern, path, "-n -i")  # -i = case insensitive
+        if "(no matches found)" not in result_ci:
+            # Found with different case - show results with warning
+            return f"⚠ No exact match for '{function_name}', but found with different case:\n{result_ci}"
+    
+    return result
+
+
+def find_usages(file_path: str, symbol_name: str | None = None) -> str:
+    """
+    Find all references to symbols defined in a file across the codebase.
+    
+    KEY PRINCIPLE: This tool extracts EXACT symbol names from AST first,
+    then searches. No case-sensitivity issues, no guessing.
+    
+    Use cases:
+    - Dead code detection: Which symbols have no external usages?
+    - Refactoring: Where is this class/function used?
+    - Impact analysis: What will break if I change this?
+    - Understanding: How is this module connected to the rest?
+    
+    Args:
+        file_path: File containing the symbol definitions
+        symbol_name: Optional - specific symbol to check. If None, checks ALL symbols.
+    
+    Returns:
+        For each symbol: definition location + usage locations across codebase
+    
+    Examples:
+        find_usages("src/optimizer.py")  # All symbols in file
+        find_usages("src/optimizer.py", "SIMBAOptimizer")  # Specific symbol
+    
+    Note: If you get the case wrong, it suggests the correct spelling.
+    """
+    try:
+        from .core.ast_index import index_file
+        
+        file_path = _resolve_project_path(file_path)
+        
+        if not Path(file_path).exists():
+            return f"(file not found: {file_path})"
+        
+        # Step 1: Get exact symbol names from the file using AST
+        ast_index = index_file(str(file_path))
+        
+        if not ast_index or not ast_index.definitions:
+            return f"(no symbols found in {file_path})"
+        
+        # Convert to list of dicts for easier processing
+        symbols = [
+            {"name": d.name, "kind": d.kind, "line": d.line, "parent": d.parent}
+            for d in ast_index.definitions
+        ]
+        
+        # Filter to specific symbol if requested
+        if symbol_name:
+            filtered = [s for s in symbols if s["name"] == symbol_name]
+            if not filtered:
+                # Try case-insensitive match and suggest correct name
+                all_names = [s["name"] for s in symbols]
+                matches = [n for n in all_names if n.lower() == symbol_name.lower()]
+                if matches:
+                    return f"(symbol '{symbol_name}' not found. Did you mean: {', '.join(set(matches))}?)"
+                return f"(symbol '{symbol_name}' not found in {file_path})"
+            symbols = filtered
+        
+        # Step 2: For each top-level symbol (not methods), search for usages
+        results = []
+        base_path = Path(file_path).parent.parent  # Go up to find project root
+        search_path = str(base_path) if base_path.exists() else "."
+        
+        # Only check top-level symbols (classes, functions) - not methods
+        top_level = [s for s in symbols if s["parent"] is None and s["kind"] in ("class", "function")]
+        
+        for sym in top_level:
+            name = sym["name"]
+            kind = sym["kind"]
+            line = sym["line"]
+            
+            # Search for usages using exact name (with word boundaries)
+            pattern = rf"\b{re.escape(name)}\b"
+            usage_result = ripgrep(pattern, search_path, "-l")  # -l = files only
+            
+            # Count files and exclude the definition file
+            if "(no matches found)" in usage_result or not usage_result.strip():
+                usage_files = []
+            else:
+                usage_files = [f for f in usage_result.strip().split("\n") 
+                              if f and not f.endswith(Path(file_path).name)]
+            
+            # Format result
+            status = f"({len(usage_files)} files)" if usage_files else "⚠ NO EXTERNAL USAGES"
+            results.append(f"{kind} {name} (line {line}): {status}")
+            if usage_files:
+                # Show shortened paths
+                short_files = [Path(f).name for f in usage_files[:5]]
+                results.append(f"  → {', '.join(short_files)}")
+                if len(usage_files) > 5:
+                    results.append(f"  ... and {len(usage_files) - 5} more files")
+        
+        if not results:
+            return f"(no top-level classes/functions found in {file_path})"
+            
+        return "\n".join(results)
+        
+    except Exception as e:
+        return f"(find_usages error: {e})"
 
 
 def shell(command: str, timeout: int = 30) -> str:
@@ -856,6 +971,7 @@ BUILTIN_TOOLS: dict[str, Any] = {
     "find_methods": find_methods,
     "find_imports": find_imports,
     "find_calls": find_calls,
+    "find_usages": find_usages,  # Dead code detection - extracts exact names first
     # Semantic search (uses current project by default)
     "semantic_search": semantic_search,
     # Shell (unsafe)

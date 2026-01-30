@@ -806,15 +806,15 @@ EXPLORATION STRATEGY (follow this order):
 
 2. NARROW DOWN:
    - `index_code("src/", kind="class")` - Find all classes in a directory
-   - `ripgrep("keyword", ".", "-i")` - Case-insensitive search across all files
+   - `find_usages("path/to/file.py")` - Find where symbols are used (extracts exact names!)
 
 3. THEN READ SPECIFIC CODE:
    - `read_file(path, start_line, end_line)` - Read only what you need
 
-SEARCH TIPS:
-- Tools are CASE-SENSITIVE by default
-- Use `ripgrep("pattern", ".", "-i")` for case-insensitive
-- When claiming "X is not used", verify with BOTH case-sensitive AND case-insensitive search
+CRITICAL: EXTRACT EXACT NAMES BEFORE SEARCHING
+- DON'T guess symbol names from filenames (simba_optimizer.py ≠ SimbaOptimizer)
+- DO use `find_usages(file)` or `index_code(file)` to get EXACT names first
+- THEN search with exact names
 
 VERIFICATION RULES:
 1. NEVER claim issues without using read_file() to see actual code
@@ -823,8 +823,8 @@ VERIFICATION RULES:
 
 ANTI-PATTERNS:
 - DON'T analyze files one by one - search across project first
-- DON'T guess file locations - use find_files or ripgrep
-- DON'T claim "not found" without trying case-insensitive search
+- DON'T guess symbol names - extract exact names from AST first
+- DON'T claim "not found" without verifying you have the right case
 
 """
 

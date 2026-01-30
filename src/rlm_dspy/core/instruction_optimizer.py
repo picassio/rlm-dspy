@@ -108,15 +108,26 @@ AVAILABLE TOOLS:
 - `semantic_search(query)` - Conceptual search across indexed project
 - `index_code(path, kind, name)` - Find classes/functions/methods with EXACT line numbers
 - `find_classes(path)`, `find_functions(path)`, `find_methods(path)` - Structural queries
-- `find_calls(path, function_name)` - Find where functions are called (CASE-SENSITIVE!)
+- `find_calls(path, function_name)` - Find call sites (CASE-SENSITIVE - know exact name first!)
+- `find_usages(file_path)` - Find ALL references to symbols in a file (extracts exact names from AST)
 - `ripgrep(pattern, path, flags)` - Fast regex search (use flags="-i" for case-insensitive)
 - `read_file(path, start_line, end_line)` - Read specific sections
+
+CRITICAL: EXTRACT EXACT NAMES BEFORE SEARCHING
+- DON'T guess symbol names from filenames (simba_optimizer.py ≠ SimbaOptimizer)
+- DO use `find_usages(file)` or `index_code(file)` to get EXACT names first
+- THEN search with exact names
+
+Use `find_usages(file)` for:
+- Dead code detection: Which symbols have no external usages?
+- Refactoring: Where is this class/function used?
+- Impact analysis: What will break if I change this?
+- Understanding: How is this module connected to the rest?
 
 SEARCH TIPS:
 - `find_calls` and `ripgrep` are CASE-SENSITIVE by default
 - Use `ripgrep("pattern", ".", "-i")` for case-insensitive search
-- When searching for a class/function, check the EXACT name first with index_code
-- If search returns nothing, try case-insensitive or check spelling
+- If search returns nothing, you probably have the wrong case
 
 ANTI-PATTERNS (avoid these):
 - DON'T analyze files one by one - search across the project first
