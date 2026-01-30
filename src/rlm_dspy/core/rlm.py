@@ -650,6 +650,13 @@ FILE OPERATIONS:
 - `read_file(path, start_line, end_line)` - Read specific file sections
 - `find_files(pattern, path)` - Find files by name pattern
 
+CRITICAL VERIFICATION RULES:
+1. NEVER claim a bug/issue exists without using read_file() to see the actual code
+2. ALWAYS verify line numbers by reading the file - don't guess or assume
+3. If you claim "file.py:123 has bug X", you MUST have read lines 120-130 to verify
+4. Check for existing protections before claiming vulnerabilities (guards, validation, etc.)
+5. When reporting issues, quote the actual problematic code you found
+
 Use structural tools for exact lookups, semantic search for exploratory queries.
 
 """
