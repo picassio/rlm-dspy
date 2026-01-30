@@ -1184,7 +1184,6 @@ rlm-dspy config set optimization.use_bootstrapped_demos true
 
 ### Phase 13: Additional Enhancements (Backlog)
 
-- [ ] **MCP Tool Integration** - External service support via Model Context Protocol
 - [ ] **KNNFewShot** - Dynamic example selection for better prompts  
 - [ ] **SIMBA** - Self-improving optimization
 - [ ] **Index Compression** - Reduce disk usage for large indexes
@@ -1192,6 +1191,38 @@ rlm-dspy config set optimization.use_bootstrapped_demos true
 - [ ] **IDE Integration** - VS Code extension for inline search
 - [ ] **json_repair Integration** - Robust JSON parsing from DSPy adapters
 - [ ] **Callback Middleware** - Extensibility via `@with_callbacks` pattern
+
+---
+
+### Optional: MCP Tool Integration
+
+**Status:** Optional / Low Priority
+
+**Goal:** External service support via Model Context Protocol.
+
+MCP allows connecting to external tools (filesystem, GitHub, databases, etc.) via a standardized protocol. This is useful for extending rlm-dspy with external capabilities but is **not required** for core functionality.
+
+**When to implement:**
+- When users need to query external services (GitHub issues, Jira, etc.)
+- When integrating with IDE extensions that use MCP
+- When building multi-agent workflows
+
+**Configuration (if implemented):**
+
+```yaml
+# ~/.rlm/config.yaml
+
+# MCP Settings (optional)
+mcp_servers:
+  - name: filesystem
+    command: npx @anthropic/mcp-server-filesystem /path/to/allowed/dir
+  - name: github
+    command: npx @anthropic/mcp-server-github
+    env:
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
+```
+
+**Note:** rlm-dspy already has powerful built-in tools (ripgrep, tree-sitter, LSP, semantic search) that cover most code analysis needs without MCP.
 
 ---
 
