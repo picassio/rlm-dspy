@@ -1,129 +1,161 @@
-"""Core RLM-DSPy modules."""
+"""Core RLM-DSPy modules.
 
-# Core RLM (uses dspy.RLM for REPL-based exploration)
-from .rlm import RLM, RLMConfig, RLMResult, ProgressCallback
+Uses lazy imports to avoid ~3s DSPy startup cost for lightweight operations.
+"""
 
-# Embeddings
-from .embeddings import (
-    EmbeddingConfig,
-    clear_embedder_cache,
-    embed_texts,
-    get_embedder,
-    get_embedding_dim,
-)
+# Mapping of names to their source modules for lazy loading
+_LAZY_IMPORTS = {
+    # Core RLM (imports DSPy - slow)
+    "RLM": ".rlm",
+    "RLMConfig": ".rlm",
+    "RLMResult": ".rlm",
+    "ProgressCallback": ".rlm",
+    # Embeddings (imports DSPy - slow)
+    "EmbeddingConfig": ".embeddings",
+    "clear_embedder_cache": ".embeddings",
+    "embed_texts": ".embeddings",
+    "get_embedder": ".embeddings",
+    "get_embedding_dim": ".embeddings",
+    # Vector Index (imports DSPy - slow)
+    "CodeIndex": ".vector_index",
+    "CodeSnippet": ".vector_index",
+    "IndexConfig": ".vector_index",
+    "SearchResult": ".vector_index",
+    "get_index_manager": ".vector_index",
+    "semantic_search": ".vector_index",
+    # Citations (imports DSPy - slow)
+    "SourceLocation": ".citations",
+    "CitedFinding": ".citations",
+    "CitedAnalysisResult": ".citations",
+    "code_to_document": ".citations",
+    "files_to_documents": ".citations",
+    "citations_to_locations": ".citations",
+    "parse_findings_from_text": ".citations",
+    # Project Registry (lightweight)
+    "Project": ".project_registry",
+    "ProjectRegistry": ".project_registry",
+    "RegistryConfig": ".project_registry",
+    "get_project_registry": ".project_registry",
+    # Daemon (lightweight)
+    "DaemonConfig": ".daemon",
+    "IndexDaemon": ".daemon",
+    "get_daemon_pid": ".daemon",
+    "is_daemon_running": ".daemon",
+    "stop_daemon": ".daemon",
+    # Validation (mostly lightweight)
+    "PreflightResult": ".validation",
+    "ValidationResult": ".validation",
+    "preflight_check": ".validation",
+}
 
-# Vector Index
-from .vector_index import (
-    CodeIndex,
-    CodeSnippet,
-    IndexConfig,
-    SearchResult,
-    get_index_manager,
-    semantic_search,
-)
 
-# Citations
-from .citations import (
-    SourceLocation,
-    CitedFinding,
-    CitedAnalysisResult,
-    code_to_document,
-    files_to_documents,
-    citations_to_locations,
-    parse_findings_from_text,
-)
+def __getattr__(name: str):
+    """Lazy import to avoid loading DSPy for lightweight operations."""
+    if name in _LAZY_IMPORTS:
+        import importlib
+        module = importlib.import_module(_LAZY_IMPORTS[name], package=__name__)
+        return getattr(module, name)
 
-# Project Registry
-from .project_registry import (
-    Project,
-    ProjectRegistry,
-    RegistryConfig,
-    get_project_registry,
-)
+    # For remaining lightweight modules, import eagerly on first access
+    if name in _LIGHTWEIGHT_EXPORTS:
+        _load_lightweight()
+        return globals()[name]
 
-# Daemon
-from .daemon import (
-    DaemonConfig,
-    IndexDaemon,
-    get_daemon_pid,
-    is_daemon_running,
-    stop_daemon,
-)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
-# Debug utilities
-from .debug import (
-    Verbosity,
-    configure_debug,
-    debug_log,
-    debug_request,
-    debug_response,
-    get_verbosity,
-    is_debug,
-    is_verbose,
-    setup_logging,
-    timer,
-    trace,
-    truncate_for_log,
-)
 
-# File utilities
-from .fileutils import (
-    PathTraversalError,
-    SKIP_DIRS,
-    atomic_write,
-    clear_context_cache,
-    collect_files,
-    ensure_dir,
-    format_file_context,
-    get_cache_dir,
-    get_context_cache_stats,
-    is_linux,
-    is_macos,
-    is_windows,
-    estimate_tokens,
-    load_context_from_paths,
-    load_context_from_paths_cached,
-    load_gitignore_patterns,
-    smart_truncate_context,
-    truncate_context,
-    path_to_module,
-    should_skip_entry,
-    smart_link,
-    smart_rmtree,
-    sync_directory,
-    validate_path_safety,
-)
+# Lightweight modules that don't import DSPy
+_LIGHTWEIGHT_EXPORTS = {
+    # Debug utilities
+    "Verbosity", "configure_debug", "debug_log", "debug_request", "debug_response",
+    "get_verbosity", "is_debug", "is_verbose", "setup_logging", "timer", "trace",
+    "truncate_for_log",
+    # File utilities
+    "PathTraversalError", "SKIP_DIRS", "atomic_write", "clear_context_cache",
+    "collect_files", "ensure_dir", "format_file_context", "get_cache_dir",
+    "get_context_cache_stats", "is_linux", "is_macos", "is_windows", "estimate_tokens",
+    "load_context_from_paths", "load_context_from_paths_cached", "load_gitignore_patterns",
+    "smart_truncate_context", "truncate_context", "path_to_module", "should_skip_entry",
+    "smart_link", "smart_rmtree", "sync_directory", "validate_path_safety",
+    # Retry utilities
+    "is_rate_limit_error", "parse_retry_after", "retry_sync", "retry_with_backoff",
+    # Secrets management
+    "MissingSecretError", "check_for_exposed_secrets", "clean_secrets", "get_api_key",
+    "inject_secrets", "is_secret_key", "mask_value",
+    # Token stats
+    "SessionStats", "TokenStats", "count_tokens", "estimate_cost", "get_session",
+    "record_operation",
+}
 
-# Retry utilities
-from .retry import is_rate_limit_error, parse_retry_after, retry_sync, retry_with_backoff
+_lightweight_loaded = False
 
-# Secrets management
-from .secrets import (
-    MissingSecretError,
-    check_for_exposed_secrets,
-    clean_secrets,
-    get_api_key,
-    inject_secrets,
-    is_secret_key,
-    mask_value,
-)
 
-# Token stats
-from .token_stats import (
-    SessionStats,
-    TokenStats,
-    count_tokens,
-    estimate_cost,
-    get_session,
-    record_operation,
-)
+def _load_lightweight():
+    """Load all lightweight modules at once."""
+    global _lightweight_loaded
+    if _lightweight_loaded:
+        return
+    _lightweight_loaded = True
 
-# Validation
-from .validation import (
-    PreflightResult,
-    ValidationResult,
-    preflight_check,
-)
+    from .debug import (
+        Verbosity, configure_debug, debug_log, debug_request, debug_response,
+        get_verbosity, is_debug, is_verbose, setup_logging, timer, trace,
+        truncate_for_log,
+    )
+    from .fileutils import (
+        PathTraversalError, SKIP_DIRS, atomic_write, clear_context_cache,
+        collect_files, ensure_dir, format_file_context, get_cache_dir,
+        get_context_cache_stats, is_linux, is_macos, is_windows, estimate_tokens,
+        load_context_from_paths, load_context_from_paths_cached, load_gitignore_patterns,
+        smart_truncate_context, truncate_context, path_to_module, should_skip_entry,
+        smart_link, smart_rmtree, sync_directory, validate_path_safety,
+    )
+    from .retry import is_rate_limit_error, parse_retry_after, retry_sync, retry_with_backoff
+    from .secrets import (
+        MissingSecretError, check_for_exposed_secrets, clean_secrets, get_api_key,
+        inject_secrets, is_secret_key, mask_value,
+    )
+    from .token_stats import (
+        SessionStats, TokenStats, count_tokens, estimate_cost, get_session,
+        record_operation,
+    )
+
+    # Update globals for subsequent access
+    globals().update({
+        # Debug
+        "Verbosity": Verbosity, "configure_debug": configure_debug, "debug_log": debug_log,
+        "debug_request": debug_request, "debug_response": debug_response,
+        "get_verbosity": get_verbosity, "is_debug": is_debug, "is_verbose": is_verbose,
+        "setup_logging": setup_logging, "timer": timer, "trace": trace,
+        "truncate_for_log": truncate_for_log,
+        # Fileutils
+        "PathTraversalError": PathTraversalError, "SKIP_DIRS": SKIP_DIRS,
+        "atomic_write": atomic_write, "clear_context_cache": clear_context_cache,
+        "collect_files": collect_files, "ensure_dir": ensure_dir,
+        "format_file_context": format_file_context, "get_cache_dir": get_cache_dir,
+        "get_context_cache_stats": get_context_cache_stats, "is_linux": is_linux,
+        "is_macos": is_macos, "is_windows": is_windows, "estimate_tokens": estimate_tokens,
+        "load_context_from_paths": load_context_from_paths,
+        "load_context_from_paths_cached": load_context_from_paths_cached,
+        "load_gitignore_patterns": load_gitignore_patterns,
+        "smart_truncate_context": smart_truncate_context, "truncate_context": truncate_context,
+        "path_to_module": path_to_module, "should_skip_entry": should_skip_entry,
+        "smart_link": smart_link, "smart_rmtree": smart_rmtree,
+        "sync_directory": sync_directory, "validate_path_safety": validate_path_safety,
+        # Retry
+        "is_rate_limit_error": is_rate_limit_error, "parse_retry_after": parse_retry_after,
+        "retry_sync": retry_sync, "retry_with_backoff": retry_with_backoff,
+        # Secrets
+        "MissingSecretError": MissingSecretError, "check_for_exposed_secrets": check_for_exposed_secrets,
+        "clean_secrets": clean_secrets, "get_api_key": get_api_key,
+        "inject_secrets": inject_secrets, "is_secret_key": is_secret_key, "mask_value": mask_value,
+        # Token stats
+        "SessionStats": SessionStats, "TokenStats": TokenStats, "count_tokens": count_tokens,
+        "estimate_cost": estimate_cost, "get_session": get_session, "record_operation": record_operation,
+    })
+
+
+__all__ = list(_LAZY_IMPORTS.keys()) + list(_LIGHTWEIGHT_EXPORTS)
 
 __all__ = [
     # Core RLM

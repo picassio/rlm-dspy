@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated, Optional, TYPE_CHECKING
 
 import typer
 from rich.console import Console
@@ -17,8 +17,16 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
-from .core.rlm import RLM, RLMConfig, RLMResult
-from .core.fileutils import PathTraversalError, validate_path_safety
+# Lazy imports for faster CLI startup (~3s saved by deferring DSPy import)
+if TYPE_CHECKING:
+    from .core.rlm import RLM, RLMConfig, RLMResult
+
+# Import lightweight fileutils directly without going through core/__init__.py
+# This avoids triggering the DSPy import chain
+import importlib
+_fileutils = importlib.import_module("rlm_dspy.core.fileutils")
+PathTraversalError = _fileutils.PathTraversalError
+validate_path_safety = _fileutils.validate_path_safety
 
 app = typer.Typer(
     name="rlm-dspy",
@@ -143,6 +151,9 @@ def _get_config(
     if max_workers is not None and max_workers <= 0:
         console.print("[red]Error: --max-workers must be positive[/red]")
         raise typer.Exit(1)
+
+    # Lazy import to avoid 3s DSPy startup for non-query commands
+    from .core.rlm import RLMConfig
 
     # RLMConfig reads from env by default, only override if CLI args provided
     config = RLMConfig()
@@ -588,6 +599,8 @@ def ask(
             raise typer.Exit(1)
         sig = sig_class
 
+    # Lazy import RLM to avoid 3s DSPy startup for non-query commands
+    from .core.rlm import RLM
     rlm = RLM(config=config, signature=sig, use_tools=not no_tools)
 
     # Show debug info
@@ -702,6 +715,7 @@ def analyze(
     By default, runs 3 analysis queries in parallel for ~3x faster results.
     Use --sequential for debugging or if you encounter issues.
     """
+    from .core.rlm import RLM
     config = _get_config(model)
     rlm = RLM(config=config)
 
@@ -811,6 +825,7 @@ def diff(
         git diff | rlm-dspy diff "What changed?"
         rlm-dspy diff "Are there any bugs?" --file changes.diff
     """
+    from .core.rlm import RLM
     config = _get_config(model)
     rlm = RLM(config=config)
 
@@ -1014,6 +1029,7 @@ def config(
 ) -> None:
     """Show or edit configuration."""
     if show:
+        from .core.rlm import RLMConfig
         table = Table(title="RLM-DSPy Configuration")
         table.add_column("Setting", style="cyan")
         table.add_column("Value", style="green")
@@ -1089,6 +1105,7 @@ def preflight(
         rlm-dspy preflight --no-network
     """
     from .core.validation import preflight_check
+    from .core.rlm import RLM, RLMConfig
 
     config = RLMConfig()
 
