@@ -518,8 +518,8 @@ def find_usages(file_path: str, symbol_name: str | None = None) -> str:
         For each symbol: definition location + usage locations across codebase
     
     Examples:
-        find_usages("src/optimizer.py")  # All symbols in file
-        find_usages("src/optimizer.py", "SIMBAOptimizer")  # Specific symbol
+        find_usages("src/rlm_dspy/core/simba_optimizer.py")  # All symbols in file
+        find_usages("src/rlm_dspy/core/rlm.py", "RLM")  # Specific symbol
     
     Note: If you get the case wrong, it suggests the correct spelling.
     """
