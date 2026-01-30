@@ -156,17 +156,20 @@ cargo install ripgrep
 
 **LSP Servers** - For IDE-quality code intelligence (optional):
 ```bash
-# Python (pyright)
-npm install -g pyright
+# Install all LSP servers at once (recommended)
+rlm-dspy lsp install-all
 
-# TypeScript/JavaScript
-npm install -g typescript-language-server typescript
+# Or during setup
+rlm-dspy setup --install-lsp
 
-# Rust
-rustup component add rust-analyzer
+# Or install individually
+rlm-dspy lsp install python      # Pyright
+rlm-dspy lsp install typescript  # TypeScript LS
+rlm-dspy lsp install rust        # rust-analyzer
+rlm-dspy lsp install go          # gopls
 
-# Go
-go install golang.org/x/tools/gopls@latest
+# Check status
+rlm-dspy lsp status
 ```
 
 Tree-sitter is included by default for AST-based code analysis.
@@ -1303,6 +1306,164 @@ pip install rlm-dspy[lsp]
 | **Index Daemon** | ❌ No | Only if you want auto-indexing |
 | **LSP Servers** | ❌ No | Only for LSP tools |
 | **ripgrep** | ❌ No | Only for `ripgrep` tool (fallback: grep) |
+
+## LSP Integration (IDE-Quality Code Intelligence)
+
+RLM-DSPy includes full LSP (Language Server Protocol) support for IDE-quality code analysis across 16+ languages. This provides precise navigation, references, and type information.
+
+### Quick Start
+
+```bash
+# Check LSP server status
+rlm-dspy lsp status
+
+# Install all available LSP servers
+rlm-dspy lsp install-all
+
+# Or install during setup
+rlm-dspy setup --install-lsp
+
+# Test LSP on a file
+rlm-dspy lsp test src/main.py
+```
+
+### Available LSP Tools
+
+| Tool | Description | Example |
+|------|-------------|---------|
+| `find_references(file, line, col)` | Find all usages of a symbol | Cross-file reference tracking |
+| `go_to_definition(file, line, col)` | Jump to definition | Navigate to function source |
+| `get_type_info(file, line, col)` | Get type signature & docs | Hover information |
+| `get_symbol_hierarchy(file)` | Get file's symbol tree | Classes, methods, functions |
+
+### Supported Languages
+
+| Language | Server | Status |
+|----------|--------|--------|
+| Python | Pyright | ✅ Auto-installed |
+| TypeScript/JavaScript | typescript-language-server | ✅ Auto-installed |
+| Go | gopls | ✅ Auto-installed |
+| Rust | rust-analyzer | ✅ Auto-installed |
+| C/C++ | clangd | ✅ Auto-installed |
+| Java | Eclipse JDTLS | ✅ Auto-install on use |
+| Kotlin | kotlin-language-server | ✅ Auto-install on use |
+| Scala | Metals | ✅ Auto-installed |
+| Ruby | ruby-lsp | ✅ Auto-installed |
+| PHP | Intelephense | ✅ Auto-installed |
+| C# | OmniSharp | ✅ Auto-install on use |
+| Haskell | HLS | ✅ Auto-installed |
+| Lua | lua-language-server | ✅ Auto-install on use |
+| Bash | bash-language-server | ✅ Auto-installed |
+
+Plus 25+ additional languages via solidlsp (Dart, Elixir, Elm, etc.).
+
+### LSP CLI Commands
+
+```bash
+# Show installation status
+rlm-dspy lsp status
+
+# Install specific server
+rlm-dspy lsp install python
+rlm-dspy lsp install typescript
+rlm-dspy lsp install rust
+
+# Install all servers
+rlm-dspy lsp install-all
+
+# Test LSP functionality on a file
+rlm-dspy lsp test src/main.py
+```
+
+### Using LSP Tools in Queries
+
+The LLM automatically uses LSP tools when appropriate:
+
+```bash
+# Find all references to a function
+rlm-dspy ask "Find all places where authenticate() is called" src/
+
+# Get symbol hierarchy
+rlm-dspy ask "Use get_symbol_hierarchy to show the structure of api.py" src/
+
+# Navigate codebase
+rlm-dspy ask "What functions call the validate method?" src/
+```
+
+### Python API
+
+```python
+from rlm_dspy.tools import (
+    find_references,
+    go_to_definition,
+    get_type_info,
+    get_symbol_hierarchy,
+)
+
+# Get symbol hierarchy for a file
+symbols = get_symbol_hierarchy("src/main.py")
+print(symbols)
+# class: MyClass [lines 10-50]
+#   method: __init__ [lines 12-15]
+#   method: process [lines 17-30]
+# function: main [lines 52-60]
+
+# Find all references to symbol at line 15, column 10
+refs = find_references("src/main.py", 15, 10)
+print(refs)
+# Found 12 references:
+#   src/main.py:15:10
+#   src/api.py:42:5
+#   tests/test_main.py:8:12
+#   ...
+
+# Get type info
+info = get_type_info("src/main.py", 15, 10)
+print(info)
+# def process(self, data: dict[str, Any]) -> Result
+# Process the input data and return a Result object.
+```
+
+### LSP vs Tree-sitter Tools
+
+| Feature | Tree-sitter (AST) | LSP |
+|---------|-------------------|-----|
+| **Speed** | ⚡ Very fast | 🐢 Slower (server startup) |
+| **Accuracy** | ✅ Exact syntax | ✅ Semantic (type-aware) |
+| **Cross-file** | ❌ Single file | ✅ Whole project |
+| **Type info** | ❌ No | ✅ Yes |
+| **References** | ❌ No | ✅ Yes |
+| **Go to def** | ❌ No | ✅ Yes |
+| **Setup** | None | Needs language server |
+
+**When to use which:**
+- **Tree-sitter** (`index_code`, `find_classes`, etc.): Fast structural queries within files
+- **LSP** (`find_references`, `go_to_definition`): Cross-file navigation, type information
+
+### Troubleshooting LSP
+
+```bash
+# Check if servers are installed
+rlm-dspy lsp status
+
+# Test LSP on a specific file
+rlm-dspy lsp test src/main.py
+
+# If LSP returns "(LSP not available)":
+# 1. Install the language server
+rlm-dspy lsp install python
+
+# 2. Check server is in PATH
+which pyright  # Should return path
+
+# 3. Ensure file exists and is valid syntax
+python -m py_compile src/main.py
+```
+
+**Common issues:**
+- **"No definition found"**: Symbol may not have a definition (built-in, external library)
+- **Server startup slow**: First query starts server; subsequent queries are faster
+- **Missing server**: Run `rlm-dspy lsp install <language>`
 
 ## Documentation
 
