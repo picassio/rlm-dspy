@@ -54,6 +54,9 @@ dependencies = [
     "faiss-cpu>=1.7.0",
     # Watchdog for file system monitoring (daemon auto-indexing)
     "watchdog>=3.0.0",
+    # LSP support dependencies (for vendored solidlsp)
+    "psutil>=5.9.0",
+    "charset-normalizer>=3.0.0",
 ]
 
 [project.optional-dependencies]
@@ -67,14 +70,9 @@ dev = [
 local = [
     "sentence-transformers>=2.0.0",
 ]
-# For LSP-powered code intelligence (go to definition, find references, etc.)
-lsp = [
-    "solidlsp>=0.1.0",
-]
 # All optional features
 all = [
     "sentence-transformers>=2.0.0",
-    "solidlsp>=0.1.0",
 ]
 
 [project.scripts]

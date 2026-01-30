@@ -100,16 +100,16 @@ class TestLSPManager:
     def test_get_language_python(self):
         """Recognizes Python files."""
         manager = LSPManager(LSPConfig(enabled=False))
-
-        # Mock the import to avoid solidlsp dependency in test
-        with patch.dict('sys.modules', {'solidlsp.ls_config': MagicMock()}):
-            try:
-                from solidlsp.ls_config import Language
-                lang = manager._get_language(Path("test.py"))
-                assert lang == Language.PYTHON
-            except ImportError:
-                # solidlsp not installed - test the extension mapping logic
-                pass
+        
+        # Now returns string instead of Language enum
+        lang = manager._get_language(Path("test.py"))
+        assert lang == "python"
+        
+        lang = manager._get_language(Path("test.js"))
+        assert lang == "javascript"
+        
+        lang = manager._get_language(Path("test.go"))
+        assert lang == "go"
 
     def test_get_language_unsupported(self):
         """Returns None for unsupported extensions."""

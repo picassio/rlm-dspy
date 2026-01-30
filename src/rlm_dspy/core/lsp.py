@@ -3,7 +3,7 @@
 Provides precise code navigation, type information, and refactoring capabilities
 by leveraging actual language servers (pyright, rust-analyzer, gopls, etc.).
 
-Uses solidlsp from the Serena project for unified LSP management.
+Uses vendored solidlsp for unified LSP management with auto-installation support.
 """
 
 from __future__ import annotations
@@ -22,9 +22,18 @@ _lsp_manager: "LSPManager | None" = None
 @dataclass
 class LSPConfig:
     """Configuration for LSP integration."""
+    
     enabled: bool = True
-    timeout: int = 30  # Request timeout in seconds
+    """Whether LSP features are enabled."""
+    
+    auto_install: bool = True
+    """Whether to auto-install LSP servers when needed."""
+    
+    timeout: int = 30
+    """Request timeout in seconds."""
+    
     cache_dir: Path = field(default_factory=lambda: Path.home() / ".rlm" / "lsp_cache")
+    """Directory for LSP cache files."""
 
     @classmethod
     def from_user_config(cls) -> "LSPConfig":
@@ -35,6 +44,7 @@ class LSPConfig:
 
             return cls(
                 enabled=config.get("lsp_enabled", True),
+                auto_install=config.get("lsp_auto_install", True),
                 timeout=config.get("lsp_timeout", 30),
                 cache_dir=Path(config.get("lsp_cache_dir", "~/.rlm/lsp_cache")).expanduser(),
             )
@@ -42,18 +52,56 @@ class LSPConfig:
             return cls()
 
 
+# Extension to language mapping
+EXT_TO_LANGUAGE = {
+    # Python
+    ".py": "python",
+    ".pyi": "python",
+    # JavaScript/TypeScript
+    ".js": "javascript",
+    ".jsx": "javascript",
+    ".mjs": "javascript",
+    ".ts": "typescript",
+    ".tsx": "typescript",
+    # Other languages
+    ".go": "go",
+    ".rs": "rust",
+    ".java": "java",
+    ".kt": "kotlin",
+    ".kts": "kotlin",
+    ".scala": "scala",
+    ".sc": "scala",
+    ".cpp": "cpp",
+    ".cc": "cpp",
+    ".cxx": "cpp",
+    ".hpp": "cpp",
+    ".hxx": "cpp",
+    ".c": "c",
+    ".h": "c",
+    ".rb": "ruby",
+    ".cs": "csharp",
+    ".lua": "lua",
+    ".hs": "haskell",
+    ".lhs": "haskell",
+    ".php": "php",
+    ".sh": "bash",
+    ".bash": "bash",
+    ".zsh": "bash",
+}
+
+
 class LSPManager:
     """Manages language server connections for different projects/languages.
 
     Provides a unified interface for LSP operations across all supported languages.
-    Lazily starts language servers as needed.
+    Lazily starts language servers as needed and auto-installs them if configured.
 
     Example:
         ```python
         manager = get_lsp_manager()
 
         # Find all references to a symbol
-        refs = manager.find_references("/path/to/file.py", "MyClass", line=10)
+        refs = manager.find_references("/path/to/file.py", line=10, column=5)
 
         # Get type info for a symbol
         info = manager.get_hover_info("/path/to/file.py", line=10, column=5)
@@ -63,26 +111,12 @@ class LSPManager:
     def __init__(self, config: LSPConfig | None = None):
         self.config = config or LSPConfig.from_user_config()
         self._servers: dict[str, Any] = {}  # project_root -> SolidLanguageServer
-        self._solidlsp_available = self._check_solidlsp()
-
-    def _check_solidlsp(self) -> bool:
-        """Check if solidlsp is available."""
-        try:
-            from solidlsp import SolidLanguageServer  # noqa: F401
-            return True
-        except ImportError:
-            logger.warning(
-                "solidlsp not installed. LSP features unavailable. "
-                "Install with: pip install -e path/to/serena"
-            )
-            return False
+        self._solidlsp_available = True  # We vendored it, so it's always available
 
     def _get_server(self, file_path: str) -> Any | None:
         """Get or create a language server for the given file."""
-        if not self._solidlsp_available or not self.config.enabled:
+        if not self.config.enabled:
             return None
-
-        from solidlsp import SolidLanguageServer
 
         path = Path(file_path).resolve()
         if not path.exists():
@@ -90,37 +124,109 @@ class LSPManager:
 
         # Find project root (look for common markers)
         project_root = self._find_project_root(path)
-        project_key = str(project_root)
-
-        if project_key in self._servers:
-            server = self._servers[project_key]
-            if server.is_running():
-                return server
-            else:
-                # Server stopped, remove from cache
-                del self._servers[project_key]
-
-        # Determine language from file extension
+        
+        # Get language for this file
         language = self._get_language(path)
         if not language:
+            logger.debug(f"No language detected for {path}")
             return None
+        
+        # Project key includes language since we might have multiple servers per project
+        project_key = f"{project_root}:{language}"
 
+        if project_key in self._servers:
+            return self._servers[project_key]
+
+        # Check if server is installed, auto-install if configured
+        if self.config.auto_install:
+            if not self._ensure_server_installed(language):
+                return None
+        
         # Create and start language server
         try:
-            from solidlsp.ls_config import LanguageServerConfig
+            server = self._create_server(language, project_root)
+            if server:
+                self._servers[project_key] = server
+                logger.info(f"Started language server for {project_root} ({language})")
+            return server
+        except Exception as e:
+            logger.warning(f"Failed to start language server for {language}: {e}")
+            return None
 
-            ls_config = LanguageServerConfig(code_language=language)
+    def _ensure_server_installed(self, language: str) -> bool:
+        """Ensure LSP server is installed for the language."""
+        try:
+            from .lsp_installer import (
+                get_server_for_language,
+                check_server_installed,
+                install_for_language,
+                LANGUAGE_TO_SERVER,
+            )
+            
+            server_id = LANGUAGE_TO_SERVER.get(language)
+            if not server_id:
+                logger.debug(f"No LSP server configured for {language}")
+                return False
+            
+            if check_server_installed(server_id):
+                return True
+            
+            logger.info(f"Auto-installing LSP server for {language}...")
+            return install_for_language(language)
+            
+        except Exception as e:
+            logger.warning(f"Failed to check/install LSP server: {e}")
+            return False
+
+    def _create_server(self, language: str, project_root: Path) -> Any | None:
+        """Create a language server instance."""
+        try:
+            from rlm_dspy.vendor.solidlsp import SolidLanguageServer
+            from rlm_dspy.vendor.solidlsp.ls_config import Language, LanguageServerConfig
+            
+            # Map our language string to solidlsp Language enum
+            lang_enum = self._get_language_enum(language)
+            if not lang_enum:
+                return None
+            
+            config = LanguageServerConfig(code_language=lang_enum)
             server = SolidLanguageServer.create(
-                config=ls_config,
+                config=config,
                 repository_root_path=str(project_root),
                 timeout=float(self.config.timeout),
             )
             server.start()
-            self._servers[project_key] = server
-            logger.info("Started language server for %s (%s)", project_root, language)
             return server
+            
         except Exception as e:
-            logger.warning("Failed to start language server: %s", e)
+            logger.error(f"Failed to create server for {language}: {e}")
+            return None
+
+    def _get_language_enum(self, language: str) -> Any | None:
+        """Convert language string to solidlsp Language enum."""
+        try:
+            from rlm_dspy.vendor.solidlsp.ls_config import Language
+            
+            mapping = {
+                "python": Language.PYTHON,
+                "javascript": Language.TYPESCRIPT,  # TypeScript server handles both
+                "typescript": Language.TYPESCRIPT,
+                "go": Language.GO,
+                "rust": Language.RUST,
+                "java": Language.JAVA,
+                "kotlin": Language.KOTLIN,
+                "scala": Language.SCALA,
+                "cpp": Language.CPP,
+                "c": Language.CPP,  # clangd handles both
+                "ruby": Language.RUBY,
+                "csharp": Language.CSHARP,
+                "lua": Language.LUA,
+                "haskell": Language.HASKELL,
+                "php": Language.PHP,
+                "bash": Language.BASH,
+            }
+            return mapping.get(language)
+        except ImportError:
             return None
 
     def _find_project_root(self, path: Path) -> Path:
@@ -141,79 +247,9 @@ class LSPManager:
         # Fallback to file's directory
         return path if path.is_dir() else path.parent
 
-    def _get_language(self, path: Path) -> Any | None:
-        """Get Language enum for a file extension."""
-        try:
-            from solidlsp.ls_config import Language
-
-            ext_map = {
-                # Python
-                ".py": Language.PYTHON,
-                ".pyi": Language.PYTHON,
-                # JavaScript/TypeScript (use TypeScript server for both)
-                ".js": Language.TYPESCRIPT,
-                ".jsx": Language.TYPESCRIPT,
-                ".mjs": Language.TYPESCRIPT,
-                ".ts": Language.TYPESCRIPT,
-                ".tsx": Language.TYPESCRIPT,
-                # Other languages
-                ".go": Language.GO,
-                ".rs": Language.RUST,
-                ".java": Language.JAVA,
-                ".kt": Language.KOTLIN,
-                ".kts": Language.KOTLIN,
-                ".scala": Language.SCALA,
-                ".sc": Language.SCALA,
-                ".cpp": Language.CPP,
-                ".cc": Language.CPP,
-                ".cxx": Language.CPP,
-                ".hpp": Language.CPP,
-                ".hxx": Language.CPP,
-                ".c": Language.CPP,  # Use CPP server for C too
-                ".h": Language.CPP,
-                ".rb": Language.RUBY,
-                ".cs": Language.CSHARP,
-                ".lua": Language.LUA,
-                ".hs": Language.HASKELL,
-                ".lhs": Language.HASKELL,
-                ".php": Language.PHP,
-                ".swift": Language.SWIFT,
-                ".ex": Language.ELIXIR,
-                ".exs": Language.ELIXIR,
-                ".erl": Language.ERLANG,
-                ".hrl": Language.ERLANG,
-                ".sh": Language.BASH,
-                ".bash": Language.BASH,
-                ".zsh": Language.BASH,
-                ".dart": Language.DART,
-                ".clj": Language.CLOJURE,
-                ".cljs": Language.CLOJURE,
-                ".nix": Language.NIX,
-                ".zig": Language.ZIG,
-                ".jl": Language.JULIA,
-                ".r": Language.R,
-                ".R": Language.R,
-                ".yaml": Language.YAML,
-                ".yml": Language.YAML,
-                ".toml": Language.TOML,
-                ".md": Language.MARKDOWN,
-                ".ps1": Language.POWERSHELL,
-                ".vue": Language.VUE,
-                ".elm": Language.ELM,
-                ".fs": Language.FSHARP,
-                ".fsx": Language.FSHARP,
-                ".pl": Language.PERL,
-                ".pm": Language.PERL,
-                ".f90": Language.FORTRAN,
-                ".f95": Language.FORTRAN,
-                ".tf": Language.TERRAFORM,
-                ".pas": Language.PASCAL,
-                ".groovy": Language.GROOVY,
-                ".m": Language.MATLAB,
-            }
-            return ext_map.get(path.suffix.lower())
-        except ImportError:
-            return None
+    def _get_language(self, path: Path) -> str | None:
+        """Get language for a file extension."""
+        return EXT_TO_LANGUAGE.get(path.suffix.lower())
 
     def find_references(
         self,
@@ -236,7 +272,6 @@ class LSPManager:
             return []
 
         try:
-            # solidlsp uses relative path from project root
             abs_path = Path(file_path).resolve()
             project_root = self._find_project_root(abs_path)
             try:
@@ -253,18 +288,15 @@ class LSPManager:
             if not refs:
                 return []
 
-            # solidlsp returns Location objects (TypedDict-like)
             result = []
             for ref in refs:
                 if hasattr(ref, 'get'):
-                    # Dict-like
                     result.append({
                         "file": ref.get("uri", "").replace("file://", ""),
                         "line": ref.get("range", {}).get("start", {}).get("line", 0) + 1,
                         "column": ref.get("range", {}).get("start", {}).get("character", 0),
                     })
                 elif hasattr(ref, 'uri'):
-                    # Object with attributes
                     result.append({
                         "file": getattr(ref, 'uri', '').replace("file://", ""),
                         "line": getattr(ref, 'range', {}).get("start", {}).get("line", 0) + 1,
@@ -272,7 +304,7 @@ class LSPManager:
                     })
             return result
         except Exception as e:
-            logger.warning("Failed to find references: %s", e)
+            logger.warning(f"Failed to find references: {e}")
             return []
 
     def go_to_definition(
@@ -296,11 +328,17 @@ class LSPManager:
             return None
 
         try:
-            result = server.request_definition(file_path, line - 1, column)
+            abs_path = Path(file_path).resolve()
+            project_root = self._find_project_root(abs_path)
+            try:
+                rel_path = str(abs_path.relative_to(project_root))
+            except ValueError:
+                rel_path = str(abs_path)
+
+            result = server.request_definition(rel_path, line - 1, column)
             if not result:
                 return None
 
-            # Handle both single location and list of locations
             loc = result[0] if isinstance(result, list) else result
 
             return {
@@ -309,7 +347,7 @@ class LSPManager:
                 "column": loc.get("range", {}).get("start", {}).get("character", 0),
             }
         except Exception as e:
-            logger.warning("Failed to go to definition: %s", e)
+            logger.warning(f"Failed to go to definition: {e}")
             return None
 
     def get_hover_info(
@@ -333,11 +371,17 @@ class LSPManager:
             return None
 
         try:
-            result = server.request_hover(file_path, line - 1, column)
+            abs_path = Path(file_path).resolve()
+            project_root = self._find_project_root(abs_path)
+            try:
+                rel_path = str(abs_path.relative_to(project_root))
+            except ValueError:
+                rel_path = str(abs_path)
+
+            result = server.request_hover(rel_path, line - 1, column)
             if not result:
                 return None
 
-            # Extract contents from hover response
             contents = result.get("contents", "")
             if isinstance(contents, dict):
                 return contents.get("value", str(contents))
@@ -348,7 +392,7 @@ class LSPManager:
                 )
             return str(contents)
         except Exception as e:
-            logger.warning("Failed to get hover info: %s", e)
+            logger.warning(f"Failed to get hover info: {e}")
             return None
 
     def get_document_symbols(self, file_path: str) -> list[dict[str, Any]]:
@@ -365,11 +409,17 @@ class LSPManager:
             return []
 
         try:
-            result = server.request_document_symbols(file_path)
+            abs_path = Path(file_path).resolve()
+            project_root = self._find_project_root(abs_path)
+            try:
+                rel_path = str(abs_path.relative_to(project_root))
+            except ValueError:
+                rel_path = str(abs_path)
+
+            result = server.request_document_symbols(rel_path)
             if result is None:
                 return []
 
-            # solidlsp returns DocumentSymbols object with root_symbols attribute
             if hasattr(result, 'root_symbols'):
                 symbols = result.root_symbols
             elif isinstance(result, list):
@@ -379,7 +429,7 @@ class LSPManager:
 
             return self._flatten_symbols(symbols)
         except Exception as e:
-            logger.warning("Failed to get document symbols: %s", e)
+            logger.warning(f"Failed to get document symbols: {e}")
             return []
 
     def _flatten_symbols(
@@ -402,7 +452,6 @@ class LSPManager:
                 "parent": parent,
             })
 
-            # Recurse into children
             children = sym.get("children", [])
             if children:
                 result.extend(self._flatten_symbols(children, parent=name))
@@ -422,70 +471,22 @@ class LSPManager:
         }
         return kinds.get(kind, f"kind_{kind}")
 
-    def rename_symbol(
-        self,
-        file_path: str,
-        line: int,
-        column: int,
-        new_name: str
-    ) -> dict[str, list[dict]] | None:
-        """Get edits needed to rename a symbol.
-
-        Args:
-            file_path: Path to the file
-            line: Line number (1-indexed)
-            column: Column number (0-indexed)
-            new_name: New name for the symbol
-
-        Returns:
-            Dict mapping file paths to list of edits
-        """
-        server = self._get_server(file_path)
-        if not server:
-            return None
-
-        try:
-            result = server.request_rename_symbol_edit(
-                file_path, line - 1, column, new_name
-            )
-            if not result:
-                return None
-
-            # Convert workspace edit to our format
-            edits: dict[str, list[dict]] = {}
-            for uri, changes in result.get("changes", {}).items():
-                file = uri.replace("file://", "")
-                edits[file] = [
-                    {
-                        "start_line": c["range"]["start"]["line"] + 1,
-                        "start_col": c["range"]["start"]["character"],
-                        "end_line": c["range"]["end"]["line"] + 1,
-                        "end_col": c["range"]["end"]["character"],
-                        "new_text": c["newText"],
-                    }
-                    for c in changes
-                ]
-            return edits
-        except Exception as e:
-            logger.warning("Failed to rename symbol: %s", e)
-            return None
-
     def shutdown(self) -> None:
         """Shutdown all running language servers."""
         for project, server in list(self._servers.items()):
             try:
                 server.stop()
-                logger.info("Stopped language server for %s", project)
+                logger.info(f"Stopped language server for {project}")
             except Exception as e:
-                logger.warning("Error stopping server for %s: %s", project, e)
+                logger.warning(f"Error stopping server for {project}: {e}")
         self._servers.clear()
 
     def __del__(self) -> None:
-        """Cleanup on garbage collection - prevent orphaned subprocesses."""
+        """Cleanup on garbage collection."""
         try:
             self.shutdown()
         except Exception:
-            pass  # Best effort cleanup during GC
+            pass
 
 
 def get_lsp_manager(config: LSPConfig | None = None) -> LSPManager:
