@@ -46,6 +46,25 @@ _LAZY_IMPORTS = {
     "PreflightResult": ".validation",
     "ValidationResult": ".validation",
     "preflight_check": ".validation",
+    # Trace Collector (lightweight)
+    "REPLTrace": ".trace_collector",
+    "TraceCollector": ".trace_collector",
+    "TraceCollectorConfig": ".trace_collector",
+    "get_trace_collector": ".trace_collector",
+    "clear_trace_collector": ".trace_collector",
+    # Instruction Optimizer (imports DSPy for optimization)
+    "InstructionOptimizer": ".instruction_optimizer",
+    "InstructionOutcome": ".instruction_optimizer",
+    "OptimizerConfig": ".instruction_optimizer",
+    "get_instruction_optimizer": ".instruction_optimizer",
+    "clear_instruction_optimizer": ".instruction_optimizer",
+    # Grounded Proposer (imports DSPy for tip generation)
+    "GroundedProposer": ".grounded_proposer",
+    "ProposerConfig": ".grounded_proposer",
+    "FailureRecord": ".grounded_proposer",
+    "SuccessRecord": ".grounded_proposer",
+    "get_grounded_proposer": ".grounded_proposer",
+    "clear_grounded_proposer": ".grounded_proposer",
 }
 
 

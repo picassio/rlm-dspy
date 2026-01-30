@@ -142,6 +142,56 @@ def _sanitize_trajectory(trajectory: list, extra_secrets: list[str] | None = Non
     return [_sanitize_value(item, extra_secrets) for item in trajectory]
 
 
+def _extract_trace_metadata(trajectory: list) -> dict[str, Any]:
+    """Extract metadata from trajectory for trace collection.
+
+    Extracts reasoning steps, code blocks, outputs, and tools used
+    for use in few-shot bootstrapping.
+    """
+    reasoning_steps = []
+    code_blocks = []
+    outputs = []
+    tools_used = set()
+
+    # Known tool names to detect
+    tool_patterns = {
+        "read_file", "ripgrep", "find_files", "find_classes", "find_functions",
+        "find_methods", "find_imports", "find_calls", "index_code",
+        "semantic_search", "grep_context", "run_shell_command",
+        "find_references", "go_to_definition", "get_type_info", "get_symbol_hierarchy",
+    }
+
+    for item in trajectory:
+        if isinstance(item, dict):
+            # Extract reasoning
+            reasoning = item.get("reasoning") or item.get("thought")
+            if reasoning:
+                reasoning_steps.append(str(reasoning))
+
+            # Extract code
+            code = item.get("code") or item.get("action")
+            if code:
+                code_str = str(code)
+                code_blocks.append(code_str)
+
+                # Detect tools used
+                for tool in tool_patterns:
+                    if tool in code_str:
+                        tools_used.add(tool)
+
+            # Extract output
+            output = item.get("output") or item.get("observation")
+            if output:
+                outputs.append(str(output))
+
+    return {
+        "reasoning_steps": reasoning_steps,
+        "code_blocks": code_blocks,
+        "outputs": outputs,
+        "tools_used": sorted(tools_used),
+    }
+
+
 T = TypeVar("T", int, float, bool, str)
 
 
@@ -375,6 +425,9 @@ class RLMResult:
     # RLM-specific
     trajectory: list[dict[str, Any]] = field(default_factory=list)
     final_reasoning: str = ""
+
+    # Metadata for optimization (trace collection)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     # Error info
     error: str | None = None
@@ -889,14 +942,19 @@ Use structural tools for exact lookups, semantic search for exploratory queries.
             # Standard signature: just get answer
             answer = _sanitize_secrets(getattr(prediction, "answer", ""), extra_secrets)
 
+        # Extract metadata for trace collection
+        sanitized_trajectory = _sanitize_trajectory(raw_trajectory, extra_secrets)
+        metadata = _extract_trace_metadata(sanitized_trajectory)
+
         return RLMResult(
             answer=answer,
             success=True,
             elapsed_time=elapsed,
-            trajectory=_sanitize_trajectory(raw_trajectory, extra_secrets),
+            trajectory=sanitized_trajectory,
             final_reasoning=_sanitize_secrets(raw_reasoning, extra_secrets),
             iterations=len(raw_trajectory),
             outputs=outputs,
+            metadata=metadata,
         )
 
     def query(

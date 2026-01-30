@@ -670,6 +670,52 @@ def ask(
 
         console.print("\n[dim]Validating output with LLM-as-judge...[/dim]")
         validation = validate_groundedness(result.answer, context, query)
+
+        # Record outcome for optimization learning
+        try:
+            from .core.trace_collector import get_trace_collector
+            from .core.grounded_proposer import get_grounded_proposer
+
+            collector = get_trace_collector()
+            proposer = get_grounded_proposer()
+
+            # Extract trace info from result metadata if available
+            reasoning_steps = result.metadata.get("reasoning_steps", []) if result.metadata else []
+            code_blocks = result.metadata.get("code_blocks", []) if result.metadata else []
+            outputs = result.metadata.get("outputs", []) if result.metadata else []
+
+            if validation.is_grounded:
+                # Record successful trace for bootstrapping
+                collector.record(
+                    query=query,
+                    reasoning_steps=reasoning_steps,
+                    code_blocks=code_blocks,
+                    outputs=outputs,
+                    final_answer=result.answer,
+                    grounded_score=validation.score,
+                    query_type=signature if signature else None,
+                )
+                proposer.record_success(
+                    query=query,
+                    query_type=signature if signature else "general",
+                    grounded_score=validation.score,
+                    tools_used=result.metadata.get("tools_used", []) if result.metadata else [],
+                )
+            else:
+                # Record failure for tip generation
+                proposer.record_failure(
+                    query=query,
+                    query_type=signature if signature else "general",
+                    failure_reason=validation.discussion[:200] if validation.discussion else "ungrounded",
+                    grounded_score=validation.score,
+                    ungrounded_claims=[],  # Could extract from validation
+                    tools_used=result.metadata.get("tools_used", []) if result.metadata else [],
+                )
+        except Exception as e:
+            # Don't fail the query if optimization recording fails
+            if verbose:
+                console.print(f"[dim]Warning: Failed to record optimization data: {e}[/dim]")
+
         if not validation.is_grounded:
             console.print(f"\n[yellow]⚠ Potential hallucinations detected ({validation.score:.0%} grounded)[/yellow]")
             console.print(f"[dim]{validation.discussion[:500]}[/dim]")
@@ -2063,6 +2109,369 @@ def daemon_log(
             console.print(line)
         else:
             console.print(f"[dim]{line}[/dim]")
+
+
+# =============================================================================
+# Traces commands (trace collection for bootstrapping)
+# =============================================================================
+
+traces_app = typer.Typer(
+    name="traces",
+    help="Manage collected REPL traces for few-shot bootstrapping",
+    no_args_is_help=True,
+)
+app.add_typer(traces_app, name="traces")
+
+
+@traces_app.command("list")
+def traces_list(
+    limit: Annotated[
+        int,
+        typer.Option("--limit", "-n", help="Max traces to show"),
+    ] = 20,
+    query_type: Annotated[
+        Optional[str],
+        typer.Option("--type", "-t", help="Filter by query type"),
+    ] = None,
+) -> None:
+    """List collected traces."""
+    from .core.trace_collector import get_trace_collector
+
+    collector = get_trace_collector()
+    traces = collector.traces
+
+    if query_type:
+        traces = [t for t in traces if t.query_type == query_type]
+
+    if not traces:
+        console.print("[dim]No traces collected yet[/dim]")
+        return
+
+    table = Table(title=f"Collected Traces ({len(traces)} total)")
+    table.add_column("ID", style="dim")
+    table.add_column("Type")
+    table.add_column("Query", max_width=40)
+    table.add_column("Score", justify="right")
+    table.add_column("Tools")
+
+    for trace in traces[-limit:]:
+        table.add_row(
+            trace.trace_id[:12],
+            trace.query_type,
+            trace.query[:40] + "..." if len(trace.query) > 40 else trace.query,
+            f"{trace.grounded_score:.0%}",
+            ", ".join(trace.tools_used[:3]) + ("..." if len(trace.tools_used) > 3 else ""),
+        )
+
+    console.print(table)
+
+
+@traces_app.command("show")
+def traces_show(
+    trace_id: Annotated[str, typer.Argument(help="Trace ID (or prefix)")],
+) -> None:
+    """Show details of a specific trace."""
+    from .core.trace_collector import get_trace_collector
+
+    collector = get_trace_collector()
+
+    # Find trace by ID prefix
+    matches = [t for t in collector.traces if t.trace_id.startswith(trace_id)]
+
+    if not matches:
+        console.print(f"[red]No trace found with ID starting with '{trace_id}'[/red]")
+        raise typer.Exit(1)
+
+    if len(matches) > 1:
+        console.print(f"[yellow]Multiple matches, showing first:[/yellow]")
+
+    trace = matches[0]
+
+    console.print(Panel(
+        f"[bold]Query:[/bold] {trace.query}\n"
+        f"[bold]Type:[/bold] {trace.query_type}\n"
+        f"[bold]Score:[/bold] {trace.grounded_score:.0%}\n"
+        f"[bold]Tools:[/bold] {', '.join(trace.tools_used)}\n"
+        f"[bold]Timestamp:[/bold] {trace.timestamp}",
+        title=f"Trace {trace.trace_id}",
+    ))
+
+    console.print("\n[bold]Formatted Demo:[/bold]")
+    console.print(trace.format_as_demo())
+
+
+@traces_app.command("stats")
+def traces_stats() -> None:
+    """Show trace collection statistics."""
+    from .core.trace_collector import get_trace_collector
+
+    collector = get_trace_collector()
+    stats = collector.get_stats()
+
+    if stats["total"] == 0:
+        console.print("[dim]No traces collected yet[/dim]")
+        return
+
+    table = Table(title="Trace Statistics")
+    table.add_column("Metric")
+    table.add_column("Value", justify="right")
+
+    table.add_row("Total Traces", str(stats["total"]))
+    table.add_row("Average Score", f"{stats['avg_score']:.1%}")
+    table.add_row("Min Score", f"{stats['min_score']:.1%}")
+    table.add_row("Max Score", f"{stats['max_score']:.1%}")
+
+    console.print(table)
+
+    if stats["by_type"]:
+        type_table = Table(title="By Query Type")
+        type_table.add_column("Type")
+        type_table.add_column("Count", justify="right")
+
+        for qtype, count in sorted(stats["by_type"].items(), key=lambda x: x[1], reverse=True):
+            type_table.add_row(qtype, str(count))
+
+        console.print(type_table)
+
+
+@traces_app.command("export")
+def traces_export(
+    output: Annotated[Path, typer.Argument(help="Output file path")],
+) -> None:
+    """Export traces to a JSON file."""
+    from .core.trace_collector import get_trace_collector
+
+    collector = get_trace_collector()
+    count = collector.export(output)
+
+    console.print(f"[green]✓[/green] Exported {count} traces to {output}")
+
+
+@traces_app.command("import")
+def traces_import(
+    input_file: Annotated[Path, typer.Argument(help="Input file path")],
+) -> None:
+    """Import traces from a JSON file."""
+    from .core.trace_collector import get_trace_collector
+
+    if not input_file.exists():
+        console.print(f"[red]File not found: {input_file}[/red]")
+        raise typer.Exit(1)
+
+    collector = get_trace_collector()
+    count = collector.import_traces(input_file)
+
+    console.print(f"[green]✓[/green] Imported {count} traces from {input_file}")
+
+
+@traces_app.command("clear")
+def traces_clear(
+    force: Annotated[
+        bool,
+        typer.Option("--force", "-f", help="Skip confirmation"),
+    ] = False,
+) -> None:
+    """Clear all collected traces."""
+    from .core.trace_collector import get_trace_collector
+
+    collector = get_trace_collector()
+    count = len(collector.traces)
+
+    if count == 0:
+        console.print("[dim]No traces to clear[/dim]")
+        return
+
+    if not force:
+        confirm = typer.confirm(f"Delete {count} traces?")
+        if not confirm:
+            raise typer.Abort()
+
+    deleted = collector.clear()
+    console.print(f"[green]✓[/green] Cleared {deleted} traces")
+
+
+# =============================================================================
+# Optimize commands (instruction optimization)
+# =============================================================================
+
+optimize_app = typer.Typer(
+    name="optimize",
+    help="Optimize tool instructions and prompts",
+    no_args_is_help=True,
+)
+app.add_typer(optimize_app, name="optimize")
+
+
+@optimize_app.command("stats")
+def optimize_stats() -> None:
+    """Show optimization statistics."""
+    from .core.instruction_optimizer import get_instruction_optimizer
+    from .core.grounded_proposer import get_grounded_proposer
+
+    optimizer = get_instruction_optimizer()
+    proposer = get_grounded_proposer()
+
+    opt_stats = optimizer.get_stats()
+    prop_stats = proposer.get_stats()
+
+    # Optimizer stats
+    table = Table(title="Instruction Optimizer")
+    table.add_column("Metric")
+    table.add_column("Value", justify="right")
+
+    table.add_row("Total Outcomes", str(opt_stats["total_outcomes"]))
+
+    console.print(table)
+
+    if opt_stats["by_key"]:
+        key_table = Table(title="By Instruction Key")
+        key_table.add_column("Key")
+        key_table.add_column("Total", justify="right")
+        key_table.add_column("Success Rate", justify="right")
+        key_table.add_column("Avg Score", justify="right")
+
+        for key, stats in opt_stats["by_key"].items():
+            key_table.add_row(
+                key,
+                str(stats["total"]),
+                f"{stats['success_rate']:.0%}",
+                f"{stats['avg_score']:.1%}",
+            )
+
+        console.print(key_table)
+
+    # Proposer stats
+    console.print()
+    prop_table = Table(title="Grounded Proposer")
+    prop_table.add_column("Metric")
+    prop_table.add_column("Value", justify="right")
+
+    prop_table.add_row("Total Failures", str(prop_stats["total_failures"]))
+    prop_table.add_row("Total Successes", str(prop_stats["total_successes"]))
+    prop_table.add_row("Current Tips", str(prop_stats["current_tips_count"]))
+    prop_table.add_row("Queries Since Refresh", str(prop_stats["queries_since_refresh"]))
+
+    console.print(prop_table)
+
+
+@optimize_app.command("tips")
+def optimize_tips(
+    regenerate: Annotated[
+        bool,
+        typer.Option("--regenerate", "-r", help="Regenerate tips from history"),
+    ] = False,
+    reset: Annotated[
+        bool,
+        typer.Option("--reset", help="Reset to default tips"),
+    ] = False,
+) -> None:
+    """Show or regenerate optimization tips."""
+    from .core.grounded_proposer import get_grounded_proposer
+
+    proposer = get_grounded_proposer()
+
+    if reset:
+        proposer.reset_tips()
+        console.print("[green]✓[/green] Reset to default tips")
+
+    if regenerate:
+        console.print("[dim]Regenerating tips from history...[/dim]")
+        tips = proposer.generate_tips()
+        proposer.current_tips = tips
+        proposer._save_state()
+        console.print(f"[green]✓[/green] Generated {len(tips)} tips")
+
+    tips = proposer.get_tips()
+
+    console.print(Panel(
+        "\n".join(f"• {tip}" for tip in tips),
+        title=f"Current Tips ({len(tips)})",
+    ))
+
+
+@optimize_app.command("instructions")
+def optimize_instructions(
+    key: Annotated[
+        Optional[str],
+        typer.Argument(help="Instruction key to show/modify"),
+    ] = None,
+    reset: Annotated[
+        bool,
+        typer.Option("--reset", help="Reset to default"),
+    ] = False,
+    propose: Annotated[
+        bool,
+        typer.Option("--propose", "-p", help="Propose improvement"),
+    ] = False,
+) -> None:
+    """Show or modify tool instructions."""
+    from .core.instruction_optimizer import get_instruction_optimizer, DEFAULT_INSTRUCTIONS
+
+    optimizer = get_instruction_optimizer()
+
+    if key is None:
+        # List all keys
+        table = Table(title="Instruction Keys")
+        table.add_column("Key")
+        table.add_column("Length", justify="right")
+        table.add_column("Modified")
+
+        for k in DEFAULT_INSTRUCTIONS:
+            current = optimizer.get_instruction(k)
+            default = DEFAULT_INSTRUCTIONS[k]
+            modified = "✓" if current != default else ""
+            table.add_row(k, str(len(current)), modified)
+
+        console.print(table)
+        console.print("\n[dim]Use 'rlm-dspy optimize instructions <key>' to view details[/dim]")
+        return
+
+    if key not in DEFAULT_INSTRUCTIONS:
+        console.print(f"[red]Unknown key: {key}[/red]")
+        console.print(f"[dim]Available: {', '.join(DEFAULT_INSTRUCTIONS.keys())}[/dim]")
+        raise typer.Exit(1)
+
+    if reset:
+        optimizer.reset_to_defaults(key)
+        console.print(f"[green]✓[/green] Reset '{key}' to default")
+
+    if propose:
+        console.print(f"[dim]Proposing improvement for '{key}'...[/dim]")
+        proposed = optimizer.propose_improvement(key)
+        if proposed:
+            console.print(Panel(proposed, title="Proposed Improvement"))
+        else:
+            console.print("[yellow]Not enough data to propose improvement[/yellow]")
+        return
+
+    instruction = optimizer.get_instruction(key)
+    console.print(Panel(instruction, title=f"Instruction: {key}"))
+
+
+@optimize_app.command("clear")
+def optimize_clear(
+    force: Annotated[
+        bool,
+        typer.Option("--force", "-f", help="Skip confirmation"),
+    ] = False,
+) -> None:
+    """Clear optimization history."""
+    from .core.instruction_optimizer import get_instruction_optimizer
+    from .core.grounded_proposer import get_grounded_proposer
+
+    if not force:
+        confirm = typer.confirm("Clear all optimization history?")
+        if not confirm:
+            raise typer.Abort()
+
+    optimizer = get_instruction_optimizer()
+    proposer = get_grounded_proposer()
+
+    opt_count = optimizer.clear_history()
+    fail_count, success_count = proposer.clear()
+
+    console.print(f"[green]✓[/green] Cleared {opt_count} optimizer records")
+    console.print(f"[green]✓[/green] Cleared {fail_count} failures, {success_count} successes")
 
 
 if __name__ == "__main__":
