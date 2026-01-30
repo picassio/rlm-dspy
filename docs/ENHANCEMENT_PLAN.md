@@ -1182,14 +1182,17 @@ rlm-dspy config set optimization.use_bootstrapped_demos true
 
 ---
 
-### Phase 13: Additional Enhancements (Backlog)
+### Phase 13: Additional Enhancements
 
-- [ ] **KNNFewShot** - Dynamic example selection for better prompts  
+#### Completed
+- [x] **KNNFewShot** - Dynamic example selection using embedding similarity
+- [x] **json_repair Integration** - Robust JSON parsing with repair and extraction
+
+#### Backlog
 - [ ] **SIMBA** - Self-improving optimization
 - [ ] **Index Compression** - Reduce disk usage for large indexes
 - [ ] **Distributed Search** - Search across remote indexes (team sharing)
 - [ ] **IDE Integration** - VS Code extension for inline search
-- [ ] **json_repair Integration** - Robust JSON parsing from DSPy adapters
 - [ ] **Callback Middleware** - Extensibility via `@with_callbacks` pattern
 
 ---
