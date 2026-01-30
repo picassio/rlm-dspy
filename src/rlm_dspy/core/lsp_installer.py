@@ -226,7 +226,7 @@ SERVERS: dict[str, ServerInfo] = {
     "intelephense": ServerInfo(
         name="Intelephense",
         languages=["php"],
-        check_cmd=["intelephense", "--version"],
+        check_cmd=lambda: shutil.which("intelephense") is not None,
         install_methods={
             "any": "npm install -g intelephense",
         },
