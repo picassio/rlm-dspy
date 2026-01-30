@@ -319,21 +319,32 @@ model: openrouter/google/gemini-3-flash-preview
 sub_model: openrouter/google/gemini-3-flash-preview  # Use same model to reduce hallucination
 
 # Execution limits (higher = fewer hallucinations from forced completion)
-max_iterations: 30      # Max REPL iterations (default: 20)
-max_llm_calls: 100      # Max sub-LLM calls (default: 50)
+max_iterations: 30      # Max REPL iterations (min: 20, max: 100)
+max_llm_calls: 100      # Max sub-LLM calls (default: 50, max: 500)
 
 # Parallelism settings
-max_workers: 8          # Workers for batch operations (default: 8)
+max_workers: 8          # Workers for batch operations (default: 8, max: 32)
 
 # Budget/safety limits
-max_budget: 2.0         # Max cost in USD (default: 1.0)
-max_timeout: 600        # Max time in seconds (default: 300)
+max_budget: 2.0         # Max cost in USD (default: 1.0, max: 100)
+max_timeout: 600        # Max time in seconds (default: 300, max: 3600)
+
+# Embedding settings (for semantic search)
+embedding_model: openrouter/openai/text-embedding-3-small
+embedding_batch_size: 100  # Embeddings per API call
+
+# Vector index settings
+index_dir: ~/.rlm/indexes  # Where indexes are stored
+use_faiss: true            # Use FAISS for large indexes
+faiss_threshold: 20000     # Switch to FAISS above this snippet count
+auto_update_index: true    # Auto-rebuild when files change
+index_cache_ttl: 3600      # Index cache TTL in seconds
 
 # Path to .env file with API keys
 env_file: ~/.env
 ```
 
-**Tip**: To reduce hallucinations, use the same high-quality model for both `model` and `sub_model`, and increase `max_iterations`.
+**Tip**: To reduce hallucinations, use the same high-quality model for both `model` and `sub_model`, and increase `max_iterations`. Minimum 20 iterations enforced to prevent early termination.
 
 ### Environment Variables
 
