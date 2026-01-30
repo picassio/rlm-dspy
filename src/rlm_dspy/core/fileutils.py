@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import sys
+from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -96,11 +97,13 @@ def is_linux() -> bool:
     return sys.platform.startswith("linux")
 
 
+@lru_cache(maxsize=4)
 def get_cache_dir(app_name: str = "rlm_dspy") -> Path:
     """
     Get platform-appropriate cache directory.
 
     Learned from modaic: platformdirs-style cache locations.
+    Cached since result never changes during runtime.
 
     Args:
         app_name: Application name for the cache folder

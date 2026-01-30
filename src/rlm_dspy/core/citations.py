@@ -16,6 +16,27 @@ import dspy
 _document_cache: dict[tuple[str, float], dict] = {}
 _DOCUMENT_CACHE_MAX_SIZE = 200
 
+# Pre-compiled regex patterns for finding detection and classification
+_FINDING_NUMBERED = re.compile(r'^\d+\.')
+_FINDING_LABELED = re.compile(r'^\[(WARNING|ERROR|INFO|CRITICAL)\]', re.IGNORECASE)
+_FINDING_CATEGORY = re.compile(r'^(Bug|Issue|Problem|Warning|Error|Security|Performance):', re.IGNORECASE)
+
+# Severity detection patterns
+_SEVERITY_CRITICAL = re.compile(r'\b(critical|severe|dangerous)\b', re.IGNORECASE)
+_SEVERITY_ERROR = re.compile(r'\b(error|bug|broken|fail)\b', re.IGNORECASE)
+_SEVERITY_WARNING = re.compile(r'\b(warning|caution|potential|possible)\b', re.IGNORECASE)
+
+# Category detection patterns
+_CATEGORY_SECURITY = re.compile(r'\b(security|vulnerab|injection|xss|csrf|auth)\b', re.IGNORECASE)
+_CATEGORY_PERFORMANCE = re.compile(r'\b(performance|slow|optimization|memory|leak)\b', re.IGNORECASE)
+_CATEGORY_BUG = re.compile(r'\b(bug|error|exception|crash|null)\b', re.IGNORECASE)
+_CATEGORY_STYLE = re.compile(r'\b(style|naming|convention|format)\b', re.IGNORECASE)
+
+# Text cleanup patterns
+_CLEANUP_BULLET = re.compile(r'^[-*•]\s*')
+_CLEANUP_NUMBER = re.compile(r'^\d+\.\s*')
+_CLEANUP_LABEL = re.compile(r'^\[(WARNING|ERROR|INFO|CRITICAL)\]\s*', re.IGNORECASE)
+
 
 @dataclass
 class SourceLocation:
@@ -314,12 +335,12 @@ def parse_findings_from_text(
     for line in lines:
         stripped = line.strip()
 
-        # Check if this starts a new finding
+        # Check if this starts a new finding (using pre-compiled patterns)
         is_new_finding = (
             stripped.startswith(('-', '*', '•')) or
-            re.match(r'^\d+\.', stripped) or
-            re.match(r'^\[(WARNING|ERROR|INFO|CRITICAL)\]', stripped, re.IGNORECASE) or
-            re.match(r'^(Bug|Issue|Problem|Warning|Error|Security|Performance):', stripped, re.IGNORECASE)
+            _FINDING_NUMBERED.match(stripped) or
+            _FINDING_LABELED.match(stripped) or
+            _FINDING_CATEGORY.match(stripped)
         )
 
         if is_new_finding and current_finding:
@@ -347,33 +368,33 @@ def _create_finding(text: str, documents: list[dict]) -> CitedFinding | None:
     if not text or len(text) < 10:
         return None
 
-    # Detect severity
+    # Detect severity (using pre-compiled patterns)
     severity = "info"
-    if re.search(r'\b(critical|severe|dangerous)\b', text, re.IGNORECASE):
+    if _SEVERITY_CRITICAL.search(text):
         severity = "critical"
-    elif re.search(r'\b(error|bug|broken|fail)\b', text, re.IGNORECASE):
+    elif _SEVERITY_ERROR.search(text):
         severity = "error"
-    elif re.search(r'\b(warning|caution|potential|possible)\b', text, re.IGNORECASE):
+    elif _SEVERITY_WARNING.search(text):
         severity = "warning"
 
-    # Detect category
+    # Detect category (using pre-compiled patterns)
     category = ""
-    if re.search(r'\b(security|vulnerab|injection|xss|csrf|auth)\b', text, re.IGNORECASE):
+    if _CATEGORY_SECURITY.search(text):
         category = "security"
-    elif re.search(r'\b(performance|slow|optimization|memory|leak)\b', text, re.IGNORECASE):
+    elif _CATEGORY_PERFORMANCE.search(text):
         category = "performance"
-    elif re.search(r'\b(bug|error|exception|crash|null)\b', text, re.IGNORECASE):
+    elif _CATEGORY_BUG.search(text):
         category = "bug"
-    elif re.search(r'\b(style|naming|convention|format)\b', text, re.IGNORECASE):
+    elif _CATEGORY_STYLE.search(text):
         category = "style"
 
     # Extract citations
     sources = citations_to_locations(text, documents)
 
-    # Clean up text (remove bullet markers, etc.)
-    clean_text = re.sub(r'^[-*•]\s*', '', text)
-    clean_text = re.sub(r'^\d+\.\s*', '', clean_text)
-    clean_text = re.sub(r'^\[(WARNING|ERROR|INFO|CRITICAL)\]\s*', '', clean_text, flags=re.IGNORECASE)
+    # Clean up text using pre-compiled patterns
+    clean_text = _CLEANUP_BULLET.sub('', text)
+    clean_text = _CLEANUP_NUMBER.sub('', clean_text)
+    clean_text = _CLEANUP_LABEL.sub('', clean_text)
 
     return CitedFinding(
         text=clean_text.strip(),
