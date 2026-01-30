@@ -66,10 +66,7 @@ _LAZY_IMPORTS = {
     "get_grounded_proposer": ".grounded_proposer",
     "clear_grounded_proposer": ".grounded_proposer",
     # KNN Few-Shot (uses embeddings)
-    "KNNFewShot": ".knn_fewshot",
-    "KNNFewShotConfig": ".knn_fewshot",
-    "get_knn_fewshot": ".knn_fewshot",
-    "clear_knn_fewshot": ".knn_fewshot",
+
     # JSON Utilities (lightweight)
     "parse_json_safe": ".json_utils",
     "parse_json_strict": ".json_utils",

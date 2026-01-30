@@ -6,8 +6,7 @@ This document outlines the plan to add advanced features to rlm-dspy:
 1. Citations Support - Source-backed answers
 2. Semantic Code Search - Embedding-based retrieval
 3. MCP Tool Integration - External tool support
-4. KNNFewShot - Dynamic example selection
-5. SIMBA - Self-improving optimization
+4. SIMBA - Self-improving optimization
 
 All features will use centralized configuration via `~/.rlm/config.yaml` and `.env`.
 
@@ -86,13 +85,6 @@ max_timeout: 600
 #     command: npx @anthropic/mcp-server-filesystem /path/to/allowed/dir
 #   - name: github
 #     command: npx @anthropic/mcp-server-github
-
-# ============================================================================
-# Optimization Settings
-# ============================================================================
-# Enable KNN few-shot (requires examples in ~/.rlm/examples/)
-use_knn_fewshot: false
-knn_k: 3
 
 # ============================================================================
 # API Key Location
@@ -1185,7 +1177,6 @@ rlm-dspy config set optimization.use_bootstrapped_demos true
 ### Phase 13: Additional Enhancements ✅ COMPLETE
 
 #### Completed
-- [x] **KNNFewShot** - Dynamic example selection using embedding similarity
 - [x] **json_repair Integration** - Robust JSON parsing with repair and extraction
 - [x] **Index Compression** - Float16 quantization + gzip for ~4x compression
 - [x] **Callback Middleware** - Extensibility via `@with_callbacks` pattern
