@@ -480,6 +480,13 @@ class LSPManager:
                 logger.warning("Error stopping server for %s: %s", project, e)
         self._servers.clear()
 
+    def __del__(self) -> None:
+        """Cleanup on garbage collection - prevent orphaned subprocesses."""
+        try:
+            self.shutdown()
+        except Exception:
+            pass  # Best effort cleanup during GC
+
 
 def get_lsp_manager(config: LSPConfig | None = None) -> LSPManager:
     """Get the singleton LSP manager instance."""

@@ -631,9 +631,10 @@ def _resolve_project_path(path: str | None) -> str:
     if not path or path == ".":
         return _current_project_path or "."
 
-    # If already absolute and exists, use as-is
+    # If already absolute, still need to validate it
+    # (don't just return - let _is_safe_path check it later)
     if Path(path).is_absolute():
-        return path
+        return str(Path(path).resolve())
 
     # Try multiple resolution strategies for relative paths
     if _current_project_path:
@@ -710,8 +711,8 @@ def list_projects(include_empty: bool = False) -> str:
                         import json
                         manifest = json.loads(manifest_path.read_text())
                         snippet_count = manifest.get("snippet_count", 0)
-                    except Exception:
-                        pass
+                    except (json.JSONDecodeError, OSError) as e:
+                        logger.debug("Failed to read manifest %s: %s", manifest_path, e)
 
             # Filter empty projects unless requested
             if snippet_count > 0 or include_empty:

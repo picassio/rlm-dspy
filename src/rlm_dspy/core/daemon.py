@@ -600,9 +600,9 @@ class IndexDaemon:
         pid_file.parent.mkdir(parents=True, exist_ok=True)
 
         try:
-            # Open with O_CLOEXEC to prevent fd inheritance after fork
-            # This prevents the fd from leaking to child processes
-            flags = os.O_CREAT | os.O_WRONLY | os.O_TRUNC
+            # Open WITHOUT O_TRUNC first - truncate only AFTER acquiring lock
+            # This prevents clearing another instance's PID if we fail to get lock
+            flags = os.O_CREAT | os.O_WRONLY
             if hasattr(os, 'O_CLOEXEC'):  # Unix
                 flags |= os.O_CLOEXEC
             fd = os.open(str(pid_file), flags)
@@ -624,6 +624,8 @@ class IndexDaemon:
                     os.close(fd)
                     raise RuntimeError("Another daemon instance is already running")
 
+            # NOW truncate and write - we have the lock
+            os.ftruncate(fd, 0)
             os.write(fd, str(os.getpid()).encode())
             # Store fd so lock is held and can be closed on shutdown
             self._pid_fd = fd
