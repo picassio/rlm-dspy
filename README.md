@@ -384,6 +384,22 @@ rlm-dspy example
 
 ## CLI Reference
 
+### Command Groups
+
+| Group | Purpose |
+|-------|---------|
+| `rlm-dspy ask` | Query files/directories |
+| `rlm-dspy analyze` | Parallel multi-analysis |
+| `rlm-dspy diff` | Analyze git diffs |
+| `rlm-dspy index` | Manage semantic search indexes |
+| `rlm-dspy project` | Multi-project management |
+| `rlm-dspy daemon` | Background index monitoring |
+| `rlm-dspy traces` | Manage execution traces |
+| `rlm-dspy optimize` | Self-optimization controls |
+| `rlm-dspy setup` | Configuration wizard |
+| `rlm-dspy config` | View/modify settings |
+| `rlm-dspy preflight` | Environment checks |
+
 ### Basic Usage
 
 ```bash
@@ -398,12 +414,12 @@ rlm-dspy diff HEAD~1                        # Review git diff
 | Option | Short | Description |
 |--------|-------|-------------|
 | `--signature` | `-S` | Output format: security, bugs, review, architecture, performance, diff |
-| `--max-iterations` | `-i` | Max REPL iterations (default: 20) |
+| `--max-iterations` | `-i` | Max REPL iterations (default: 20, min: 20) |
 | `--max-tokens` | `-T` | Truncate context to token limit |
 | `--max-workers` | `-w` | Parallel workers for batch ops |
 | `--no-tools` | | Disable built-in tools (ripgrep, AST) |
 | `--no-cache` | | Disable context caching |
-| `--validate` | `-V` | Check output for hallucinations |
+| `--validate` | `-V` | Check output for hallucinations (default: on) |
 | `--json` | `-j` | JSON output format |
 | `--verbose` | `-v` | Show detailed progress |
 | `--debug` | `-d` | Full debug output |
@@ -426,8 +442,38 @@ rlm-dspy ask "Analyze" src/ -w 8
 # Fresh load (no cache)
 rlm-dspy ask "Check" src/ --no-cache
 
-# With hallucination check
-rlm-dspy ask "Find issues" src/ --validate
+# Disable hallucination check (faster)
+rlm-dspy ask "Quick check" src/ --no-validate
+```
+
+### Index Commands
+
+```bash
+rlm-dspy index build .              # Build semantic index
+rlm-dspy index status .             # Check index status
+rlm-dspy index search "query" -k 10 # Search code semantically
+rlm-dspy index compress .           # Compress index (~2x savings)
+rlm-dspy index clear .              # Remove index
+```
+
+### Project Commands
+
+```bash
+rlm-dspy project add myproject /path/to/project
+rlm-dspy project list
+rlm-dspy project default myproject
+rlm-dspy project tag myproject python backend
+rlm-dspy project remove myproject
+```
+
+### Daemon Commands
+
+```bash
+rlm-dspy daemon start               # Start background indexer
+rlm-dspy daemon status              # Check daemon status
+rlm-dspy daemon watch /path/to/dir  # Add watched directory
+rlm-dspy daemon list                # List watched paths
+rlm-dspy daemon stop                # Stop daemon
 ```
 
 ## Python API Reference
@@ -962,10 +1008,182 @@ daemon:
   idle_timeout: 0          # Auto-stop after N seconds (0 = never)
 ```
 
+## Self-Optimization (DSPy Patterns)
+
+RLM-DSPy automatically improves over time using DSPy-inspired optimization patterns:
+
+### Automatic Features (No Manual Action Required)
+
+| Feature | What It Does | When It Triggers |
+|---------|--------------|------------------|
+| **Trace Collection** | Records successful query trajectories | After every validated query |
+| **Failure Analysis** | Tracks why queries fail validation | After every failed validation |
+| **Tip Injection** | Adds learned tips to prompts | On every RLM initialization |
+| **Tip Refresh** | Regenerates tips from patterns | Every 50 queries (if ≥5 failures) |
+
+### How It Works
+
+```
+Query → Validation → Record Success/Failure → Update Stats
+                            ↓
+              (every 50 queries with ≥5 failures)
+                            ↓
+                   Auto-regenerate tips via LLM
+                            ↓
+                   Next query uses improved tips
+```
+
+### CLI Commands
+
+```bash
+# View optimization statistics
+rlm-dspy optimize stats
+
+# View current tips (learned from failures)
+rlm-dspy optimize tips
+
+# Force regenerate tips now (uses LLM)
+rlm-dspy optimize tips --regenerate
+
+# Reset to default tips
+rlm-dspy optimize tips --reset
+
+# View/modify tool instructions
+rlm-dspy optimize instructions
+rlm-dspy optimize instructions tool_instructions
+
+# Run SIMBA optimization (requires collected traces)
+rlm-dspy optimize simba --dry-run     # Preview
+rlm-dspy optimize simba --batch-size 8  # Run with smaller batch
+```
+
+### Trace Management
+
+```bash
+# View collected traces
+rlm-dspy traces list
+rlm-dspy traces stats
+
+# Show specific trace
+rlm-dspy traces show <trace_id>
+
+# Export/import traces
+rlm-dspy traces export backup.json
+rlm-dspy traces import backup.json
+
+# Clear all traces
+rlm-dspy traces clear
+```
+
+### Grounded Proposer (MIPROv2 Pattern)
+
+The Grounded Proposer analyzes failure patterns to generate actionable tips:
+
+```python
+# Example generated tips (from actual failures):
+# - "Use ripgrep to search for specific decorators to ensure accurate counts"
+# - "Verify the existence of CLI commands in source before confirming"
+# - "Execute read_file to inspect specific lines identified by search tools"
+```
+
+These tips are automatically injected into the RLM signature, helping the model avoid past mistakes.
+
+### SIMBA Optimizer
+
+SIMBA (Stochastic Introspective Mini-Batch Ascent) uses collected traces to optimize prompts:
+
+```bash
+# Check if you have enough traces
+rlm-dspy optimize simba --dry-run
+
+# Output:
+# SIMBA Optimization
+#   Traces found: 28
+#   Qualifying (score >= 0.7): 28
+#   Batch size: 16
+#   Steps: 4
+#   Candidates/step: 4
+```
+
+Requirements:
+- At least `batch_size` traces (default: 16)
+- Traces must have `grounded_score >= min_score` (default: 0.7)
+
+## Index Compression
+
+Reduce index disk usage with compression:
+
+```bash
+# Compress all project indexes (~2x compression ratio)
+rlm-dspy index compress
+
+# Compress specific project
+rlm-dspy index compress .
+
+# Decompress for debugging
+rlm-dspy index compress . --decompress
+```
+
+**Compression strategies:**
+- **Vector embeddings**: Float16 quantization + ZIP compression (~4x savings)
+- **JSON metadata**: Compact format + Gzip
+- **Large text files**: Gzip (files >10KB)
+
+Indexes are automatically decompressed when loaded, so compression is transparent.
+
+## Callback System
+
+Hook into the RLM execution lifecycle for monitoring, logging, or custom behavior:
+
+```python
+from rlm_dspy.core.callbacks import (
+    Callback, CallbackManager, MetricsCallback, 
+    LoggingCallback, ProgressCallback, get_callback_manager
+)
+
+# Create custom callback
+class MyCallback(Callback):
+    def on_query_start(self, ctx):
+        print(f"Starting query: {ctx.data.get('query', '')[:50]}")
+    
+    def on_iteration_end(self, ctx):
+        print(f"Iteration complete in {ctx.elapsed:.2f}s")
+    
+    def on_error(self, ctx):
+        print(f"Error: {ctx.data.get('error')}")
+
+# Register callback
+manager = get_callback_manager()
+manager.add(MyCallback())
+manager.add(MetricsCallback())  # Collect timing stats
+
+# After queries, get metrics
+metrics = manager.callbacks[1]  # MetricsCallback
+print(metrics.get_summary())
+```
+
+### Built-in Callbacks
+
+| Callback | Purpose |
+|----------|---------|
+| `LoggingCallback` | Logs all events to Python logger |
+| `MetricsCallback` | Collects counts, timing, error stats |
+| `ProgressCallback` | Reports progress percentage |
+
+### Lifecycle Events
+
+- `query.start` / `query.end`
+- `iteration.start` / `iteration.end`
+- `tool_call`
+- `llm_call`
+- `validation`
+- `error`
+
 ## Documentation
 
 - **[Provider Guide](docs/PROVIDERS.md)** - Supported LLM providers
 - **[Testing](docs/TESTING.md)** - Test results and benchmarks
+- **[Enhancement Plan](docs/ENHANCEMENT_PLAN.md)** - Development roadmap
 
 ## License
 
