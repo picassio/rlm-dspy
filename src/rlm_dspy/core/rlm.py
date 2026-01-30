@@ -806,10 +806,15 @@ EXPLORATION STRATEGY (follow this order):
 
 2. NARROW DOWN:
    - `index_code("src/", kind="class")` - Find all classes in a directory
-   - `ripgrep("keyword", ".")` - Search patterns across all files
+   - `ripgrep("keyword", ".", "-i")` - Case-insensitive search across all files
 
 3. THEN READ SPECIFIC CODE:
    - `read_file(path, start_line, end_line)` - Read only what you need
+
+SEARCH TIPS:
+- Tools are CASE-SENSITIVE by default
+- Use `ripgrep("pattern", ".", "-i")` for case-insensitive
+- When claiming "X is not used", verify with BOTH case-sensitive AND case-insensitive search
 
 VERIFICATION RULES:
 1. NEVER claim issues without using read_file() to see actual code
@@ -819,6 +824,7 @@ VERIFICATION RULES:
 ANTI-PATTERNS:
 - DON'T analyze files one by one - search across project first
 - DON'T guess file locations - use find_files or ripgrep
+- DON'T claim "not found" without trying case-insensitive search
 
 """
 

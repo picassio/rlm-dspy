@@ -91,6 +91,8 @@ DEFAULT_TIPS = [
     "Use ripgrep or find_functions first to locate relevant code, then read_file to verify",
     "Quote the actual problematic code when reporting issues",
     "Verify that reported vulnerabilities aren't already mitigated by existing checks",
+    "Search tools are CASE-SENSITIVE - use ripgrep with '-i' flag or check exact spelling",
+    "When claiming 'X is not used', try BOTH case-sensitive AND case-insensitive search",
 ]
 
 

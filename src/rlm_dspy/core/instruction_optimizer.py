@@ -108,14 +108,21 @@ AVAILABLE TOOLS:
 - `semantic_search(query)` - Conceptual search across indexed project
 - `index_code(path, kind, name)` - Find classes/functions/methods with EXACT line numbers
 - `find_classes(path)`, `find_functions(path)`, `find_methods(path)` - Structural queries
-- `find_calls(path, function_name)` - Find where functions are called
-- `ripgrep(pattern, path)` - Fast regex search across files
+- `find_calls(path, function_name)` - Find where functions are called (CASE-SENSITIVE!)
+- `ripgrep(pattern, path, flags)` - Fast regex search (use flags="-i" for case-insensitive)
 - `read_file(path, start_line, end_line)` - Read specific sections
+
+SEARCH TIPS:
+- `find_calls` and `ripgrep` are CASE-SENSITIVE by default
+- Use `ripgrep("pattern", ".", "-i")` for case-insensitive search
+- When searching for a class/function, check the EXACT name first with index_code
+- If search returns nothing, try case-insensitive or check spelling
 
 ANTI-PATTERNS (avoid these):
 - DON'T analyze files one by one - search across the project first
 - DON'T guess at file locations - use find_files or ripgrep
-- DON'T claim issues exist without reading the actual code""",
+- DON'T claim issues exist without reading the actual code
+- DON'T assume case - use -i flag or verify exact name first""",
 
     "verification_rules": """CRITICAL VERIFICATION RULES:
 1. NEVER claim a bug/issue exists without using read_file() to see the actual code
