@@ -120,23 +120,26 @@ def _sanitize_secrets(text: str, extra_secrets: list[str] | None = None) -> str:
     return result
 
 
+def _sanitize_value(value: Any, extra_secrets: list[str] | None = None) -> Any:
+    """Recursively sanitize a value, handling nested structures."""
+    if isinstance(value, str):
+        return _sanitize_secrets(value, extra_secrets)
+    elif isinstance(value, dict):
+        return {k: _sanitize_value(v, extra_secrets) for k, v in value.items()}
+    elif isinstance(value, list):
+        return [_sanitize_value(item, extra_secrets) for item in value]
+    elif isinstance(value, tuple):
+        return tuple(_sanitize_value(item, extra_secrets) for item in value)
+    else:
+        return value
+
+
 def _sanitize_trajectory(trajectory: list, extra_secrets: list[str] | None = None) -> list:
-    """Sanitize all strings in a trajectory list."""
+    """Sanitize all strings in a trajectory list, including nested structures."""
     if not trajectory:
         return trajectory
 
-    sanitized = []
-    for item in trajectory:
-        if isinstance(item, str):
-            sanitized.append(_sanitize_secrets(item, extra_secrets))
-        elif isinstance(item, dict):
-            sanitized.append({
-                k: _sanitize_secrets(v, extra_secrets) if isinstance(v, str) else v
-                for k, v in item.items()
-            })
-        else:
-            sanitized.append(item)
-    return sanitized
+    return [_sanitize_value(item, extra_secrets) for item in trajectory]
 
 
 T = TypeVar("T", int, float, bool, str)
@@ -166,7 +169,8 @@ def _env_get(key: str, default: T, cast: type[T] | None = None) -> T:
     try:
         return target_type(val)  # type: ignore[return-value]
     except ValueError:
-        _logger.warning("Invalid %s for %s=%r, using default %r", target_type.__name__, key, val, default)
+        # Don't log the actual value in case it contains sensitive data
+        _logger.warning("Invalid %s for %s, using default", target_type.__name__, key)
         return default
 
 
