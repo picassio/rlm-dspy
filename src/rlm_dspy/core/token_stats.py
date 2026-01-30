@@ -16,18 +16,23 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # Pricing per 1M tokens (as of 2024) - module level for efficiency
+# IMPORTANT: Order matters! More specific keys must come BEFORE less specific ones
+# because matching uses substring search (e.g., "gpt-4-turbo" before "gpt-4")
 MODEL_PRICING: dict[str, dict[str, float]] = {
-    "gpt-4": {"input": 30.0, "output": 60.0},
+    # GPT-4 variants (most specific first)
+    "gpt-4o-mini": {"input": 0.15, "output": 0.60},
     "gpt-4-turbo": {"input": 10.0, "output": 30.0},
     "gpt-4o": {"input": 5.0, "output": 15.0},
-    "gpt-4o-mini": {"input": 0.15, "output": 0.60},
+    "gpt-4": {"input": 30.0, "output": 60.0},  # Must be last of gpt-4 variants
+    # Claude variants (most specific first)
     "claude-3-opus": {"input": 15.0, "output": 75.0},
     "claude-3-sonnet": {"input": 3.0, "output": 15.0},
     "claude-sonnet-4": {"input": 3.0, "output": 15.0},
     "claude-3-haiku": {"input": 0.25, "output": 1.25},
-    "gemini-1.5-pro": {"input": 3.50, "output": 10.50},
-    "gemini-1.5-flash": {"input": 0.075, "output": 0.30},
+    # Gemini variants (most specific first)
     "gemini-2.0-flash": {"input": 0.10, "output": 0.40},
+    "gemini-1.5-flash": {"input": 0.075, "output": 0.30},
+    "gemini-1.5-pro": {"input": 3.50, "output": 10.50},
 }
 
 # Lazy-loaded encoder (singleton)
