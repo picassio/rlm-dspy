@@ -676,21 +676,39 @@ class RLM:
         # Tracking
         self._start_time: float | None = None
 
-    def _wrap_signature_with_tool_instructions(
-        self,
-        signature: str | type,
-        use_tools: bool | str
-    ) -> str | type:
-        """Wrap signature with instructions to prioritize tool usage.
-
-        When tools are enabled, this adds instructions telling the LLM to
-        use the provided tools (index_code, ripgrep, etc.) FIRST before
-        writing custom code. This improves accuracy for code analysis tasks.
+    def _get_optimized_instructions(self) -> str:
+        """Get tool instructions from optimizer (with fallback to defaults).
+        
+        Includes:
+        - Optimized tool instructions (from InstructionOptimizer)
+        - Verification rules
+        - Iteration guidance
+        - Dynamic tips from past failures (from GroundedProposer)
         """
-        if not use_tools or not self._tools:
-            return signature
-
-        tool_instructions = """IMPORTANT: You have access to powerful code analysis tools. \
+        try:
+            from .instruction_optimizer import get_instruction_optimizer
+            from .grounded_proposer import get_grounded_proposer
+            
+            optimizer = get_instruction_optimizer()
+            proposer = get_grounded_proposer()
+            
+            # Get base instructions (may be optimized)
+            tool_inst = optimizer.get_instruction("tool_instructions")
+            verify_rules = optimizer.get_instruction("verification_rules")
+            iter_guide = optimizer.get_instruction("iteration_guidance")
+            
+            # Get dynamic tips from past failures
+            tips = proposer.get_tips()
+            tips_text = ""
+            if tips:
+                tips_text = "\n\nLEARNED TIPS (from past queries):\n" + "\n".join(f"- {t}" for t in tips[:5])
+            
+            return f"{tool_inst}\n\n{verify_rules}\n\n{iter_guide}{tips_text}\n\n"
+            
+        except Exception as e:
+            logger.debug("Failed to get optimized instructions, using defaults: %s", e)
+            # Fallback to hardcoded defaults
+            return """IMPORTANT: You have access to powerful code analysis tools. \
 USE THEM FIRST before writing custom code:
 
 STRUCTURAL SEARCH (100% accurate, use for exact matches):
@@ -716,6 +734,25 @@ CRITICAL VERIFICATION RULES:
 Use structural tools for exact lookups, semantic search for exploratory queries.
 
 """
+
+    def _wrap_signature_with_tool_instructions(
+        self,
+        signature: str | type,
+        use_tools: bool | str
+    ) -> str | type:
+        """Wrap signature with instructions to prioritize tool usage.
+
+        When tools are enabled, this adds instructions telling the LLM to
+        use the provided tools (index_code, ripgrep, etc.) FIRST before
+        writing custom code. This improves accuracy for code analysis tasks.
+        
+        Uses optimized instructions from InstructionOptimizer if available.
+        """
+        if not use_tools or not self._tools:
+            return signature
+
+        # Get optimized instructions (or defaults)
+        tool_instructions = self._get_optimized_instructions()
         if isinstance(signature, str):
             # Convert string signature to class with tool instructions
             # Parse "context, query -> answer" format
