@@ -99,6 +99,13 @@ _LAZY_IMPORTS = {
     "clear_callback_manager": ".callbacks",
     "with_callbacks": ".callbacks",
     "emit_event": ".callbacks",
+    # SIMBA Optimizer
+    "SIMBAOptimizer": ".simba_optimizer",
+    "OptimizationResult": ".simba_optimizer",
+    "grounded_metric": ".simba_optimizer",
+    "accuracy_metric": ".simba_optimizer",
+    "create_training_example": ".simba_optimizer",
+    "get_simba_optimizer": ".simba_optimizer",
 }
 
 

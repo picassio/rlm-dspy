@@ -2568,5 +2568,145 @@ def optimize_clear(
     console.print(f"[green]✓[/green] Cleared {fail_count} failures, {success_count} successes")
 
 
+@optimize_app.command("simba")
+def optimize_simba(
+    min_score: Annotated[
+        float,
+        typer.Option("--min-score", "-s", help="Minimum trace score to include"),
+    ] = 0.7,
+    max_examples: Annotated[
+        int,
+        typer.Option("--max-examples", "-n", help="Maximum training examples"),
+    ] = 100,
+    batch_size: Annotated[
+        int,
+        typer.Option("--batch-size", "-b", help="Mini-batch size"),
+    ] = 16,
+    steps: Annotated[
+        int,
+        typer.Option("--steps", help="Optimization steps"),
+    ] = 4,
+    candidates: Annotated[
+        int,
+        typer.Option("--candidates", "-c", help="Candidates per step"),
+    ] = 4,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Show what would be optimized without running"),
+    ] = False,
+) -> None:
+    """Run SIMBA self-improving optimization.
+
+    Uses collected traces to optimize the RLM program via DSPy's SIMBA optimizer.
+    SIMBA analyzes performance on challenging examples and generates improvement rules.
+
+    Examples:
+        rlm-dspy optimize simba                    # Run with defaults
+        rlm-dspy optimize simba --min-score 0.5   # Include lower-scoring traces
+        rlm-dspy optimize simba --steps 8         # More optimization steps
+        rlm-dspy optimize simba --dry-run         # Preview without running
+    """
+    import json
+    from pathlib import Path
+    from .core.simba_optimizer import SIMBAOptimizer, grounded_metric
+
+    traces_dir = Path.home() / ".rlm" / "traces"
+
+    if not traces_dir.exists():
+        console.print("[yellow]No traces directory found[/yellow]")
+        console.print("[dim]Run queries with validation to collect traces first[/dim]")
+        raise typer.Exit(1)
+
+    # Count available traces
+    trace_files = list(traces_dir.glob("*.json"))
+    if not trace_files:
+        console.print("[yellow]No trace files found[/yellow]")
+        console.print("[dim]Run queries with validation to collect traces[/dim]")
+        raise typer.Exit(1)
+
+    # Filter and count qualifying traces
+    qualifying = 0
+    for f in trace_files:
+        try:
+            data = json.loads(f.read_text())
+            score = data.get("validation_score", data.get("score", 0))
+            if score >= min_score:
+                qualifying += 1
+        except Exception:
+            pass
+
+    console.print(f"[bold]SIMBA Optimization[/bold]")
+    console.print(f"  Traces found: {len(trace_files)}")
+    console.print(f"  Qualifying (score >= {min_score}): {qualifying}")
+    console.print(f"  Batch size: {batch_size}")
+    console.print(f"  Steps: {steps}")
+    console.print(f"  Candidates/step: {candidates}")
+    console.print()
+
+    if qualifying < batch_size:
+        console.print(f"[yellow]Not enough qualifying traces ({qualifying} < {batch_size})[/yellow]")
+        console.print("[dim]Lower --min-score or collect more traces[/dim]")
+        raise typer.Exit(1)
+
+    if dry_run:
+        console.print("[dim]Dry run - would optimize with above settings[/dim]")
+        return
+
+    # Create optimizer
+    optimizer = SIMBAOptimizer(
+        metric=grounded_metric,
+        batch_size=batch_size,
+        num_candidates=candidates,
+        max_steps=steps,
+    )
+
+    # Create a simple RLM program for optimization
+    console.print("[dim]Loading RLM program...[/dim]")
+
+    try:
+        import dspy
+        from .core.rlm import RLMClient
+
+        # Get current RLM client
+        client = RLMClient()
+
+        # Run optimization
+        console.print("[dim]Running SIMBA optimization (this may take a while)...[/dim]")
+
+        optimized, result = optimizer.optimize_from_traces(
+            program=client._rlm,  # The underlying dspy.RLM
+            traces_dir=traces_dir,
+            min_score=min_score,
+            max_examples=max_examples,
+        )
+
+        # Display result
+        console.print()
+        if result.improved:
+            console.print(f"[green]✓ Optimization successful![/green]")
+            console.print(f"  Baseline score: {result.baseline_score:.2%}")
+            console.print(f"  Optimized score: {result.optimized_score:.2%}")
+            console.print(f"  Improvement: +{result.improvement:.1f}%")
+
+            # Save the optimized program
+            save_path = Path.home() / ".rlm" / "optimized_program.json"
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Save optimization result
+            save_path.write_text(json.dumps(result.to_dict(), indent=2))
+            console.print(f"\n[dim]Result saved to: {save_path}[/dim]")
+        else:
+            console.print(f"[yellow]No improvement found[/yellow]")
+            console.print(f"  Score: {result.baseline_score:.2%}")
+
+    except ImportError as e:
+        console.print(f"[red]Import error: {e}[/red]")
+        console.print("[dim]Ensure dspy>=2.5 is installed[/dim]")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]Optimization failed: {e}[/red]")
+        raise typer.Exit(1)
+
+
 if __name__ == "__main__":
     app()

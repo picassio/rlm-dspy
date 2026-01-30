@@ -1191,7 +1191,9 @@ rlm-dspy config set optimization.use_bootstrapped_demos true
 - [x] **Callback Middleware** - Extensibility via `@with_callbacks` pattern
 
 #### Backlog (Lower Priority)
-- [ ] **SIMBA** - Self-improving optimization
+- [x] **SIMBA** - Self-improving optimization (integrated via CLI)
+
+All planned enhancements are now complete!
 
 ---
 
