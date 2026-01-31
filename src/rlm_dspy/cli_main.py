@@ -264,11 +264,12 @@ def register_commands(app: typer.Typer) -> None:
             context = rlm.load_context([str(p) for p in paths])
 
             progress.add_task("Analyzing...", total=None)
+            # Use num_threads=1 to avoid Deno subprocess conflicts in parallel execution
             results = rlm.batch([
                 {"query": "List all files and their purposes"},
                 {"query": "Identify main components and their roles"},
                 {"query": "Find potential bugs or improvements"},
-            ], context=context, num_threads=3, return_failed=True)
+            ], context=context, num_threads=1, return_failed=True)
 
         if len(results) != 3 or not all(r.success for r in results):
             console.print("[red]Analysis failed[/red]")
