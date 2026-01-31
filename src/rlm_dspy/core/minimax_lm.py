@@ -84,13 +84,28 @@ class MiniMaxLM(BaseLM):
             raise ValueError(f"No MiniMax API key found. Set {env_var} environment variable.")
         
         # Create Anthropic client with MiniMax base URL
-        base_url = MINIMAX_CN_BASE_URL if china else MINIMAX_BASE_URL
+        self._base_url = MINIMAX_CN_BASE_URL if china else MINIMAX_BASE_URL
         self._client = anthropic.Anthropic(
             api_key=self._api_key,
-            base_url=base_url,
+            base_url=self._base_url,
             default_headers={
                 "accept": "application/json",
             },
+        )
+    
+    def __getstate__(self) -> dict:
+        """Get state for pickling - exclude non-picklable client."""
+        state = self.__dict__.copy()
+        state.pop('_client', None)
+        return state
+    
+    def __setstate__(self, state: dict) -> None:
+        """Restore state from pickle - recreate client."""
+        self.__dict__.update(state)
+        self._client = anthropic.Anthropic(
+            api_key=self._api_key,
+            base_url=self._base_url,
+            default_headers={"accept": "application/json"},
         )
     
     def _convert_messages(self, messages: list[dict]) -> tuple[list[dict], str | None]:

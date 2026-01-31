@@ -84,6 +84,20 @@ class ZaiLM(BaseLM):
             base_url=ZAI_BASE_URL,
         )
     
+    def __getstate__(self) -> dict:
+        """Get state for pickling - exclude non-picklable client."""
+        state = self.__dict__.copy()
+        state.pop('_client', None)
+        return state
+    
+    def __setstate__(self, state: dict) -> None:
+        """Restore state from pickle - recreate client."""
+        self.__dict__.update(state)
+        self._client = OpenAI(
+            api_key=self._api_key,
+            base_url=ZAI_BASE_URL,
+        )
+    
     def __call__(
         self,
         prompt: str | None = None,

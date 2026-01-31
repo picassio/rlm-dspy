@@ -182,6 +182,40 @@ class AnthropicOAuthLM(BaseLM):
                 max_retries=num_retries,
             )
             logger.info(f"Created AnthropicOAuthLM for model {self.model} with API key")
+    
+    def __getstate__(self) -> dict:
+        """Get state for pickling - exclude non-picklable client."""
+        state = self.__dict__.copy()
+        state.pop('_client', None)
+        return state
+    
+    def __setstate__(self, state: dict) -> None:
+        """Restore state from pickle - recreate client."""
+        self.__dict__.update(state)
+        # Recreate the client based on OAuth status
+        if self._is_oauth:
+            beta_features = [
+                "fine-grained-tool-streaming-2025-05-14",
+                "interleaved-thinking-2025-05-14",
+            ]
+            default_headers = {
+                "accept": "application/json",
+                "anthropic-dangerous-direct-browser-access": "true",
+                "anthropic-beta": f"claude-code-20250219,oauth-2025-04-20,{','.join(beta_features)}",
+                "user-agent": f"claude-cli/{CLAUDE_CODE_VERSION} (external, cli)",
+                "x-app": "cli",
+            }
+            self._client = anthropic.Anthropic(
+                api_key=None,
+                auth_token=self._auth_token,
+                max_retries=self.num_retries,
+                default_headers=default_headers,
+            )
+        else:
+            self._client = anthropic.Anthropic(
+                api_key=self._auth_token,
+                max_retries=self.num_retries,
+            )
 
     def forward(
         self,

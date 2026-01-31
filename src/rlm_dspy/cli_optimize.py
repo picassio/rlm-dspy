@@ -188,6 +188,7 @@ def optimize_simba(
     batch_size: Annotated[int, typer.Option("--batch-size", "-b", help="Mini-batch size")] = 16,
     steps: Annotated[int, typer.Option("--steps", help="Optimization steps")] = 4,
     candidates: Annotated[int, typer.Option("--candidates", "-c", help="Candidates per step")] = 4,
+    threads: Annotated[int, typer.Option("--threads", "-t", help="Parallel threads for evaluation")] = 4,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Show what would be optimized")] = False,
 ) -> None:
     """Run SIMBA self-improving optimization.
@@ -233,21 +234,30 @@ def optimize_simba(
         raise typer.Exit(1)
 
     console.print(f"[cyan]Created {len(examples)} training examples[/cyan]")
-    console.print(f"[cyan]Running SIMBA optimization (steps={steps}, candidates={candidates})...[/cyan]")
+    console.print(f"[cyan]Running SIMBA optimization (steps={steps}, candidates={candidates}, threads={threads})...[/cyan]")
 
     try:
         from .core.rlm import RLM
         from .core.simba_optimizer import save_optimized_program, save_optimization_state, OptimizationState, get_trace_count
+        import dspy
 
         # Get the RLM program to optimize
         rlm = RLM()
-        optimizer = get_simba_optimizer()
+        optimizer = get_simba_optimizer(
+            batch_size=batch_size,
+            num_candidates=candidates,
+            max_steps=steps,
+            num_threads=threads,
+        )
 
-        # Pass the LM from RLM to the optimizer
+        # Configure DSPy with our LM before optimization
+        # The LM is already configured in RLM, just ensure dspy.settings has it
+        dspy.configure(lm=rlm._lm)
+
         optimized_program, result = optimizer.optimize(
             program=rlm._rlm,
             trainset=examples,
-            lm=rlm._lm,
+            lm=None,  # Use dspy.settings.lm
         )
 
         console.print("\n[bold green]✓ Optimization complete![/bold green]")

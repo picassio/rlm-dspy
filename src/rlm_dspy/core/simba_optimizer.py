@@ -292,13 +292,18 @@ class SIMBAOptimizer:
             batch_size = self.batch_size
 
         # Create SIMBA optimizer
+        # Use configured num_threads, defaulting to 4 for parallelism
+        # dspy.LM is pickleable so threading works fine
+        effective_threads = self.num_threads if self.num_threads is not None else 4
+        logger.info("SIMBA using %d threads for parallel evaluation", effective_threads)
+        
         optimizer = SIMBA(
             metric=self.metric,
             bsize=batch_size,
             num_candidates=self.num_candidates,
             max_steps=self.max_steps,
             max_demos=self.max_demos,
-            num_threads=self.num_threads,
+            num_threads=effective_threads,
         )
 
         # Get baseline score

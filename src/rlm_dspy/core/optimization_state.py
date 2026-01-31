@@ -98,8 +98,16 @@ class OptimizationState:
         last_opt = data.get("last_optimization")
         last_result_data = data.get("last_result")
 
+        # Parse last_optimization and ensure it's timezone-aware
+        last_optimization = None
+        if last_opt:
+            last_optimization = datetime.fromisoformat(last_opt)
+            # If naive datetime, assume UTC
+            if last_optimization.tzinfo is None:
+                last_optimization = last_optimization.replace(tzinfo=UTC)
+
         return cls(
-            last_optimization=datetime.fromisoformat(last_opt) if last_opt else None,
+            last_optimization=last_optimization,
             traces_at_last_optimization=data.get("traces_at_last_optimization", 0),
             last_result=OptimizationResult.from_dict(last_result_data) if last_result_data else None,
             optimizer_type=data.get("optimizer_type", "simba"),
