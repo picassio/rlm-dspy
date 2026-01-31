@@ -8,9 +8,45 @@ following DSPy's JSONAdapter pattern.
 import json
 import logging
 import re
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# Maximum JSON file size to load (100MB)
+MAX_JSON_FILE_SIZE = 100 * 1024 * 1024
+
+
+class JSONFileTooLargeError(Exception):
+    """Raised when a JSON file exceeds the maximum allowed size."""
+    pass
+
+
+def safe_load_json_file(path: Path, max_size: int = MAX_JSON_FILE_SIZE) -> Any:
+    """Safely load a JSON file with size limits.
+    
+    Args:
+        path: Path to JSON file
+        max_size: Maximum file size in bytes (default: 100MB)
+        
+    Returns:
+        Parsed JSON data
+        
+    Raises:
+        JSONFileTooLargeError: If file exceeds max_size
+        FileNotFoundError: If file doesn't exist
+        json.JSONDecodeError: If JSON is invalid
+    """
+    if not path.exists():
+        raise FileNotFoundError(f"JSON file not found: {path}")
+    
+    file_size = path.stat().st_size
+    if file_size > max_size:
+        raise JSONFileTooLargeError(
+            f"JSON file too large: {file_size / 1024 / 1024:.1f}MB > {max_size / 1024 / 1024:.1f}MB limit"
+        )
+    
+    return json.loads(path.read_text(encoding='utf-8'))
 
 
 def repair_json(text: str) -> str:

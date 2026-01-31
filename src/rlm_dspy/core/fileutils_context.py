@@ -78,13 +78,33 @@ def should_skip_entry(entry: Path, gitignore_spec: "pathspec.PathSpec | None", b
     return False
 
 
-def collect_files(paths: list[Path | str], gitignore_spec: "pathspec.PathSpec | None" = None) -> list[Path]:
-    """Collect all files from paths, respecting gitignore patterns."""
+def collect_files(
+    paths: list[Path | str],
+    gitignore_spec: "pathspec.PathSpec | None" = None,
+    follow_symlinks: bool = False,
+) -> list[Path]:
+    """Collect all files from paths, respecting gitignore patterns.
+    
+    Args:
+        paths: List of file or directory paths to collect
+        gitignore_spec: Optional gitignore pattern spec
+        follow_symlinks: Whether to follow symlinks (default: False for security)
+        
+    Returns:
+        List of collected file paths
+    """
     files = []
     seen = set()
 
     for p in paths:
-        p = Path(p).resolve()
+        p = Path(p)
+        
+        # Skip symlinks if not following them
+        if not follow_symlinks and p.is_symlink():
+            logger.debug("Skipping symlink: %s", p)
+            continue
+            
+        p = p.resolve()
 
         if p.is_file():
             if str(p) not in seen:
@@ -93,6 +113,11 @@ def collect_files(paths: list[Path | str], gitignore_spec: "pathspec.PathSpec | 
         elif p.is_dir():
             base_path = p
             for entry in sorted(p.rglob("*")):
+                # Skip symlinks in directory traversal
+                if not follow_symlinks and entry.is_symlink():
+                    logger.debug("Skipping symlink in directory: %s", entry)
+                    continue
+                    
                 if entry.is_file() and str(entry) not in seen:
                     if not should_skip_entry(entry, gitignore_spec, base_path):
                         if not should_skip_entry(entry.parent, gitignore_spec, base_path):
