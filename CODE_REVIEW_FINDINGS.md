@@ -294,7 +294,7 @@ The codebase has tests (638 passing), but the analysis suggests adding:
 9. [x] Add dictionary lookup to project registry - **FIXED** (get_by_path with _path_index)
 
 ### Long-term (Architecture)
-10. [ ] Consolidate OAuth modules
+10. [x] Consolidate OAuth modules - **DONE** (src/rlm_dspy/core/oauth/)
 11. [ ] Implement RLM builder pattern
 12. [ ] Unify configuration management
 
