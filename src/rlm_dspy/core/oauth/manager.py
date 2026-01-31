@@ -93,20 +93,7 @@ def get_credentials(provider: str) -> OAuthCredentials | None:
     except ValueError:
         pass
     
-    # Try primary name first
     creds = load_credentials(provider)
-    
-    # Try aliases if not found
-    if not creds:
-        aliases = {
-            "google-gemini": ["google", "gemini"],
-            "antigravity": ["antigravity"],
-        }
-        for alias in aliases.get(provider, []):
-            creds = load_credentials(alias)
-            if creds:
-                break
-    
     if not creds:
         return None
     
