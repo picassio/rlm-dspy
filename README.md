@@ -297,16 +297,16 @@ Code:
 
 ## Supported Providers
 
-RLM-DSPy supports **100+ LLM providers** via LiteLLM:
+RLM-DSPy supports **32+ models across 9 providers**, including free OAuth providers:
 
 ```bash
+# Kimi (Recommended - fastest, 100% accuracy)
+export KIMI_API_KEY="sk-..."
+rlm-dspy ask "..." ./src --model kimi/k2p5
+
 # OpenAI
 export OPENAI_API_KEY="sk-..."
 rlm-dspy ask "..." ./src --model openai/gpt-4o
-
-# DeepSeek
-export DEEPSEEK_API_KEY="sk-..."
-rlm-dspy ask "..." ./src --model deepseek/deepseek-chat
 
 # DeepSeek
 export DEEPSEEK_API_KEY="sk-..."
@@ -316,13 +316,32 @@ rlm-dspy ask "..." ./src --model deepseek/deepseek-chat
 export GEMINI_API_KEY="..."
 rlm-dspy ask "..." ./src --model gemini/gemini-2.0-flash
 
-# OpenRouter (any model)
+# MiniMax
+export MINIMAX_API_KEY="..."
+rlm-dspy ask "..." ./src --model minimax/MiniMax-M2.1
+
+# Z.AI (GLM)
+export ZAI_API_KEY="..."
+rlm-dspy ask "..." ./src --model zai/glm-4.7
+
+# OpenRouter (100+ models)
 export OPENROUTER_API_KEY="sk-or-..."
 rlm-dspy ask "..." ./src --model openrouter/google/gemini-3-flash-preview
 
 # Ollama (local)
 rlm-dspy ask "..." ./src --model ollama/llama3.2
 ```
+
+### Provider Benchmark Results
+
+| Provider | Model | Accuracy | Hallucination | Avg Time |
+|----------|-------|----------|---------------|----------|
+| **Kimi** | k2p5 | **100%** | **0%** | **14.4s** |
+| Kimi | k2-thinking | 100% | 0% | 15.5s |
+| Z.AI | glm-4.7 | 100% | 0% | 44.2s |
+| MiniMax | M2.1 | ~50%* | 0% | ~70s |
+
+*MiniMax affected by timeouts on complex queries
 
 **Full provider list**: See [docs/PROVIDERS.md](docs/PROVIDERS.md)
 
@@ -403,6 +422,10 @@ env_file: ~/.env
 
 | Model Prefix | Environment Variable |
 |--------------|---------------------|
+| `kimi/` | `KIMI_API_KEY` |
+| `minimax/` | `MINIMAX_API_KEY` |
+| `zai/` | `ZAI_API_KEY` |
+| `opencode/` | `OPENCODE_API_KEY` |
 | `openai/` | `OPENAI_API_KEY` |
 | `deepseek/` | `DEEPSEEK_API_KEY` |
 | `gemini/` | `GEMINI_API_KEY` |
