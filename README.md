@@ -332,6 +332,27 @@ rlm-dspy ask "..." ./src --model openrouter/google/gemini-3-flash-preview
 rlm-dspy ask "..." ./src --model ollama/llama3.2
 ```
 
+### OAuth Authentication (Free Providers)
+
+For providers that support OAuth, you can authenticate without API keys:
+
+```bash
+# Anthropic (Claude Pro/Max subscription)
+rlm-dspy auth login anthropic
+rlm-dspy ask "..." ./src --model anthropic/claude-sonnet-4-20250514
+
+# Google Gemini CLI
+rlm-dspy auth login google-gemini
+rlm-dspy ask "..." ./src --model google/gemini-2.0-flash
+
+# Google Antigravity (experimental)
+rlm-dspy auth login antigravity
+rlm-dspy ask "..." ./src --model antigravity/gemini-2.5-flash
+
+# Check auth status
+rlm-dspy auth status
+```
+
 ### Provider Benchmark Results
 
 | Provider | Model | Accuracy | Hallucination | Avg Time |

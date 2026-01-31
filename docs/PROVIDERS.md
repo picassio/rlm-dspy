@@ -35,6 +35,64 @@ We benchmarked all providers on real code analysis tasks:
 
 ---
 
+## OAuth Providers (Free, No API Key Required)
+
+These providers support OAuth authentication - no API key needed:
+
+### Anthropic (Claude Pro/Max)
+
+Requires a Claude Pro or Max subscription at claude.ai.
+
+```bash
+# Login with OAuth
+rlm-dspy auth login anthropic
+
+# Use Claude models
+rlm-dspy ask "..." ./src --model anthropic/claude-sonnet-4-20250514
+rlm-dspy ask "..." ./src --model anthropic/claude-3-5-sonnet-20241022
+```
+
+### Google Gemini CLI
+
+Uses the same OAuth as the Gemini CLI tool.
+
+```bash
+# Login with OAuth
+rlm-dspy auth login google-gemini
+
+# Use Gemini models
+rlm-dspy ask "..." ./src --model google/gemini-2.0-flash
+rlm-dspy ask "..." ./src --model google/gemini-2.5-flash
+```
+
+### Antigravity (Experimental)
+
+Google's experimental API with access to latest models.
+
+```bash
+# Login with OAuth
+rlm-dspy auth login antigravity
+
+# Use Antigravity models
+rlm-dspy ask "..." ./src --model antigravity/gemini-2.5-flash
+rlm-dspy ask "..." ./src --model antigravity/gemini-3-flash
+```
+
+### Managing OAuth
+
+```bash
+# Check authentication status
+rlm-dspy auth status
+
+# Refresh tokens
+rlm-dspy auth refresh anthropic
+
+# Logout
+rlm-dspy auth logout google-gemini
+```
+
+---
+
 ## Native Providers (Custom LMs)
 
 These providers use custom Language Model implementations that bypass LiteLLM for direct API access:
