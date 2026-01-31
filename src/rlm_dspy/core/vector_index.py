@@ -150,8 +150,6 @@ class CodeIndex:
 
     def build(self, repo_path: str | Path, force: bool = False) -> int:
         """Build or update index for a repository."""
-        from .vector_build import check_needs_update, build_full_index, incremental_update
-        from dspy.retrievers import Embeddings
 
         repo_path = Path(repo_path).resolve()
         if not repo_path.exists():

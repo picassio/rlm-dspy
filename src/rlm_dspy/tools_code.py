@@ -231,7 +231,7 @@ def find_usages(file_path: str, symbol_name: str | None = None) -> str:
         if "(no matches)" in result or "(error)" in result.lower():
             continue
 
-        files = [f for f in result.strip().split('\n') if f and not "(no matches)" in f]
+        files = [f for f in result.strip().split('\n') if f and "(no matches)" not in f]
         internal = [f for f in files if f.startswith(str(Path(file_path).parent))]
         external = [f for f in files if f not in internal]
 

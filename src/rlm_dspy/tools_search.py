@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 import subprocess
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -157,7 +155,6 @@ def list_projects(include_empty: bool = False) -> str:
     """List all indexed projects available for semantic search."""
     try:
         from .core.project_registry import get_project_registry
-        from .core.vector_index import get_index_manager
 
         registry = get_project_registry()
         projects = registry.list()
@@ -165,7 +162,6 @@ def list_projects(include_empty: bool = False) -> str:
         if not projects:
             return "No projects indexed. Use 'rlm-dspy index build <path>' to index a project."
 
-        manager = get_index_manager()
         default_project = registry.get_default()
         default_name = default_project.name if default_project else None
 

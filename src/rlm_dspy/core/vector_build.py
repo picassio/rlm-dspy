@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import json
 import logging
 import os
@@ -172,8 +171,6 @@ def build_full_index(repo_path: Path, index_path: Path, embedder, config) -> tup
     logger.info("Found %d code snippets", len(snippets))
 
     corpus = [s.to_document() for s in snippets]
-    metadata = {s.id: s for s in snippets}
-    corpus_idx_to_id = {i: s.id for i, s in enumerate(snippets)}
 
     brute_force_threshold = config.faiss_threshold if config.use_faiss else float('inf')
 
@@ -214,7 +211,6 @@ def incremental_update(
     old_metadata: dict, old_corpus_idx_map: dict,
 ) -> tuple[int, dict] | None:
     """Incrementally update index. Returns (snippet_count, manifest) or None if failed."""
-    from dspy.retrievers import Embeddings
 
     logger.info("Incremental update: %d new/modified, %d deleted", len(new_or_modified), len(deleted))
 

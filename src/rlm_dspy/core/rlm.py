@@ -10,7 +10,7 @@ import dspy
 
 from .rlm_types import (
     RLMConfig, RLMResult, ProgressCallback,
-    get_provider_env_var, PROVIDER_API_KEYS,
+    get_provider_env_var,
 )
 from .secrets import sanitize_text as _sanitize_secrets, sanitize_value as _sanitize_value
 

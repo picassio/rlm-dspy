@@ -15,7 +15,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
 if TYPE_CHECKING:
-    from .core.rlm import RLM, RLMConfig, RLMResult
+    pass
 
 import importlib
 _fileutils = importlib.import_module("rlm_dspy.core.fileutils")
@@ -205,7 +205,7 @@ def register_commands(app: typer.Typer) -> None:
 
         sig = "context, query -> answer"
         if signature:
-            from .signatures import get_signature, list_signatures
+            from .signatures import get_signature
             sig_class = get_signature(signature)
             if not sig_class:
                 console.print(f"[red]Unknown signature: {signature}[/red]")

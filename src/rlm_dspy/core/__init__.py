@@ -91,7 +91,7 @@ _LAZY_IMPORTS = {
     "CallbackManager": ".callbacks",
     "LoggingCallback": ".callbacks",
     "MetricsCallback": ".callbacks",
-    "ProgressCallback": ".callbacks",
+    # Note: ProgressCallback from .rlm takes precedence (line 12)
     "get_callback_manager": ".callbacks",
     "clear_callback_manager": ".callbacks",
     "with_callbacks": ".callbacks",

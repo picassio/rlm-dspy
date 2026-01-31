@@ -38,7 +38,7 @@ def project_add(
 
         if default:
             registry.set_default(project.name)
-            console.print(f"[dim]Set as default project[/dim]")
+            console.print("[dim]Set as default project[/dim]")
 
     except ValueError as e:
         console.print(f"[red]Error: {e}[/red]")
@@ -115,7 +115,7 @@ def project_remove(
     if registry.remove(name, delete_index=delete_index):
         console.print(f"[green]✓[/green] Removed project: {name}")
     else:
-        console.print(f"[red]Failed to remove project[/red]")
+        console.print("[red]Failed to remove project[/red]")
 
 
 @project_app.command("default")
