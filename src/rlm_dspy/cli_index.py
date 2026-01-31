@@ -177,14 +177,14 @@ def index_cache(
     clear: Annotated[bool, typer.Option("--clear", "-c", help="Clear AST cache")] = False,
 ) -> None:
     """Show or clear AST index cache statistics."""
-    from .core.ast_index import get_ast_cache_stats, clear_ast_cache
+    from .core.ast_index import get_cache_stats, clear_index_cache
 
     if clear:
-        cleared = clear_ast_cache()
+        cleared = clear_index_cache()
         console.print(f"[green]✓[/green] Cleared AST cache ({cleared} entries)")
         return
 
-    stats = get_ast_cache_stats()
+    stats = get_cache_stats()
     table = Table(title="AST Index Cache")
     table.add_column("Property", style="cyan")
     table.add_column("Value")

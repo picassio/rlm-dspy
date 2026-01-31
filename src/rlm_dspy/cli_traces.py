@@ -24,34 +24,34 @@ def traces_list(
     from .core.trace_collector import get_trace_collector
 
     collector = get_trace_collector()
-    traces = collector.list_traces(limit=limit)
+    traces = list(collector.traces)[-limit:]  # Get last N traces
 
     if query_filter:
-        traces = [t for t in traces if query_filter.lower() in t.get("query", "").lower()]
+        traces = [t for t in traces if query_filter.lower() in t.query.lower()]
 
     if not traces:
         console.print("[yellow]No traces found[/yellow]")
         return
 
     table = Table(title=f"Recent Traces (showing {len(traces)})")
-    table.add_column("ID", style="cyan", max_width=12)
+    table.add_column("ID", style="cyan", max_width=16)
     table.add_column("Query", max_width=40)
-    table.add_column("Status")
-    table.add_column("Iterations", justify="right")
-    table.add_column("Time", justify="right")
+    table.add_column("Type")
+    table.add_column("Score", justify="right")
+    table.add_column("Tools", justify="right")
 
     for trace in traces:
-        status = "[green]✓[/green]" if trace.get("success") else "[red]✗[/red]"
-        query = trace.get("query", "")[:40]
-        if len(trace.get("query", "")) > 40:
+        query = trace.query[:40]
+        if len(trace.query) > 40:
             query += "..."
+        score_color = "green" if trace.grounded_score >= 0.8 else "yellow" if trace.grounded_score >= 0.5 else "red"
 
         table.add_row(
-            trace.get("id", "")[:12],
+            trace.trace_id[:16] if trace.trace_id else "",
             query,
-            status,
-            str(trace.get("iterations", 0)),
-            f"{trace.get('elapsed_time', 0):.1f}s",
+            trace.query_type,
+            f"[{score_color}]{trace.grounded_score:.0%}[/{score_color}]",
+            str(len(trace.tools_used)),
         )
 
     console.print(table)

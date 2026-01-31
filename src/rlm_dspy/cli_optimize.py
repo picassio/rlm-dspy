@@ -164,13 +164,21 @@ def optimize_patterns() -> None:
 
     if failure_patterns:
         console.print("\n[bold red]Failure Patterns:[/bold red]")
-        for reason, count in sorted(failure_patterns.items(), key=lambda x: -x[1])[:10]:
-            console.print(f"  {count}x: {reason[:60]}...")
+        top_reasons = failure_patterns.get("top_reasons", [])
+        for reason, count in top_reasons[:10]:
+            console.print(f"  {count}x: {reason[:60]}{'...' if len(reason) > 60 else ''}")
+        
+        missing_tools = failure_patterns.get("missing_tools", [])
+        if missing_tools:
+            console.print("\n[bold yellow]Missing Tools:[/bold yellow]")
+            for tool, count in missing_tools[:5]:
+                console.print(f"  {count}x: {tool}")
 
     if success_patterns:
         console.print("\n[bold green]Success Patterns:[/bold green]")
-        for pattern, count in sorted(success_patterns.items(), key=lambda x: -x[1])[:10]:
-            console.print(f"  {count}x: {pattern[:60]}...")
+        tools_used = success_patterns.get("tools_used", [])
+        for tool, count in tools_used[:10]:
+            console.print(f"  {count}x: {tool}")
 
 
 @optimize_app.command("simba")
