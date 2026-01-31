@@ -243,6 +243,22 @@ def register_commands(app: typer.Typer) -> None:
             else:
                 console.print(f"[yellow]⚠ Potential hallucinations ({validation.score:.0%} grounded)[/yellow]")
 
+            # Record trace for future optimization
+            try:
+                from .core.trace_collector import get_trace_collector
+                metadata = result.metadata or {}
+                collector = get_trace_collector()
+                collector.record(
+                    query=query,
+                    reasoning_steps=metadata.get("reasoning_steps", []),
+                    code_blocks=metadata.get("code_blocks", []),
+                    outputs=metadata.get("outputs", []),
+                    final_answer=result.answer,
+                    grounded_score=validation.score,
+                )
+            except Exception:
+                pass  # Don't fail on trace recording errors
+
         resolved_format = output_format or ("json" if output_json else "text")
         _output_result(result, resolved_format, output_file, verbose, debug)
 

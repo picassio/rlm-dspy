@@ -220,7 +220,11 @@ def optimize_simba(
     # Convert traces to training examples
     examples = []
     for trace in traces:
-        example = create_training_example(trace)
+        example = create_training_example(
+            query=trace.query,
+            answer=trace.final_answer,
+            context="",  # Context not stored in trace
+        )
         if example:
             examples.append(example)
 
@@ -239,9 +243,11 @@ def optimize_simba(
         rlm = RLM()
         optimizer = get_simba_optimizer()
 
+        # Pass the LM from RLM to the optimizer
         optimized_program, result = optimizer.optimize(
             program=rlm._rlm,
             trainset=examples,
+            lm=rlm._lm,
         )
 
         console.print("\n[bold green]✓ Optimization complete![/bold green]")

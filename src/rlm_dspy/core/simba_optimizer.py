@@ -246,6 +246,7 @@ class SIMBAOptimizer:
         program: Any,
         trainset: list[Any],
         seed: int = 42,
+        lm: Any = None,
     ) -> tuple[Any, OptimizationResult]:
         """
         Optimize a program using SIMBA.
@@ -254,16 +255,30 @@ class SIMBAOptimizer:
             program: DSPy module to optimize
             trainset: Training examples (list of dspy.Example)
             seed: Random seed for reproducibility
+            lm: Optional language model (will create default if not provided)
 
         Returns:
             Tuple of (optimized_program, optimization_result)
         """
+        import dspy
+
         # Lazy import to avoid startup cost
         try:
             from dspy.teleprompt import SIMBA
         except ImportError:
             logger.error("DSPy SIMBA not available")
             raise ImportError("DSPy SIMBA optimizer not available. Install dspy>=2.5")
+
+        # Configure LM if not already set
+        if lm is None and dspy.settings.lm is None:
+            from .user_config import load_config
+            config = load_config()
+            model = config.get("model", "openai/gpt-4o-mini")
+            lm = dspy.LM(model)
+            logger.info("Created LM for SIMBA: %s", model)
+
+        if lm is not None:
+            dspy.configure(lm=lm)
 
         # Validate trainset size
         if len(trainset) < self.batch_size:
