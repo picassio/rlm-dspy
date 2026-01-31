@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Callable
+from typing import Any, Callable, TYPE_CHECKING
 
 import dspy
 
@@ -14,11 +14,44 @@ from .rlm_types import (
 )
 from .secrets import sanitize_text as _sanitize_secrets
 
+if TYPE_CHECKING:
+    from .builder import RLMBuilder
+
 _logger = logging.getLogger(__name__)
 
 
 class RLM:
-    """Recursive Language Model using DSPy's native RLM module."""
+    """Recursive Language Model using DSPy's native RLM module.
+    
+    Can be created directly or via the builder pattern:
+    
+        # Direct creation
+        rlm = RLM(RLMConfig(model="kimi/k2p5"))
+        
+        # Builder pattern (recommended)
+        rlm = (RLM.builder()
+            .model("kimi/k2p5")
+            .iterations(30)
+            .verbose()
+            .build())
+    """
+    
+    @classmethod
+    def builder(cls) -> "RLMBuilder":
+        """Create a builder for fluent RLM configuration.
+        
+        Returns:
+            RLMBuilder instance
+            
+        Example:
+            rlm = (RLM.builder()
+                .model("kimi/k2p5")
+                .iterations(30)
+                .verbose()
+                .build())
+        """
+        from .builder import RLMBuilder
+        return RLMBuilder()
 
     def __init__(
         self,

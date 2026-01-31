@@ -8,7 +8,10 @@ only using lightweight features like CLI commands that don't need the LLM.
 def __getattr__(name: str):
     """Lazy import heavy modules (DSPy) only when accessed."""
     # Core RLM (imports DSPy)
-    if name in ("RLM", "RLMConfig", "RLMResult", "ProgressCallback"):
+    if name in ("RLM", "RLMBuilder", "RLMConfig", "RLMResult", "ProgressCallback"):
+        if name == "RLMBuilder":
+            from .core.builder import RLMBuilder
+            return RLMBuilder
         from .core.rlm import RLM, RLMConfig, RLMResult, ProgressCallback
         return {"RLM": RLM, "RLMConfig": RLMConfig, "RLMResult": RLMResult, "ProgressCallback": ProgressCallback}[name]
 

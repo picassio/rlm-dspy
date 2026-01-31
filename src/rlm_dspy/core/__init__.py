@@ -7,6 +7,7 @@ Uses lazy imports to avoid ~3s DSPy startup cost for lightweight operations.
 _LAZY_IMPORTS = {
     # Core RLM (imports DSPy - slow)
     "RLM": ".rlm",
+    "RLMBuilder": ".builder",
     "RLMConfig": ".rlm",
     "RLMResult": ".rlm",
     "ProgressCallback": ".rlm",
