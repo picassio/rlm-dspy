@@ -36,11 +36,14 @@ def _register_builtin_providers() -> None:
         return  # Already registered
     
     from .google import GeminiCLIProvider, AntigravityProvider
+    from .anthropic import AnthropicProvider
     
     _providers = {
         "google-gemini": GeminiCLIProvider,
         "gemini": GeminiCLIProvider,  # Alias
         "antigravity": AntigravityProvider,
+        "anthropic": AnthropicProvider,
+        "claude": AnthropicProvider,  # Alias
     }
 
 

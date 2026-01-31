@@ -50,7 +50,8 @@ def get_anthropic_api_key() -> str | None:
     
     Priority:
     1. ANTHROPIC_OAUTH_TOKEN env var
-    2. ANTHROPIC_API_KEY env var
+    2. OAuth credentials from ~/.rlm/oauth/credentials.json
+    3. ANTHROPIC_API_KEY env var
     
     Returns:
         API key/token or None
@@ -59,6 +60,15 @@ def get_anthropic_api_key() -> str | None:
     token = os.environ.get("ANTHROPIC_OAUTH_TOKEN")
     if token:
         return token
+    
+    # Try OAuth credentials from storage
+    try:
+        from .oauth import get_anthropic_token
+        token = get_anthropic_token()
+        if token:
+            return token
+    except ImportError:
+        pass
     
     # Fall back to regular API key
     return os.environ.get("ANTHROPIC_API_KEY")

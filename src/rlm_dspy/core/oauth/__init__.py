@@ -3,6 +3,7 @@
 This module provides a consistent interface for OAuth flows across providers:
 - Google Gemini CLI
 - Google Antigravity
+- Anthropic (Claude Pro/Max)
 
 Example:
     from rlm_dspy.core.oauth import authenticate, get_credentials, is_authenticated
@@ -89,6 +90,25 @@ def is_antigravity_authenticated() -> bool:
     return is_authenticated("antigravity")
 
 
+def get_anthropic_token() -> str | None:
+    """Get valid Anthropic OAuth token.
+    
+    Auto-refreshes if expired.
+    
+    Returns:
+        Access token or None if not authenticated
+    """
+    creds = get_credentials("anthropic")
+    if creds and not creds.is_expired:
+        return creds.access_token
+    return None
+
+
+def is_anthropic_authenticated() -> bool:
+    """Check if authenticated with Anthropic OAuth."""
+    return is_authenticated("anthropic")
+
+
 __all__ = [
     # Base classes
     "OAuthCredentials",
@@ -116,6 +136,8 @@ __all__ = [
     # Provider-specific helpers
     "get_google_token",
     "get_antigravity_token",
+    "get_anthropic_token",
     "is_google_authenticated",
     "is_antigravity_authenticated",
+    "is_anthropic_authenticated",
 ]
