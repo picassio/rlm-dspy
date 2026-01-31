@@ -317,7 +317,7 @@ def _get_configured_lm(model: str | None = None):
     
     # Check for Google models - may need OAuth
     if config.model.startswith("google/"):
-        from .core.google_oauth import get_google_token
+        from .core.oauth import get_google_token
         from .core.google_oauth_lm import GoogleOAuthLM
         
         # Check if we have Google OAuth credentials
