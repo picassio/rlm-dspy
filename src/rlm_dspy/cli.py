@@ -4,12 +4,34 @@ from __future__ import annotations
 
 import typer
 
+__version__ = "0.1.0"
+
+
+def version_callback(value: bool):
+    """Show version and exit."""
+    if value:
+        import sys
+        print(f"rlm-dspy {__version__}")
+        raise typer.Exit()
+
+
 # Create main app
 app = typer.Typer(
     name="rlm-dspy",
     help="Recursive Language Models with DSPy optimization",
     no_args_is_help=True,
 )
+
+
+@app.callback()
+def main(
+    version: bool = typer.Option(
+        False, "--version", "-V", callback=version_callback, is_eager=True,
+        help="Show version and exit"
+    ),
+):
+    """RLM-DSPy - Recursive Language Models with DSPy optimization."""
+    pass
 
 # Register main commands (ask, analyze, diff, setup, config, preflight, example)
 from .cli_main import register_commands
