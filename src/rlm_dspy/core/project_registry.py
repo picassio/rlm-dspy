@@ -26,6 +26,7 @@ class ProjectRegistry:
         self.config.registry_file.parent.mkdir(parents=True, exist_ok=True)
         self._projects: dict[str, Project] = {}
         self._default_project: str | None = None
+        self._path_index: dict[str, Project] | None = None  # Lazy-built path lookup
         self._lock = threading.RLock()
         self._file_mtime: float = 0
         self._load()
@@ -39,6 +40,8 @@ class ProjectRegistry:
             self._projects = {name: Project.from_dict(p) for name, p in data.get("projects", {}).items()}
             self._default_project = data.get("default")
             self._file_mtime = self.config.registry_file.stat().st_mtime
+            # Invalidate path index on reload
+            self._path_index = None
         except (json.JSONDecodeError, KeyError) as e:
             logger.warning("Failed to load registry: %s", e)
 
@@ -187,6 +190,23 @@ class ProjectRegistry:
             if self._default_project and self._default_project in self._projects:
                 return self._projects[self._default_project]
             return None
+    
+    def get_by_path(self, path: str | Path) -> Project | None:
+        """Get a project by its path (O(n) but cached via _path_index).
+        
+        Args:
+            path: The path to look up
+            
+        Returns:
+            Project if found, None otherwise
+        """
+        path_str = str(Path(path).resolve())
+        with self._lock:
+            self._reload_if_stale()
+            # Build path index on first use
+            if not hasattr(self, '_path_index') or self._path_index is None:
+                self._path_index = {p.path: p for p in self._projects.values()}
+            return self._path_index.get(path_str)
 
     def _find_overlapping_projects(self, path: Path) -> list[Project]:
         """Find projects that overlap with the given path."""

@@ -285,13 +285,13 @@ The codebase has tests (638 passing), but the analysis suggests adding:
 
 ### Short-term (Reliability)
 4. [x] Add timeout to async query method - **FIXED** (uses config.max_timeout)
-5. [ ] Add file size limits to JSON loading
-6. [ ] Add symlink handling option
+5. [x] Add file size limits to JSON loading - **FIXED** (MAX_METADATA_SIZE=50MB)
+6. [x] Add symlink handling option - **FIXED** (follow_symlinks=False by default)
 
 ### Medium-term (Performance)
 7. [x] Implement LRU cache with eviction for vector index - **FIXED** (MAX_CACHED_INDEXES=50)
 8. [x] Optimize cache eviction in AST index - **FIXED** (batch eviction of 10%)
-9. [ ] Add dictionary lookup to project registry
+9. [x] Add dictionary lookup to project registry - **FIXED** (get_by_path with _path_index)
 
 ### Long-term (Architecture)
 10. [ ] Consolidate OAuth modules
@@ -337,3 +337,30 @@ Added LRU-style eviction:
 **File**: `core/ast_index.py`
 
 Cache eviction now removes 10% of entries at once instead of one-by-one.
+
+---
+
+## Additional Fixes (2026-01-31)
+
+### 6. JSON File Size Limits
+**Files**: `core/json_utils.py`, `core/vector_index.py`
+
+- Added `safe_load_json_file()` with configurable max size (default 100MB)
+- `MAX_METADATA_SIZE = 50MB` for index metadata files
+- Prevents memory exhaustion from maliciously large files
+
+### 7. Symlink Handling
+**File**: `core/fileutils_context.py`
+
+`collect_files()` now has `follow_symlinks=False` by default:
+- Skips symlinks during file collection
+- Prevents symlink-based directory traversal attacks
+- Can be enabled with `follow_symlinks=True` if needed
+
+### 8. Dictionary Lookup for Project Registry
+**File**: `core/project_registry.py`
+
+Added `get_by_path()` method with lazy-built `_path_index`:
+- O(1) lookup by path instead of O(n) list iteration
+- Index invalidated on reload
+- Used in `vector_index.py` for faster project lookups

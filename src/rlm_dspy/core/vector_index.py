@@ -61,9 +61,10 @@ class CodeIndex:
         repo_path = repo_path.resolve()
         registry = get_project_registry()
 
-        for project in registry.list():
-            if project.path == str(repo_path):
-                return self.config.index_dir / project.name
+        # Use O(1) path lookup instead of O(n) list iteration
+        project = registry.get_by_path(repo_path)
+        if project:
+            return self.config.index_dir / project.name
 
         best_match = registry.find_best_match(repo_path)
         if best_match and best_match.path != str(repo_path):
@@ -86,11 +87,18 @@ class CodeIndex:
             logger.debug("Decompressing index for loading: %s", index_path)
             decompress_index(index_path)
 
+    # Maximum size for index metadata files (50MB)
+    MAX_METADATA_SIZE = 50 * 1024 * 1024
+    
     def _load_manifest(self, index_path: Path) -> dict:
-        """Load manifest file."""
+        """Load manifest file with size limit."""
         manifest_path = self._get_manifest_path(index_path)
         if manifest_path.exists():
             try:
+                # Check file size before loading
+                if manifest_path.stat().st_size > self.MAX_METADATA_SIZE:
+                    logger.warning("Manifest too large at %s, skipping", manifest_path)
+                    return {"files": {}, "created": 0, "updated": 0, "snippet_count": 0}
                 return json.loads(manifest_path.read_text(encoding='utf-8'))
             except json.JSONDecodeError:
                 logger.warning("Corrupt manifest at %s", manifest_path)
@@ -128,7 +136,7 @@ class CodeIndex:
             self._corpus_idx_map[cache_key] = corpus_idx_to_id
 
     def _load_metadata(self, index_path: Path) -> tuple[dict[str, CodeSnippet], dict[int, str]]:
-        """Load snippet metadata and corpus index mapping."""
+        """Load snippet metadata and corpus index mapping with size limits."""
         cache_key = str(index_path)
         if cache_key in self._metadata and cache_key in self._corpus_idx_map:
             return self._metadata[cache_key], self._corpus_idx_map[cache_key]
@@ -136,13 +144,17 @@ class CodeIndex:
         metadata_path = index_path / "metadata.json"
         compressed_metadata = index_path / "metadata.json.gz"
 
+        data = {}
         if compressed_metadata.exists():
+            # Compressed files checked during decompression
             from .index_compression import load_json
             data = load_json(compressed_metadata)
         elif metadata_path.exists():
-            data = json.loads(metadata_path.read_text(encoding='utf-8'))
-        else:
-            return {}, {}
+            # Check file size before loading
+            if metadata_path.stat().st_size > self.MAX_METADATA_SIZE:
+                logger.warning("Metadata file too large at %s, skipping", metadata_path)
+            else:
+                data = json.loads(metadata_path.read_text(encoding='utf-8'))
 
         metadata = {id_: CodeSnippet(**info) for id_, info in data.items()}
 
@@ -155,8 +167,12 @@ class CodeIndex:
             idx_data = load_json(compressed_idx_map)
             corpus_idx_to_id = {int(k): v for k, v in idx_data.items()}
         elif idx_map_path.exists():
-            idx_data = json.loads(idx_map_path.read_text(encoding='utf-8'))
-            corpus_idx_to_id = {int(k): v for k, v in idx_data.items()}
+            # Check file size before loading
+            if idx_map_path.stat().st_size > self.MAX_METADATA_SIZE:
+                logger.warning("Index map file too large at %s, skipping", idx_map_path)
+            else:
+                idx_data = json.loads(idx_map_path.read_text(encoding='utf-8'))
+                corpus_idx_to_id = {int(k): v for k, v in idx_data.items()}
 
         self._metadata[cache_key] = metadata
         self._corpus_idx_map[cache_key] = corpus_idx_to_id
@@ -274,10 +290,10 @@ class CodeIndex:
         """Update project registry stats."""
         from .project_registry import get_project_registry
         registry = get_project_registry()
-        for project in registry.list():
-            if project.path == str(repo_path):
-                registry.update_stats(project.name, snippet_count, file_count)
-                break
+        # Use O(1) path lookup
+        project = registry.get_by_path(repo_path)
+        if project:
+            registry.update_stats(project.name, snippet_count, file_count)
 
     def search(self, repo_path: str | Path, query: str, k: int = 5) -> list[SearchResult]:
         """Search for relevant code snippets."""
