@@ -296,7 +296,7 @@ The codebase has tests (638 passing), but the analysis suggests adding:
 ### Long-term (Architecture)
 10. [x] Consolidate OAuth modules - **DONE** (src/rlm_dspy/core/oauth/)
 11. [x] Implement RLM builder pattern - **DONE** (src/rlm_dspy/core/builder.py)
-12. [ ] Unify configuration management
+12. [x] Unify configuration management - **DONE** (src/rlm_dspy/core/config.py)
 
 ---
 
