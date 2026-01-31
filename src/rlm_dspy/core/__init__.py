@@ -119,6 +119,16 @@ _LAZY_IMPORTS = {
     "get_anthropic_api_key": ".anthropic_oauth_lm",
     "is_oauth_token": ".anthropic_oauth_lm",
     "create_lm_with_oauth_fallback": ".anthropic_oauth_lm",
+    # Model Registry
+    "ModelInfo": ".models",
+    "ModelCost": ".models",
+    "ModelRegistry": ".models",
+    "get_model_registry": ".models",
+    "get_available_models": ".models",
+    "find_model": ".models",
+    "search_models": ".models",
+    "has_provider_auth": ".models",
+    "get_provider_api_key": ".models",
 }
 
 
