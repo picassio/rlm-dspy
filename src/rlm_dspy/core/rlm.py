@@ -9,84 +9,12 @@ from typing import Any, Callable
 import dspy
 
 from .rlm_types import (
-    RLMConfig, RLMResult, ProgressCallback,
-    get_provider_env_var,
+    RLMConfig, RLMResult, ProgressCallback, DspyProgressCallback,
+    get_provider_env_var, sanitize_trajectory, extract_trace_metadata,
 )
-from .secrets import sanitize_text as _sanitize_secrets, sanitize_value as _sanitize_value
+from .secrets import sanitize_text as _sanitize_secrets
 
 _logger = logging.getLogger(__name__)
-
-
-def _sanitize_trajectory(trajectory: list, extra_secrets: list[str] | None = None) -> list:
-    """Sanitize all strings in a trajectory list."""
-    if not trajectory:
-        return trajectory
-    return [_sanitize_value(item, extra_secrets) for item in trajectory]
-
-
-def _extract_trace_metadata(trajectory: list) -> dict[str, Any]:
-    """Extract metadata from trajectory for trace collection."""
-    reasoning_steps, code_blocks, outputs, tools_used = [], [], [], set()
-    tool_patterns = {"read_file", "ripgrep", "find_files", "semantic_search", "run_shell_command"}
-
-    for item in trajectory:
-        if isinstance(item, dict):
-            if reasoning := item.get("reasoning") or item.get("thought"):
-                reasoning_steps.append(str(reasoning))
-            if code := item.get("code") or item.get("action"):
-                code_str = str(code)
-                code_blocks.append(code_str)
-                tools_used.update(t for t in tool_patterns if t in code_str)
-            if output := item.get("output") or item.get("observation"):
-                outputs.append(str(output))
-
-    return {"reasoning_steps": reasoning_steps, "code_blocks": code_blocks,
-            "outputs": outputs, "tools_used": sorted(tools_used)}
-
-
-class DspyProgressCallback:
-    """DSPy-compatible callback that wraps our ProgressCallback."""
-
-    def __init__(self, progress_callback: ProgressCallback | None = None):
-        self.progress = progress_callback
-        self.lm_calls = self.tool_calls = self.module_calls = 0
-
-    def on_lm_start(self, call_id: str, instance: Any, inputs: dict[str, Any]):
-        self.lm_calls += 1
-        if self.progress:
-            self.progress.on_lm_call("lm", {"call_id": call_id, "count": self.lm_calls})
-
-    def on_lm_end(self, call_id: str, outputs: dict[str, Any] | None, exception: Exception | None = None):
-        pass
-
-    def on_tool_start(self, call_id: str, instance: Any, inputs: dict[str, Any]):
-        self.tool_calls += 1
-        if self.progress:
-            self.progress.on_lm_call("tool", {"tool": inputs.get("tool_name", "unknown")})
-
-    def on_tool_end(self, call_id: str, outputs: dict[str, Any] | None, exception: Exception | None = None):
-        pass
-
-    def on_module_start(self, call_id: str, instance: Any, inputs: dict[str, Any]):
-        self.module_calls += 1
-
-    def on_module_end(self, call_id: str, outputs: Any | None, exception: Exception | None = None):
-        pass
-
-    def on_adapter_format_start(self, call_id: str, instance: Any, inputs: dict[str, Any]):
-        pass
-
-    def on_adapter_format_end(self, call_id: str, outputs: dict[str, Any] | None, exception: Exception | None = None):
-        pass
-
-    def on_adapter_parse_start(self, call_id: str, instance: Any, inputs: dict[str, Any]):
-        pass
-
-    def on_adapter_parse_end(self, call_id: str, outputs: dict[str, Any] | None, exception: Exception | None = None):
-        pass
-
-    def get_stats(self) -> dict[str, int]:
-        return {"lm_calls": self.lm_calls, "tool_calls": self.tool_calls, "module_calls": self.module_calls}
 
 
 class RLM:
@@ -133,6 +61,10 @@ class RLM:
         self._metrics_callback: Any = None
         self._setup_callbacks()
 
+        # Load saved optimization and maybe trigger background optimization
+        self._load_and_apply_optimization()
+        self._maybe_trigger_background_optimization()
+
     def _setup_callbacks(self) -> None:
         from .callbacks import get_callback_manager, LoggingCallback, MetricsCallback
         manager = get_callback_manager()
@@ -142,6 +74,53 @@ class RLM:
         if self.config.enable_metrics:
             self._metrics_callback = MetricsCallback()
             manager.add(self._metrics_callback)
+
+    def _load_and_apply_optimization(self) -> None:
+        """Load and apply saved SIMBA optimization if available."""
+        try:
+            from .simba_optimizer import load_optimized_program
+
+            saved = load_optimized_program()
+            if saved is None:
+                return
+
+            # Apply demos to the RLM module
+            if saved.demos and hasattr(self._rlm, "demos"):
+                self._rlm.demos = saved.demos
+                _logger.debug("Applied %d saved demos from optimization", len(saved.demos))
+
+            # Note: instructions are already handled by _get_optimized_instructions()
+            # which loads from InstructionOptimizer
+
+            if saved.result and saved.result.improved:
+                _logger.info(
+                    "Loaded saved optimization: +%.1f%% improvement (%s)",
+                    saved.result.improvement,
+                    saved.optimizer_type,
+                )
+
+        except Exception as e:
+            _logger.debug("Failed to load optimization: %s", e)
+
+    def _maybe_trigger_background_optimization(self) -> None:
+        """Trigger background SIMBA optimization if conditions are met."""
+        try:
+            from .user_config import OptimizationConfig
+            from .simba_optimizer import should_optimize, run_background_optimization
+
+            config = OptimizationConfig.from_user_config()
+
+            if not config.enabled:
+                return
+
+            if should_optimize(config):
+                _logger.debug("Triggering background %s optimization", config.optimizer)
+                # Get the model to use for optimization
+                model = config.get_model(self.config.model)
+                run_background_optimization(config, model)
+
+        except Exception as e:
+            _logger.debug("Failed to check/trigger optimization: %s", e)
 
     def get_metrics(self) -> dict[str, Any] | None:
         return self._metrics_callback.get_summary() if self._metrics_callback else None
@@ -319,8 +298,8 @@ VERIFICATION RULES:
         else:
             answer = _sanitize_secrets(getattr(prediction, "answer", ""), extra_secrets)
 
-        sanitized_trajectory = _sanitize_trajectory(raw_trajectory, extra_secrets)
-        metadata = _extract_trace_metadata(sanitized_trajectory)
+        sanitized_trajectory = sanitize_trajectory(raw_trajectory, extra_secrets)
+        metadata = extract_trace_metadata(sanitized_trajectory)
 
         return RLMResult(
             answer=answer, success=True, elapsed_time=elapsed,
@@ -466,7 +445,7 @@ VERIFICATION RULES:
                 results.append(RLMResult(
                     answer=_sanitize_secrets(pred.answer, extra_secrets), success=True,
                     elapsed_time=elapsed / len(examples),
-                    trajectory=_sanitize_trajectory(getattr(pred, "trajectory", []), extra_secrets),
+                    trajectory=sanitize_trajectory(getattr(pred, "trajectory", []), extra_secrets),
                     iterations=len(getattr(pred, "trajectory", [])),
                 ))
             else:

@@ -265,10 +265,11 @@ def register_commands(app: typer.Typer) -> None:
 
             progress.add_task("Analyzing...", total=None)
             # Use num_threads=1 to avoid Deno subprocess conflicts in parallel execution
+            # Queries are scoped to the provided context only
             results = rlm.batch([
-                {"query": "List all files and their purposes"},
-                {"query": "Identify main components and their roles"},
-                {"query": "Find potential bugs or improvements"},
+                {"query": "Summarize the structure and purpose of the provided code"},
+                {"query": "Identify the main classes, functions, and their roles in the provided code"},
+                {"query": "Find potential bugs or improvements in the provided code"},
             ], context=context, num_threads=1, return_failed=True)
 
         if len(results) != 3 or not all(r.success for r in results):
