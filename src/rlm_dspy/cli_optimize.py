@@ -95,6 +95,58 @@ def optimize_clear(
     console.print(f"[green]✓[/green] Cleared {failures} failures and {successes} successes from proposer")
 
 
+@optimize_app.command("instructions")
+def optimize_instructions(
+    key: Annotated[str | None, typer.Argument(help="Instruction key to show/modify")] = None,
+    reset: Annotated[bool, typer.Option("--reset", help="Reset to default")] = False,
+    propose: Annotated[bool, typer.Option("--propose", "-p", help="Propose improvement")] = False,
+) -> None:
+    """Show or modify tool instructions."""
+    from .core.instruction_optimizer import get_instruction_optimizer, DEFAULT_INSTRUCTIONS
+
+    optimizer = get_instruction_optimizer()
+
+    if key is None:
+        table = Table(title="Instruction Keys")
+        table.add_column("Key")
+        table.add_column("Length", justify="right")
+        table.add_column("Modified")
+
+        for k in DEFAULT_INSTRUCTIONS:
+            current = optimizer.get_instruction(k)
+            default = DEFAULT_INSTRUCTIONS[k]
+            modified = "✓" if current != default else ""
+            table.add_row(k, str(len(current)), modified)
+
+        console.print(table)
+        return
+
+    if key not in DEFAULT_INSTRUCTIONS:
+        console.print(f"[red]Unknown key: {key}[/red]")
+        console.print(f"Available: {', '.join(DEFAULT_INSTRUCTIONS.keys())}")
+        raise typer.Exit(1)
+
+    if reset:
+        optimizer.reset_instruction(key)
+        console.print(f"[green]✓[/green] Reset '{key}' to default")
+        return
+
+    if propose:
+        console.print(f"[cyan]Proposing improvement for '{key}'...[/cyan]")
+        new_instruction = optimizer.propose_improvement(key)
+        if new_instruction:
+            console.print("\n[bold]Proposed instruction:[/bold]")
+            console.print(new_instruction[:500] + "..." if len(new_instruction) > 500 else new_instruction)
+        else:
+            console.print("[yellow]No improvement proposed[/yellow]")
+        return
+
+    # Show current instruction
+    current = optimizer.get_instruction(key)
+    console.print(f"\n[bold cyan]{key}:[/bold cyan]\n")
+    console.print(current)
+
+
 @optimize_app.command("patterns")
 def optimize_patterns() -> None:
     """Show learned patterns from past queries."""
@@ -119,3 +171,75 @@ def optimize_patterns() -> None:
         console.print("\n[bold green]Success Patterns:[/bold green]")
         for pattern, count in sorted(success_patterns.items(), key=lambda x: -x[1])[:10]:
             console.print(f"  {count}x: {pattern[:60]}...")
+
+
+@optimize_app.command("simba")
+def optimize_simba(
+    min_score: Annotated[float, typer.Option("--min-score", "-s", help="Minimum trace score")] = 0.7,
+    max_examples: Annotated[int, typer.Option("--max-examples", "-n", help="Maximum training examples")] = 100,
+    batch_size: Annotated[int, typer.Option("--batch-size", "-b", help="Mini-batch size")] = 16,
+    steps: Annotated[int, typer.Option("--steps", help="Optimization steps")] = 4,
+    candidates: Annotated[int, typer.Option("--candidates", "-c", help="Candidates per step")] = 4,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Show what would be optimized")] = False,
+) -> None:
+    """Run SIMBA self-improving optimization.
+
+    Uses collected traces to optimize the RLM program via DSPy's SIMBA optimizer.
+    """
+    from .core.trace_collector import get_trace_collector
+    from .core.simba_optimizer import get_simba_optimizer, create_training_example
+
+    collector = get_trace_collector()
+    traces = collector.list_traces(min_score=min_score, limit=max_examples)
+
+    if not traces:
+        console.print("[yellow]No traces found with score >= {min_score}[/yellow]")
+        console.print("Run some queries first to collect training data.")
+        raise typer.Exit(1)
+
+    console.print(f"[cyan]Found {len(traces)} traces for training[/cyan]")
+
+    if dry_run:
+        console.print("\n[bold]Would train on:[/bold]")
+        for trace in traces[:10]:
+            console.print(f"  - {trace.query[:50]}... (score: {trace.score:.2f})")
+        if len(traces) > 10:
+            console.print(f"  ... and {len(traces) - 10} more")
+        return
+
+    # Convert traces to training examples
+    examples = []
+    for trace in traces:
+        example = create_training_example(trace)
+        if example:
+            examples.append(example)
+
+    if not examples:
+        console.print("[red]No valid training examples could be created[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[cyan]Created {len(examples)} training examples[/cyan]")
+    console.print(f"[cyan]Running SIMBA optimization (steps={steps}, candidates={candidates})...[/cyan]")
+
+    try:
+        optimizer = get_simba_optimizer()
+        result = optimizer.optimize(
+            examples=examples,
+            batch_size=batch_size,
+            num_steps=steps,
+            num_candidates=candidates,
+        )
+
+        console.print("\n[bold green]✓ Optimization complete![/bold green]")
+        console.print(f"  Initial score: {result.initial_score:.2%}")
+        console.print(f"  Final score: {result.final_score:.2%}")
+        console.print(f"  Improvement: {result.improvement:.2%}")
+
+        if result.learned_rules:
+            console.print("\n[bold]Learned Rules:[/bold]")
+            for rule in result.learned_rules[:5]:
+                console.print(f"  - {rule}")
+
+    except Exception as e:
+        console.print(f"[red]Optimization failed: {e}[/red]")
+        raise typer.Exit(1)
