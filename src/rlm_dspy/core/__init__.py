@@ -11,6 +11,10 @@ _LAZY_IMPORTS = {
     "RLMConfig": ".rlm",
     "RLMResult": ".rlm",
     "ProgressCallback": ".rlm",
+    # Unified Config (lightweight)
+    "Config": ".config",
+    "get_config": ".config",
+    "reload_config": ".config",
     # Embeddings (imports DSPy - slow)
     "EmbeddingConfig": ".embeddings",
     "clear_embedder_cache": ".embeddings",
