@@ -157,12 +157,26 @@ def load_optimization_state() -> OptimizationState:
 
 
 def save_optimization_state(state: OptimizationState) -> None:
-    """Save optimization state to disk."""
+    """Save optimization state to disk atomically."""
     OPTIMIZATION_DIR.mkdir(parents=True, exist_ok=True)
     try:
-        OPTIMIZATION_STATE_FILE.write_text(json.dumps(state.to_dict(), indent=2))
+        # Write to temp file first, then atomic rename
+        import tempfile
+        with tempfile.NamedTemporaryFile(
+            mode='w',
+            dir=OPTIMIZATION_DIR,
+            suffix='.tmp',
+            delete=False
+        ) as f:
+            json.dump(state.to_dict(), f, indent=2)
+            temp_path = Path(f.name)
+        # Atomic rename (works on POSIX, best-effort on Windows)
+        temp_path.replace(OPTIMIZATION_STATE_FILE)
     except Exception as e:
         logger.warning("Failed to save optimization state: %s", e)
+        # Clean up temp file if it exists
+        if 'temp_path' in locals():
+            temp_path.unlink(missing_ok=True)
 
 
 def load_optimized_program() -> SavedOptimization | None:
@@ -206,10 +220,22 @@ def save_optimized_program(program: Any, result: OptimizationResult, optimizer_t
     )
 
     try:
-        OPTIMIZED_PROGRAM_FILE.write_text(json.dumps(saved.to_dict(), indent=2))
+        # Write to temp file first, then atomic rename
+        import tempfile
+        with tempfile.NamedTemporaryFile(
+            mode='w',
+            dir=OPTIMIZATION_DIR,
+            suffix='.tmp',
+            delete=False
+        ) as f:
+            json.dump(saved.to_dict(), f, indent=2)
+            temp_path = Path(f.name)
+        temp_path.replace(OPTIMIZED_PROGRAM_FILE)
         logger.info("Saved optimized program to %s", OPTIMIZED_PROGRAM_FILE)
     except Exception as e:
         logger.warning("Failed to save optimized program: %s", e)
+        if 'temp_path' in locals():
+            temp_path.unlink(missing_ok=True)
 
 
 def clear_optimization() -> bool:

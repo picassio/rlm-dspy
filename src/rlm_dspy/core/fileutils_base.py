@@ -147,26 +147,76 @@ def smart_rmtree(path: Path, aggressive: bool = False) -> bool:
     return not path.exists()
 
 
-def _kill_blocking_processes(path: Path) -> None:
-    """Kill processes blocking a path (macOS only)."""
+def _kill_blocking_processes(path: Path, graceful_timeout: float = 2.0) -> None:
+    """Kill processes blocking a path (Unix only).
+    
+    Uses SIGTERM first for graceful shutdown, then SIGKILL after timeout.
+    Only kills processes that are children of the current process or
+    processes explicitly blocking the target path.
+    
+    Args:
+        path: Path being blocked
+        graceful_timeout: Seconds to wait after SIGTERM before SIGKILL
+    """
+    import signal
+    import time
+    
     try:
-        result = subprocess.run(["lsof", "+D", str(path)], capture_output=True, text=True, timeout=10)
+        result = subprocess.run(
+            ["lsof", "+D", str(path)],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
         pids = set()
+        current_pid = os.getpid()
+        
         for line in result.stdout.strip().split('\n')[1:]:
             parts = line.split()
             if len(parts) > 1:
                 try:
-                    pids.add(int(parts[1]))
+                    pid = int(parts[1])
+                    # Don't kill self or init/system processes
+                    if pid != current_pid and pid > 1:
+                        pids.add(pid)
                 except ValueError:
                     pass
+        
+        if not pids:
+            return
+        
+        # Try graceful termination first (SIGTERM)
         for pid in pids:
-            if pid != os.getpid():
-                try:
-                    os.kill(pid, 9)
-                except ProcessLookupError:
-                    pass
-    except Exception:
+            try:
+                os.kill(pid, signal.SIGTERM)
+                logger.debug("Sent SIGTERM to PID %d blocking %s", pid, path)
+            except ProcessLookupError:
+                pids.discard(pid)
+            except PermissionError:
+                logger.warning("No permission to kill PID %d", pid)
+                pids.discard(pid)
+        
+        # Wait for graceful shutdown
+        if pids:
+            time.sleep(graceful_timeout)
+        
+        # Force kill remaining processes (SIGKILL)
+        for pid in pids:
+            try:
+                # Check if still running
+                os.kill(pid, 0)
+                os.kill(pid, signal.SIGKILL)
+                logger.warning("Sent SIGKILL to PID %d (didn't respond to SIGTERM)", pid)
+            except ProcessLookupError:
+                pass  # Already dead
+            except PermissionError:
+                pass
+                
+    except FileNotFoundError:
+        # lsof not available
         pass
+    except Exception as e:
+        logger.debug("Failed to kill blocking processes: %s", e)
 
 
 def sync_directory(source: Path, target: Path, delete_extra: bool = True, dry_run: bool = False) -> dict:
