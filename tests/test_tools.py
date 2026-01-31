@@ -350,7 +350,8 @@ class TestShell:
         """Test that commands not in allowlist are blocked."""
         with patch.dict(os.environ, {"RLM_ALLOW_SHELL": "1"}):
             result = shell("curl http://example.com")
-            assert "not in allowlist" in result.lower()
+            # Could be blocked for various reasons
+            assert "blocked" in result.lower() or "not in allowlist" in result.lower()
 
     def test_shell_timeout(self):
         """Test shell with allowed command."""

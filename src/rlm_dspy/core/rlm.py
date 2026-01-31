@@ -1,543 +1,24 @@
-"""Core RLM class using DSPy's native RLM module.
-
-This module wraps dspy.RLM to provide a unified interface for recursive
-language model processing with proper configuration management.
-
-Reference: "Recursive Language Models" (Zhang, Kraska, Khattab, 2025)
-"""
+"""Core RLM class using DSPy's native RLM module."""
 
 from __future__ import annotations
 
 import logging
-import os
-import re
 import time
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable
 
 import dspy
 
-from .secrets import sanitize_text, sanitize_value
+from .rlm_types import (
+    RLMConfig, RLMResult, ProgressCallback, DspyProgressCallback,
+    get_provider_env_var, sanitize_trajectory, extract_trace_metadata,
+)
+from .secrets import sanitize_text as _sanitize_secrets
 
 _logger = logging.getLogger(__name__)
 
 
-# =============================================================================
-# Environment Helpers
-# =============================================================================
-
-def _env(key: str, default: str) -> str:
-    """Get environment variable with default."""
-    return os.environ.get(key, default)
-
-
-# Aliases for backward compatibility - now use centralized secrets module
-_sanitize_secrets = sanitize_text
-_sanitize_value = sanitize_value
-
-
-def _sanitize_trajectory(trajectory: list, extra_secrets: list[str] | None = None) -> list:
-    """Sanitize all strings in a trajectory list, including nested structures."""
-    if not trajectory:
-        return trajectory
-
-    return [_sanitize_value(item, extra_secrets) for item in trajectory]
-
-
-def _extract_trace_metadata(trajectory: list) -> dict[str, Any]:
-    """Extract metadata from trajectory for trace collection.
-
-    Extracts reasoning steps, code blocks, outputs, and tools used
-    for use in few-shot bootstrapping.
-    """
-    reasoning_steps = []
-    code_blocks = []
-    outputs = []
-    tools_used = set()
-
-    # Known tool names to detect
-    tool_patterns = {
-        "read_file", "ripgrep", "find_files", "find_classes", "find_functions",
-        "find_methods", "find_imports", "find_calls", "index_code",
-        "semantic_search", "grep_context", "run_shell_command",
-        "find_references", "go_to_definition", "get_type_info", "get_symbol_hierarchy",
-    }
-
-    for item in trajectory:
-        if isinstance(item, dict):
-            # Extract reasoning
-            reasoning = item.get("reasoning") or item.get("thought")
-            if reasoning:
-                reasoning_steps.append(str(reasoning))
-
-            # Extract code
-            code = item.get("code") or item.get("action")
-            if code:
-                code_str = str(code)
-                code_blocks.append(code_str)
-
-                # Detect tools used
-                for tool in tool_patterns:
-                    if tool in code_str:
-                        tools_used.add(tool)
-
-            # Extract output
-            output = item.get("output") or item.get("observation")
-            if output:
-                outputs.append(str(output))
-
-    return {
-        "reasoning_steps": reasoning_steps,
-        "code_blocks": code_blocks,
-        "outputs": outputs,
-        "tools_used": sorted(tools_used),
-    }
-
-
-T = TypeVar("T", int, float, bool, str)
-
-
-def _env_get(key: str, default: T, cast: type[T] | None = None) -> T:
-    """Get environment variable with type casting and default.
-
-    Args:
-        key: Environment variable name
-        default: Default value (also determines type if cast not specified)
-        cast: Type to cast to (int, float, bool, str). If None, inferred from default.
-
-    Returns:
-        The environment variable value cast to the appropriate type, or default.
-    """
-    val = os.environ.get(key)
-    if val is None:
-        return default
-
-    target_type = cast or type(default)
-
-    # Special handling for bool
-    if target_type is bool:
-        return val.lower() in ("true", "1", "yes", "on")  # type: ignore[return-value]
-
-    try:
-        return target_type(val)  # type: ignore[return-value]
-    except ValueError:
-        # Don't log the actual value in case it contains sensitive data
-        _logger.warning("Invalid %s for %s, using default", target_type.__name__, key)
-        return default
-
-
-# =============================================================================
-# Provider API Key Resolution
-# =============================================================================
-
-PROVIDER_API_KEYS: dict[str, str] = {
-    "minimax/": "MINIMAX_API_KEY",
-    "deepseek/": "DEEPSEEK_API_KEY",
-    "moonshot/": "MOONSHOT_API_KEY",
-    "dashscope/": "DASHSCOPE_API_KEY",
-    "anthropic/": "ANTHROPIC_API_KEY",
-    "openai/": "OPENAI_API_KEY",
-    "gemini/": "GEMINI_API_KEY",
-    "groq/": "GROQ_API_KEY",
-    "together_ai/": "TOGETHER_API_KEY",
-    "fireworks_ai/": "FIREWORKS_API_KEY",
-    "openrouter/": "OPENROUTER_API_KEY",
-    "bedrock/": "AWS_ACCESS_KEY_ID",
-    "vertex_ai/": "GOOGLE_APPLICATION_CREDENTIALS",
-    "ollama/": "",  # No API key needed for local
-}
-
-
-def get_provider_env_var(model: str) -> str | None:
-    """Get the environment variable name for a model's provider."""
-    model_lower = model.lower()
-    for prefix, env_var in PROVIDER_API_KEYS.items():
-        if model_lower.startswith(prefix):
-            return env_var if env_var else None
-    return None
-
-
-def _load_user_env() -> None:
-    """Load environment variables from user's configured env file."""
-    try:
-        from .user_config import load_env_file
-        load_env_file()
-    except ImportError:
-        _logger.debug("user_config module not available, skipping env file loading")
-
-
-def _resolve_api_key() -> str | None:
-    """Resolve API key from environment."""
-    _load_user_env()
-
-    if key := os.environ.get("RLM_API_KEY"):
-        return key
-
-    model = os.environ.get("RLM_MODEL", "")
-    if env_var := get_provider_env_var(model):
-        if key := os.environ.get(env_var):
-            return key
-
-    return os.environ.get("OPENROUTER_API_KEY")
-
-
-def _get_user_config_default(key: str, default: Any) -> Any:
-    """Get default from user config, falling back to provided default."""
-    try:
-        from .user_config import get_config_value
-        return get_config_value(key, default)
-    except ImportError:
-        return default
-
-
-# =============================================================================
-# Configuration
-# =============================================================================
-
-@dataclass
-class RLMConfig:
-    """Configuration for RLM execution.
-
-    Settings priority (highest to lowest):
-    1. Constructor arguments
-    2. Environment variables (RLM_*)
-    3. User config (~/.rlm/config.yaml)
-    4. Built-in defaults
-
-    Environment variables:
-    - RLM_MODEL: Primary model (e.g., openai/gpt-4o)
-    - RLM_SUB_MODEL: Model for sub-queries in REPL (defaults to RLM_MODEL)
-    - RLM_API_BASE: Custom API endpoint (optional)
-    - RLM_API_KEY: API key (or use provider-specific keys)
-    - RLM_MAX_ITERATIONS: Max REPL iterations (default: 20)
-    - RLM_MAX_LLM_CALLS: Max sub-LLM calls per execution (default: 50)
-    - RLM_MAX_OUTPUT_CHARS: Max chars in REPL output (default: 100000)
-    """
-
-    # Model settings
-    model: str = field(
-        default_factory=lambda: _env(
-            "RLM_MODEL", _get_user_config_default("model", "openai/gpt-4o-mini")
-        )
-    )
-    sub_model: str = field(
-        default_factory=lambda: _env(
-            "RLM_SUB_MODEL",
-            _get_user_config_default(
-                "sub_model",
-                _env("RLM_MODEL", _get_user_config_default("model", "openai/gpt-4o-mini"))
-            )
-        )
-    )
-    api_base: str | None = field(default_factory=lambda: os.environ.get("RLM_API_BASE"))
-    api_key: str | None = field(default_factory=_resolve_api_key)
-
-    # RLM execution settings (maps to dspy.RLM parameters)
-    # Priority: env var > config.yaml > default
-    max_iterations: int = field(
-        default_factory=lambda: _env_get(
-            "RLM_MAX_ITERATIONS", _get_user_config_default("max_iterations", 20)
-        )
-    )
-    max_llm_calls: int = field(
-        default_factory=lambda: _env_get(
-            "RLM_MAX_LLM_CALLS", _get_user_config_default("max_llm_calls", 50)
-        )
-    )
-    max_output_chars: int = field(
-        default_factory=lambda: _env_get(
-            "RLM_MAX_OUTPUT_CHARS", _get_user_config_default("max_output_chars", 100_000)
-        )
-    )
-    verbose: bool = field(
-        default_factory=lambda: _env_get("RLM_VERBOSE", False)
-    )
-
-    # Budget/safety limits
-    max_budget: float = field(
-        default_factory=lambda: _env_get(
-            "RLM_MAX_BUDGET", _get_user_config_default("max_budget", 1.0)
-        )
-    )
-    max_timeout: float = field(
-        default_factory=lambda: _env_get(
-            "RLM_MAX_TIMEOUT", _get_user_config_default("max_timeout", 300.0)
-        )
-    )
-
-    # Parallelism settings
-    max_workers: int = field(
-        default_factory=lambda: _env_get(
-            "RLM_MAX_WORKERS", _get_user_config_default("max_workers", 8)
-        )
-    )
-
-    # Validation settings
-    validate: bool = field(
-        default_factory=lambda: _env_get(
-            "RLM_VALIDATE", _get_user_config_default("validate", True)
-        )
-    )
-
-    # Callback settings
-    enable_logging: bool = field(
-        default_factory=lambda: _env_get(
-            "RLM_ENABLE_LOGGING", _get_user_config_default("enable_logging", False)
-        )
-    )
-    enable_metrics: bool = field(
-        default_factory=lambda: _env_get(
-            "RLM_ENABLE_METRICS", _get_user_config_default("enable_metrics", False)
-        )
-    )
-
-    def __post_init__(self) -> None:
-        """Validate configuration values."""
-        # Minimum 20 iterations required to reduce hallucinations
-        # LLM needs turns to: search → read code → analyze → verify → report
-        # Testing showed <5 iterations = ~33% grounded, 5+ = ~100% grounded
-        # We use 20 as minimum to provide headroom for complex queries
-        if self.max_iterations < 20 or self.max_iterations > 100:
-            raise ValueError(f"max_iterations must be between 20 and 100, got {self.max_iterations}")
-
-        if self.max_llm_calls < 1 or self.max_llm_calls > 500:
-            raise ValueError(f"max_llm_calls must be between 1 and 500, got {self.max_llm_calls}")
-
-        if self.max_timeout < 0 or self.max_timeout > 3600:
-            raise ValueError(f"max_timeout must be between 0 and 3600, got {self.max_timeout}")
-
-        if self.max_budget < 0 or self.max_budget > 100:
-            raise ValueError(f"max_budget must be between 0 and 100, got {self.max_budget}")
-
-        if self.max_workers < 1 or self.max_workers > 32:
-            raise ValueError(f"max_workers must be between 1 and 32, got {self.max_workers}")
-
-    def __repr__(self) -> str:
-        key_display = "***" if self.api_key else None
-        return (
-            f"RLMConfig(model={self.model!r}, sub_model={self.sub_model!r}, "
-            f"api_key={key_display!r}, max_iterations={self.max_iterations}, ...)"
-        )
-
-
-# =============================================================================
-# Result Types
-# =============================================================================
-
-@dataclass
-class RLMResult:
-    """Result from RLM execution.
-
-    For standard signatures (context, query -> answer), access result.answer.
-    For custom signatures with structured output, access fields via:
-    - result.outputs dict: result.outputs["bugs"], result.outputs["score"]
-    - attribute access: result.bugs, result.score (raises AttributeError if missing)
-    """
-
-    answer: str
-    success: bool
-
-    # Execution metadata
-    total_tokens: int = 0
-    total_cost: float = 0.0
-    elapsed_time: float = 0.0
-    iterations: int = 0
-
-    # RLM-specific
-    trajectory: list[dict[str, Any]] = field(default_factory=list)
-    final_reasoning: str = ""
-
-    # Metadata for optimization (trace collection)
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-    # Error info
-    error: str | None = None
-
-    # Token stats (for compatibility)
-    token_stats: Any = None
-
-    # Structured output fields (for custom signatures)
-    outputs: dict[str, Any] = field(default_factory=dict)
-
-    def __getattr__(self, name: str) -> Any:
-        """Allow accessing output fields as attributes.
-
-        Example:
-            result.bugs  # same as result.outputs["bugs"]
-        """
-        # This is only called for attributes not found normally
-        if name.startswith("_"):
-            raise AttributeError(f"'{type(self).__name__}' has no attribute '{name}'")
-        outputs = object.__getattribute__(self, "outputs")
-        if name in outputs:
-            return outputs[name]
-        raise AttributeError(
-            f"'{type(self).__name__}' has no attribute '{name}'. "
-            f"Available outputs: {list(outputs.keys())}"
-        )
-
-
-# =============================================================================
-# Progress Callback
-# =============================================================================
-
-class ProgressCallback:
-    """Callback for RLM progress updates.
-
-    Subclass this to receive progress updates during RLM execution.
-
-    Example:
-        ```python
-        class MyCallback(ProgressCallback):
-            def on_iteration(self, iteration, max_iterations):
-                print(f"Iteration {iteration}/{max_iterations}")
-
-            def on_lm_call(self, call_type, inputs):
-                print(f"LLM call: {call_type}")
-
-        rlm = RLM(config=config, progress_callback=MyCallback())
-        ```
-    """
-
-    def on_start(self, query: str, context_tokens: int) -> None:
-        """Called when RLM execution starts."""
-        pass
-
-    def on_iteration(self, iteration: int, max_iterations: int) -> None:
-        """Called at the start of each REPL iteration."""
-        pass
-
-    def on_lm_call(self, call_type: str, inputs: dict | None = None) -> None:
-        """Called when an LLM call is made.
-
-        Args:
-            call_type: Type of call ("main", "sub", "tool")
-            inputs: Optional input data
-        """
-        pass
-
-    def on_tool_use(self, tool_name: str, args: dict | None = None) -> None:
-        """Called when a tool is invoked."""
-        pass
-
-    def on_complete(self, result: "RLMResult") -> None:
-        """Called when RLM execution completes."""
-        pass
-
-    def on_error(self, error: Exception) -> None:
-        """Called when an error occurs."""
-        pass
-
-
-class DspyProgressCallback:
-    """DSPy-compatible callback that wraps our ProgressCallback.
-
-    This bridges our callback interface with dspy's BaseCallback, providing
-    visibility into DSPy's internal operations:
-    - Every LLM call (main model + sub-queries)
-    - Every tool execution
-    - Module-level execution flow
-    - Adapter formatting/parsing
-    
-    Usage:
-        Register with DSPy via dspy.configure(callbacks=[callback])
-    """
-
-    def __init__(self, progress_callback: ProgressCallback | None = None):
-        self.progress = progress_callback
-        self.lm_calls = 0
-        self.tool_calls = 0
-        self.module_calls = 0
-        self._timings: list[dict] = []
-
-    def on_lm_start(self, call_id: str, instance: Any, inputs: dict[str, Any]):
-        """Called when any LLM call starts (main or sub-queries)."""
-        self.lm_calls += 1
-        if self.progress:
-            self.progress.on_lm_call("lm", {"call_id": call_id, "count": self.lm_calls})
-
-    def on_lm_end(self, call_id: str, outputs: dict[str, Any] | None, exception: Exception | None = None):
-        """Called when any LLM call completes."""
-        pass
-
-    def on_tool_start(self, call_id: str, instance: Any, inputs: dict[str, Any]):
-        """Called when a tool (ripgrep, read_file, etc.) starts."""
-        self.tool_calls += 1
-        if self.progress:
-            tool_name = inputs.get("tool_name", "unknown")
-            self.progress.on_lm_call("tool", {"tool": tool_name, "count": self.tool_calls})
-
-    def on_tool_end(self, call_id: str, outputs: dict[str, Any] | None, exception: Exception | None = None):
-        """Called when a tool completes."""
-        pass
-
-    def on_module_start(self, call_id: str, instance: Any, inputs: dict[str, Any]):
-        """Called when a DSPy module (like RLM) starts."""
-        self.module_calls += 1
-
-    def on_module_end(self, call_id: str, outputs: Any | None, exception: Exception | None = None):
-        """Called when a DSPy module completes."""
-        pass
-
-    # Adapter callbacks (required by DSPy BaseCallback interface)
-    def on_adapter_format_start(self, call_id: str, instance: Any, inputs: dict[str, Any]):
-        """Called when adapter starts formatting."""
-        pass
-
-    def on_adapter_format_end(self, call_id: str, outputs: dict[str, Any] | None, exception: Exception | None = None):
-        """Called when adapter finishes formatting."""
-        pass
-
-    def on_adapter_parse_start(self, call_id: str, instance: Any, inputs: dict[str, Any]):
-        """Called when adapter starts parsing."""
-        pass
-
-    def on_adapter_parse_end(self, call_id: str, outputs: dict[str, Any] | None, exception: Exception | None = None):
-        """Called when adapter finishes parsing."""
-        pass
-
-    def get_stats(self) -> dict[str, int]:
-        """Get callback statistics."""
-        return {
-            "lm_calls": self.lm_calls,
-            "tool_calls": self.tool_calls,
-            "module_calls": self.module_calls,
-        }
-
-
-# =============================================================================
-# Main RLM Class
-# =============================================================================
-
 class RLM:
-    """
-    Recursive Language Model using DSPy's native RLM module.
-
-    RLMs treat large contexts as external environments that the LLM explores
-    programmatically through a Python REPL. The LLM writes code to:
-    - Navigate and examine data
-    - Call sub-LLMs for semantic analysis (llm_query)
-    - Build up answers iteratively
-
-    This is fundamentally different from chunking approaches - the LLM has
-    agency to explore the context as needed.
-
-    Example:
-        ```python
-        rlm = RLM(config=RLMConfig(model="openai/gpt-4o"))
-
-        # Load context from files
-        context = rlm.load_context(["src/"])
-
-        # Query - LLM will explore context via REPL
-        result = rlm.query("What does the main function do?", context)
-        print(result.answer)
-        print(result.trajectory)  # See how LLM explored the context
-        ```
-
-    Reference: "Recursive Language Models" (Zhang, Kraska, Khattab, 2025)
-    """
+    """Recursive Language Model using DSPy's native RLM module."""
 
     def __init__(
         self,
@@ -548,77 +29,10 @@ class RLM:
         use_tools: bool | str = True,
         progress_callback: ProgressCallback | None = None,
     ):
-        """
-        Initialize RLM.
-
-        Args:
-            config: Configuration settings. Uses defaults if not provided.
-            tools: Additional tool functions available in the REPL.
-                   Built-in tools (llm_query, llm_query_batched) are always available.
-            signature: DSPy signature defining inputs and outputs.
-                      Can be a string like "context, query -> answer" or
-                      a dspy.Signature class for structured output.
-                      Default: "context, query -> answer"
-            interpreter: Custom code interpreter for REPL execution.
-                        Must implement the CodeInterpreter protocol:
-                        - tools property
-                        - start() method
-                        - execute(code, variables) method
-                        - shutdown() method
-                        If None, uses dspy's default PythonInterpreter (Deno/Pyodide).
-            use_tools: Enable built-in code analysis tools.
-                      - True or "safe": Safe tools (default) - ripgrep, tree-sitter, file ops
-                      - "all": All tools including shell (requires RLM_ALLOW_SHELL=1)
-                      - False: No extra tools
-            progress_callback: Optional callback for progress updates.
-                      Receives on_start, on_iteration, on_lm_call, on_complete events.
-
-        Available tools when enabled:
-            - ripgrep(pattern, path, flags): Fast regex search
-            - grep_context(pattern, path, context_lines): Search with context
-            - find_files(pattern, path, file_type): Find files by pattern
-            - read_file(path, start_line, end_line): Read file contents
-            - file_stats(path): Get file/directory statistics
-            - ast_query(code, query, language): Tree-sitter AST queries
-            - find_definitions(path, name): Find function/class definitions
-            - find_imports(path): Find all imports
-            - find_calls(path, function_name): Find function call sites
-            - shell(command, timeout): Run shell commands (disabled by default)
-
-        Example with structured output:
-            ```python
-            from rlm_dspy.signatures import BugFinder
-
-            rlm = RLM(config=config, signature=BugFinder)
-            result = rlm.query("Find all bugs", context)
-
-            print(result.bugs)          # list[str]
-            print(result.has_critical)  # bool
-            ```
-
-        Example with tools:
-            ```python
-            rlm = RLM(config=config, use_tools=True)
-            result = rlm.query(
-                "Find all functions that call 'execute' and check for bugs",
-                context
-            )
-            # LLM can now use ripgrep, find_calls, etc. to explore the codebase
-            ```
-
-        Example with custom interpreter:
-            ```python
-            from e2b_code_interpreter import CodeInterpreter
-
-            rlm = RLM(config=config, interpreter=CodeInterpreter())
-            ```
-        """
         self.config = config or RLMConfig()
         self._interpreter = interpreter
-        self._persistent_interpreter = None  # Lazy-created for reuse
+        self._persistent_interpreter = None
         self._progress_callback = progress_callback
-        
-        # Tool call counter (reset per query)
         self._tool_call_counts: dict[str, int] = {}
 
         # Initialize tools
@@ -626,266 +40,391 @@ class RLM:
         if use_tools:
             from ..tools import BUILTIN_TOOLS, SAFE_TOOLS
             builtin = BUILTIN_TOOLS if use_tools == "all" else SAFE_TOOLS
-            # User tools take precedence over built-in
             for name, func in builtin.items():
                 if name not in self._tools:
                     self._tools[name] = func
 
-        # Wrap tools to count invocations
         self._tools = self._wrap_tools_with_counter(self._tools)
-
-        # Validate all tools
         self._validate_tools(self._tools)
-
-        # Track if we have a custom signature with structured output
         self._is_structured = not isinstance(signature, str)
-
-        # Wrap signature with tool-first instructions if tools are enabled
         self._signature = self._wrap_signature_with_tool_instructions(signature, use_tools)
 
-        # Validate API key early
         requires_api_key = not self.config.model.lower().startswith("ollama/")
         if requires_api_key and not self.config.api_key:
             env_var = get_provider_env_var(self.config.model) or "PROVIDER_API_KEY"
-            raise ValueError(
-                f"No API key configured for model '{self.config.model}'.\n"
-                f"Set one of: RLM_API_KEY, {env_var}, or pass api_key to RLMConfig."
-            )
+            raise ValueError(f"No API key for '{self.config.model}'. Set RLM_API_KEY or {env_var}.")
 
-        # Setup DSPy
         self._setup_dspy()
-
-        # Create the dspy.RLM instance
         self._rlm = self._create_rlm()
-        self._rlm_dirty = False  # Track if RLM needs rebuild (for lazy add_tool)
-
-        # Tracking
+        self._rlm_dirty = False
         self._start_time: float | None = None
-        self._metrics_callback: Any = None  # MetricsCallback if enabled
-
-        # Register optional callbacks
+        self._metrics_callback: Any = None
         self._setup_callbacks()
 
+        # Load saved optimization and maybe trigger background optimization
+        self._load_and_apply_optimization()
+        self._maybe_trigger_background_optimization()
+
     def _setup_callbacks(self) -> None:
-        """Register optional callbacks based on config."""
         from .callbacks import get_callback_manager, LoggingCallback, MetricsCallback
-        
         manager = get_callback_manager()
-        
         if self.config.enable_logging:
             import logging
-            level = logging.DEBUG if self.config.verbose else logging.INFO
-            manager.add(LoggingCallback(level=level))
-            _logger.debug("Registered LoggingCallback")
-        
+            manager.add(LoggingCallback(level=logging.DEBUG if self.config.verbose else logging.INFO))
         if self.config.enable_metrics:
             self._metrics_callback = MetricsCallback()
             manager.add(self._metrics_callback)
-            _logger.debug("Registered MetricsCallback")
+
+    def _load_and_apply_optimization(self) -> None:
+        """Load and apply saved SIMBA optimization if available."""
+        try:
+            from .simba_optimizer import load_optimized_program
+
+            saved = load_optimized_program()
+            if saved is None:
+                return
+
+            # Apply demos to the RLM module
+            if saved.demos and hasattr(self._rlm, "demos"):
+                self._rlm.demos = saved.demos
+                _logger.debug("Applied %d saved demos from optimization", len(saved.demos))
+
+            # Note: instructions are already handled by _get_optimized_instructions()
+            # which loads from InstructionOptimizer
+
+            if saved.result and saved.result.improved:
+                _logger.info(
+                    "Loaded saved optimization: +%.1f%% improvement (%s)",
+                    saved.result.improvement,
+                    saved.optimizer_type,
+                )
+
+        except Exception as e:
+            _logger.debug("Failed to load optimization: %s", e)
+
+    def _maybe_trigger_background_optimization(self) -> None:
+        """Trigger background SIMBA optimization if conditions are met."""
+        try:
+            from .user_config import OptimizationConfig
+            from .simba_optimizer import should_optimize, run_background_optimization
+
+            config = OptimizationConfig.from_user_config()
+
+            if not config.enabled:
+                return
+
+            if should_optimize(config):
+                _logger.debug("Triggering background %s optimization", config.optimizer)
+                # Get the model to use for optimization
+                model = config.get_model(self.config.model)
+                run_background_optimization(config, model)
+
+        except Exception as e:
+            _logger.debug("Failed to check/trigger optimization: %s", e)
 
     def get_metrics(self) -> dict[str, Any] | None:
-        """Get collected metrics if metrics collection is enabled.
-        
-        Returns:
-            Metrics summary dict or None if metrics not enabled
-        """
-        if self._metrics_callback:
-            return self._metrics_callback.get_summary()
-        return None
+        return self._metrics_callback.get_summary() if self._metrics_callback else None
 
     def _wrap_tools_with_counter(self, tools: dict[str, Callable]) -> dict[str, Callable]:
-        """Wrap tools to count invocations.
-        
-        DSPy's callbacks don't track our interpreter tools, so we wrap them
-        to count how many times each tool is called during a query.
-        """
         import functools
-        
         wrapped = {}
         for name, func in tools.items():
             @functools.wraps(func)
             def wrapper(*args, _tool_name=name, _original=func, **kwargs):
-                # Increment counter
                 self._tool_call_counts[_tool_name] = self._tool_call_counts.get(_tool_name, 0) + 1
-                # Call original
                 return _original(*args, **kwargs)
             wrapped[name] = wrapper
         return wrapped
 
     def get_tool_call_counts(self) -> dict[str, int]:
-        """Get tool call counts from last query."""
         return dict(self._tool_call_counts)
 
     def _get_optimized_instructions(self) -> str:
-        """Get tool instructions from optimizer (with fallback to defaults).
-        
-        Includes:
-        - Optimized tool instructions (from InstructionOptimizer)
-        - Verification rules
-        - Iteration guidance
-        - Dynamic tips from past failures (from GroundedProposer)
-        """
         try:
             from .instruction_optimizer import get_instruction_optimizer
             from .grounded_proposer import get_grounded_proposer
-            
             optimizer = get_instruction_optimizer()
             proposer = get_grounded_proposer()
-            
-            # Get base instructions (may be optimized)
             tool_inst = optimizer.get_instruction("tool_instructions")
             verify_rules = optimizer.get_instruction("verification_rules")
             iter_guide = optimizer.get_instruction("iteration_guidance")
-            
-            # Get dynamic tips from past failures
             tips = proposer.get_tips()
-            tips_text = ""
-            if tips:
-                tips_text = "\n\nLEARNED TIPS (from past queries):\n" + "\n".join(f"- {t}" for t in tips[:5])
-            
+            tips_text = "\n\nLEARNED TIPS:\n" + "\n".join(f"- {t}" for t in tips[:5]) if tips else ""
             return f"{tool_inst}\n\n{verify_rules}\n\n{iter_guide}{tips_text}\n\n"
-            
-        except Exception as e:
-            logger.debug("Failed to get optimized instructions, using defaults: %s", e)
-            # Fallback to hardcoded defaults
-            return """CONTEXT: You are exploring a LARGE CODEBASE (potentially thousands of files).
-You CANNOT read everything - use tools strategically to find what matters.
+        except Exception:
+            return self._default_instructions()
 
-EXPLORATION STRATEGY (follow this order):
-1. GET THE BIG PICTURE FIRST:
-   - `file_stats(".")` - Understand project size
-   - `find_files("*.py", ".")` - See all relevant files
-   - `semantic_search("your topic")` - Find related code across the project
+    def _default_instructions(self) -> str:
+        return """CONTEXT: You are exploring a LARGE CODEBASE.
+Use tools strategically to find what matters.
 
-2. NARROW DOWN:
-   - `index_code("src/", kind="class")` - Find all classes in a directory
-   - `find_usages("path/to/file.py")` - Find where symbols are used (extracts exact names!)
+EXPLORATION STRATEGY:
+1. GET THE BIG PICTURE: file_stats("."), find_files("*.py"), semantic_search("topic")
+2. NARROW DOWN: index_code("src/"), find_usages("file.py")
+3. READ SPECIFIC CODE: read_file(path, start, end)
 
-3. THEN READ SPECIFIC CODE:
-   - `read_file(path, start_line, end_line)` - Read only what you need
-
-CRITICAL: EXTRACT EXACT NAMES BEFORE SEARCHING
-- DON'T guess symbol names from filenames (simba_optimizer.py ≠ SimbaOptimizer)
-- DO use `find_usages(file)` or `index_code(file)` to get EXACT names first
-- THEN search with exact names
+CRITICAL: Extract exact symbol names before searching (use find_usages or index_code).
 
 VERIFICATION RULES:
-1. NEVER claim issues without using read_file() to see actual code
+1. NEVER claim issues without read_file() to see actual code
 2. ALWAYS verify line numbers by reading the file
 3. Quote actual code in your findings
 
-ANTI-PATTERNS:
-- DON'T analyze files one by one - search across project first
-- DON'T guess symbol names - extract exact names from AST first
-- DON'T claim "not found" without verifying you have the right case
-
 """
 
-    def _wrap_signature_with_tool_instructions(
-        self,
-        signature: str | type,
-        use_tools: bool | str
-    ) -> str | type:
-        """Wrap signature with instructions to prioritize tool usage.
-
-        When tools are enabled, this adds instructions telling the LLM to
-        use the provided tools (index_code, ripgrep, etc.) FIRST before
-        writing custom code. This improves accuracy for code analysis tasks.
-        
-        Uses optimized instructions from InstructionOptimizer if available.
-        """
+    def _wrap_signature_with_tool_instructions(self, signature: str | type, use_tools: bool | str) -> str | type:
         if not use_tools or not self._tools:
             return signature
 
-        # Get optimized instructions (or defaults)
         tool_instructions = self._get_optimized_instructions()
         if isinstance(signature, str):
-            # Convert string signature to class with tool instructions
-            # Parse "context, query -> answer" format
             base_sig = dspy.Signature(signature)
-
             class ToolFirstSignature(base_sig):
                 pass
-
             ToolFirstSignature.__doc__ = tool_instructions
             return ToolFirstSignature
         else:
-            # For class-based signatures, prepend to the docstring
-            original_doc = signature.__doc__ or ""
-
-            # Create a new signature class with updated docstring
             class WrappedSignature(signature):
                 pass
-
-            WrappedSignature.__doc__ = tool_instructions + original_doc
+            WrappedSignature.__doc__ = tool_instructions + (signature.__doc__ or "")
             WrappedSignature.__name__ = signature.__name__
-            WrappedSignature.__qualname__ = signature.__qualname__
             return WrappedSignature
 
     def _setup_dspy(self) -> None:
-        """Configure DSPy with the primary model (thread-safe).
-
-        Note: We do NOT call dspy.configure() here to avoid global state pollution.
-        Instead, we use dspy.settings.context(lm=self._lm) in query() for thread-safety.
-        """
-        lm_kwargs: dict[str, Any] = {
-            "model": self.config.model,
-            "api_key": self.config.api_key,
-        }
+        from .models import find_model
+        
+        lm_kwargs: dict[str, Any] = {"api_key": self.config.api_key}
         if self.config.api_base:
             lm_kwargs["api_base"] = self.config.api_base
-
-        # Store LM instance for thread-local configuration in query()
-        self._lm = dspy.LM(**lm_kwargs)
-
-        # Configure parallelism settings (affects batch operations)
-        dspy.settings.configure(
-            async_max_workers=self.config.max_workers,
-            num_threads=self.config.max_workers,
-        )
-        # NOTE: No lm= in configure() - we use context manager in query() instead
+        
+        # Set max_tokens based on model's capability
+        model_info = find_model(self.config.model)
+        if model_info:
+            lm_kwargs["max_tokens"] = model_info.max_tokens
+            _logger.debug(f"Using max_tokens={model_info.max_tokens} for {model_info.name}")
+        
+        # Check for Anthropic models - may need OAuth or different API key handling
+        # LiteLLM has a bug where it sends OAuth tokens as x-api-key which fails
+        if self.config.model.startswith("anthropic/"):
+            from .anthropic_oauth_lm import get_anthropic_api_key, is_oauth_token, AnthropicOAuthLM
+            
+            # Check if the configured api_key is actually an Anthropic key
+            api_key = self.config.api_key
+            is_anthropic_key = api_key and (
+                api_key.startswith("sk-ant-api") or 
+                api_key.startswith("sk-ant-oat")
+            )
+            
+            if not is_anthropic_key:
+                # Try to get an Anthropic-specific key/token
+                api_key = get_anthropic_api_key()
+            
+            if api_key:
+                if is_oauth_token(api_key):
+                    _logger.info("Using Anthropic OAuth token (Claude Pro/Max)")
+                    # Use custom LM that bypasses LiteLLM for OAuth
+                    model_id = self.config.model.split("/", 1)[1]
+                    self._lm = AnthropicOAuthLM(model_id, auth_token=api_key)
+                    dspy.settings.configure(async_max_workers=self.config.max_workers, num_threads=self.config.max_workers)
+                    return
+                else:
+                    # Regular Anthropic API key
+                    lm_kwargs["api_key"] = api_key
+        
+        # Check for Google models - may need OAuth
+        # LiteLLM doesn't support OAuth tokens for Google, so we use our custom LM
+        if self.config.model.startswith("google/"):
+            from .google_oauth import get_google_token
+            from .google_oauth_lm import GoogleOAuthLM
+            
+            google_creds = get_google_token()
+            if google_creds:
+                token, project_id = google_creds
+                _logger.info("Using Google OAuth token (Gemini CLI)")
+                model_id = self.config.model.split("/", 1)[1]
+                max_tokens = model_info.max_tokens if model_info else 8192
+                self._lm = GoogleOAuthLM(model_id, auth_token=token, project_id=project_id, max_tokens=max_tokens)
+                dspy.settings.configure(async_max_workers=self.config.max_workers, num_threads=self.config.max_workers)
+                return
+        
+        # Check for Antigravity models - use custom LM
+        if self.config.model.startswith("antigravity/"):
+            from .antigravity_oauth import get_antigravity_token
+            from .antigravity_lm import AntigravityLM
+            
+            ag_creds = get_antigravity_token()
+            if ag_creds:
+                token, project_id = ag_creds
+                _logger.info("Using Antigravity OAuth token")
+                model_id = self.config.model.split("/", 1)[1]
+                max_tokens = model_info.max_tokens if model_info else 8192
+                self._lm = AntigravityLM(model_id, auth_token=token, project_id=project_id, max_tokens=max_tokens)
+                dspy.settings.configure(async_max_workers=self.config.max_workers, num_threads=self.config.max_workers)
+                return
+        
+        # Check for MiniMax models - use custom LM with Anthropic-compatible API
+        if self.config.model.startswith("minimax/"):
+            from .minimax_lm import MiniMaxLM
+            
+            model_id = self.config.model.split("/", 1)[1]
+            max_tokens = model_info.max_tokens if model_info else 8192
+            china = "-cn" in self.config.model.lower()
+            self._lm = MiniMaxLM(model_id, max_tokens=max_tokens, china=china)
+            dspy.settings.configure(async_max_workers=self.config.max_workers, num_threads=self.config.max_workers)
+            return
+        
+        # Check for OpenCode models (GLM) - use custom LM with OpenAI-compatible API
+        if self.config.model.startswith("opencode/"):
+            from .opencode_lm import OpenCodeLM
+            
+            model_id = self.config.model.split("/", 1)[1]
+            max_tokens = model_info.max_tokens if model_info else 8192
+            self._lm = OpenCodeLM(model_id, max_tokens=max_tokens)
+            dspy.settings.configure(async_max_workers=self.config.max_workers, num_threads=self.config.max_workers)
+            return
+        
+        # Check for Z.AI models (GLM) - native Zhipu provider
+        if self.config.model.startswith("zai/"):
+            from .zai_lm import ZaiLM
+            
+            model_id = self.config.model.split("/", 1)[1]
+            max_tokens = model_info.max_tokens if model_info else 8192
+            self._lm = ZaiLM(model_id, max_tokens=max_tokens)
+            dspy.settings.configure(async_max_workers=self.config.max_workers, num_threads=self.config.max_workers)
+            return
+        
+        # Check for Kimi models - Anthropic-compatible API
+        if self.config.model.startswith("kimi/"):
+            from .kimi_lm import KimiLM
+            
+            model_id = self.config.model.split("/", 1)[1]
+            max_tokens = model_info.max_tokens if model_info else 8192
+            self._lm = KimiLM(model_id, max_tokens=max_tokens)
+            dspy.settings.configure(async_max_workers=self.config.max_workers, num_threads=self.config.max_workers)
+            return
+        
+        self._lm = dspy.LM(model=self.config.model, **lm_kwargs)
+        dspy.settings.configure(async_max_workers=self.config.max_workers, num_threads=self.config.max_workers)
 
     def _create_sub_lm(self) -> dspy.LM | None:
-        """Create sub-LM for llm_query calls if different from primary."""
         if self.config.sub_model == self.config.model:
-            return None  # Use primary model
-
-        lm_kwargs: dict[str, Any] = {
-            "model": self.config.sub_model,
-            "api_key": self.config.api_key,
-        }
+            return None
+        
+        from .models import find_model
+        
+        lm_kwargs: dict[str, Any] = {"api_key": self.config.api_key}
         if self.config.api_base:
             lm_kwargs["api_base"] = self.config.api_base
-
-        return dspy.LM(**lm_kwargs)
+        
+        # Set max_tokens based on model's capability
+        model_info = find_model(self.config.sub_model)
+        if model_info:
+            lm_kwargs["max_tokens"] = model_info.max_tokens
+        
+        # Check for Anthropic sub model - may need OAuth
+        if self.config.sub_model.startswith("anthropic/"):
+            from .anthropic_oauth_lm import get_anthropic_api_key, is_oauth_token, AnthropicOAuthLM
+            
+            # Check if the configured api_key is actually an Anthropic key
+            api_key = self.config.api_key
+            is_anthropic_key = api_key and (
+                api_key.startswith("sk-ant-api") or 
+                api_key.startswith("sk-ant-oat")
+            )
+            
+            if not is_anthropic_key:
+                api_key = get_anthropic_api_key()
+            
+            if api_key and is_oauth_token(api_key):
+                model_id = self.config.sub_model.split("/", 1)[1]
+                return AnthropicOAuthLM(model_id, auth_token=api_key)
+            elif api_key:
+                lm_kwargs["api_key"] = api_key
+        
+        # Check for Google sub model - may need OAuth
+        if self.config.sub_model.startswith("google/"):
+            from .google_oauth import get_google_token
+            from .google_oauth_lm import GoogleOAuthLM
+            
+            google_creds = get_google_token()
+            if google_creds:
+                token, project_id = google_creds
+                model_id = self.config.sub_model.split("/", 1)[1]
+                from .models import find_model
+                model_info = find_model(self.config.sub_model)
+                max_tokens = model_info.max_tokens if model_info else 8192
+                return GoogleOAuthLM(model_id, auth_token=token, project_id=project_id, max_tokens=max_tokens)
+        
+        # Check for Antigravity sub model - may need OAuth
+        if self.config.sub_model.startswith("antigravity/"):
+            from .antigravity_oauth import get_antigravity_token
+            from .antigravity_lm import AntigravityLM
+            
+            ag_creds = get_antigravity_token()
+            if ag_creds:
+                token, project_id = ag_creds
+                model_id = self.config.sub_model.split("/", 1)[1]
+                from .models import find_model
+                model_info = find_model(self.config.sub_model)
+                max_tokens = model_info.max_tokens if model_info else 8192
+                return AntigravityLM(model_id, auth_token=token, project_id=project_id, max_tokens=max_tokens)
+        
+        # Check for MiniMax sub model
+        if self.config.sub_model.startswith("minimax/"):
+            from .minimax_lm import MiniMaxLM
+            
+            model_id = self.config.sub_model.split("/", 1)[1]
+            from .models import find_model
+            model_info = find_model(self.config.sub_model)
+            max_tokens = model_info.max_tokens if model_info else 8192
+            china = "-cn" in self.config.sub_model.lower()
+            return MiniMaxLM(model_id, max_tokens=max_tokens, china=china)
+        
+        # Check for OpenCode sub model (GLM)
+        if self.config.sub_model.startswith("opencode/"):
+            from .opencode_lm import OpenCodeLM
+            
+            model_id = self.config.sub_model.split("/", 1)[1]
+            from .models import find_model
+            model_info = find_model(self.config.sub_model)
+            max_tokens = model_info.max_tokens if model_info else 8192
+            return OpenCodeLM(model_id, max_tokens=max_tokens)
+        
+        # Check for Z.AI sub model (GLM)
+        if self.config.sub_model.startswith("zai/"):
+            from .zai_lm import ZaiLM
+            
+            model_id = self.config.sub_model.split("/", 1)[1]
+            from .models import find_model
+            model_info = find_model(self.config.sub_model)
+            max_tokens = model_info.max_tokens if model_info else 8192
+            return ZaiLM(model_id, max_tokens=max_tokens)
+        
+        # Check for Kimi sub model
+        if self.config.sub_model.startswith("kimi/"):
+            from .kimi_lm import KimiLM
+            
+            model_id = self.config.sub_model.split("/", 1)[1]
+            from .models import find_model
+            model_info = find_model(self.config.sub_model)
+            max_tokens = model_info.max_tokens if model_info else 8192
+            return KimiLM(model_id, max_tokens=max_tokens)
+        
+        return dspy.LM(model=self.config.sub_model, **lm_kwargs)
 
     def _get_or_create_interpreter(self):
-        """Get or create a persistent interpreter for reuse.
-
-        Reusing the interpreter avoids the ~3s Pyodide startup cost on each query.
-        Note: Not thread-safe - use separate RLM instances for concurrent queries.
-        """
         if self._interpreter is not None:
             return self._interpreter
-
         if self._persistent_interpreter is None:
             try:
                 from dspy.primitives.python_interpreter import PythonInterpreter
                 self._persistent_interpreter = PythonInterpreter()
-                _logger.debug("Created persistent interpreter for reuse")
             except Exception as e:
-                _logger.warning("Failed to create persistent interpreter: %s", e)
+                _logger.warning("Failed to create interpreter: %s", e)
                 return None
-
         return self._persistent_interpreter
 
     def _create_rlm(self, use_persistent_interpreter: bool = True) -> dspy.RLM:
-        """Create the dspy.RLM instance.
-
-        Args:
-            use_persistent_interpreter: If True, reuse interpreter across calls
-                to avoid ~3s Pyodide startup cost. Set False for thread-safe usage.
-        """
         kwargs: dict[str, Any] = {
             "signature": self._signature,
             "max_iterations": self.config.max_iterations,
@@ -895,536 +434,247 @@ ANTI-PATTERNS:
             "tools": self._tools,
             "sub_lm": self._create_sub_lm(),
         }
-
-        # Use persistent interpreter for faster sequential queries
         if use_persistent_interpreter:
-            interpreter = self._get_or_create_interpreter()
-            if interpreter is not None:
-                kwargs["interpreter"] = interpreter
+            if (interp := self._get_or_create_interpreter()) is not None:
+                kwargs["interpreter"] = interp
         elif self._interpreter is not None:
             kwargs["interpreter"] = self._interpreter
-
         return dspy.RLM(**kwargs)
 
     def shutdown(self) -> None:
-        """Shutdown the RLM instance and release resources.
-
-        Call this when done using the RLM to clean up the persistent interpreter.
-        """
         if self._persistent_interpreter is not None:
             try:
                 self._persistent_interpreter.shutdown()
-            except Exception as e:
-                _logger.debug("Error shutting down interpreter: %s", e)
+            except Exception:
+                pass
             self._persistent_interpreter = None
 
     def __del__(self):
-        """Cleanup on garbage collection."""
         try:
             self.shutdown()
         except Exception:
             pass
 
     def __enter__(self):
-        """Context manager entry."""
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit - shutdown interpreter."""
         self.shutdown()
         return False
 
-    def load_context(
-        self,
-        paths: list[str | Path],
-        gitignore: bool = True,
-        use_cache: bool = True,
-        max_tokens: int | None = None,
-    ) -> str:
-        """
-        Load context from files or directories.
-
-        Args:
-            paths: List of file or directory paths
-            gitignore: Whether to respect .gitignore patterns
-            use_cache: Whether to use context caching (default True)
-            max_tokens: Optional max tokens (truncates if exceeded)
-
-        Returns:
-            Combined context string with file markers
-        """
-        from .fileutils import (
-            load_context_from_paths,
-            load_context_from_paths_cached,
-            smart_truncate_context,
-        )
-
+    def load_context(self, paths: list, gitignore: bool = True, use_cache: bool = True,
+                     max_tokens: int | None = None) -> str:
+        from pathlib import Path
+        from .fileutils import load_context_from_paths, load_context_from_paths_cached, smart_truncate_context
         loader = load_context_from_paths_cached if use_cache else load_context_from_paths
-        context = loader(
-            paths=[Path(p) for p in paths],
-            gitignore=gitignore,
-            add_line_numbers=True,
-        )
-
-        # Optionally truncate to fit token limit
+        context = loader(paths=[Path(p) for p in paths], gitignore=gitignore, add_line_numbers=True)
         if max_tokens is not None:
             context, was_truncated = smart_truncate_context(context, max_tokens)
             if was_truncated:
-                _logger.warning(
-                    "Context truncated to fit %d token limit", max_tokens
-                )
-
+                _logger.warning("Context truncated to fit %d token limit", max_tokens)
         return context
 
     def _build_result(self, prediction: Any, elapsed: float) -> RLMResult:
-        """Build RLMResult from dspy prediction, handling structured outputs."""
         raw_trajectory = getattr(prediction, "trajectory", [])
         raw_reasoning = getattr(prediction, "final_reasoning", "")
         extra_secrets = [self.config.api_key] if self.config.api_key else None
 
-        # Extract structured outputs if using custom signature
         outputs: dict[str, Any] = {}
         answer = ""
 
         if self._is_structured:
-            # Get all output fields from the signature class
             sig = self._signature
-            output_field_names = []
-
-            # dspy.Signature classes have output_fields as a dict property
             if hasattr(sig, "output_fields"):
                 fields = sig.output_fields
-                if isinstance(fields, dict):
-                    output_field_names = list(fields.keys())
+                output_field_names = list(fields.keys()) if isinstance(fields, dict) else []
+            else:
+                output_field_names = []
 
-            # Extract values from prediction
             for field_name in output_field_names:
                 value = getattr(prediction, field_name, None)
                 if value is not None:
-                    # Sanitize string values
                     if isinstance(value, str):
                         value = _sanitize_secrets(value, extra_secrets)
                     elif isinstance(value, list):
-                        value = [
-                            _sanitize_secrets(v, extra_secrets) if isinstance(v, str) else v
-                            for v in value
-                        ]
+                        value = [_sanitize_secrets(v, extra_secrets) if isinstance(v, str) else v for v in value]
                     outputs[field_name] = value
 
-            # Use first output field as "answer" for compatibility
             if outputs:
-                first_key = next(iter(outputs))
-                first_val = outputs[first_key]
-                if isinstance(first_val, str):
-                    answer = first_val
-                elif isinstance(first_val, list):
-                    answer = "\n".join(str(v) for v in first_val)
-                else:
-                    answer = str(first_val)
+                first_val = next(iter(outputs.values()))
+                answer = "\n".join(str(v) for v in first_val) if isinstance(first_val, list) else str(first_val)
         else:
-            # Standard signature: just get answer
             answer = _sanitize_secrets(getattr(prediction, "answer", ""), extra_secrets)
 
-        # Extract metadata for trace collection
-        sanitized_trajectory = _sanitize_trajectory(raw_trajectory, extra_secrets)
-        metadata = _extract_trace_metadata(sanitized_trajectory)
+        sanitized_trajectory = sanitize_trajectory(raw_trajectory, extra_secrets)
+        metadata = extract_trace_metadata(sanitized_trajectory)
 
         return RLMResult(
-            answer=answer,
-            success=True,
-            elapsed_time=elapsed,
-            trajectory=sanitized_trajectory,
-            final_reasoning=_sanitize_secrets(raw_reasoning, extra_secrets),
-            iterations=len(raw_trajectory),
-            outputs=outputs,
-            metadata=metadata,
+            answer=answer, success=True, elapsed_time=elapsed,
+            trajectory=sanitized_trajectory, final_reasoning=_sanitize_secrets(raw_reasoning, extra_secrets),
+            iterations=len(raw_trajectory), outputs=outputs, metadata=metadata,
         )
 
-    def query(
-        self,
-        query: str,
-        context: str,
-    ) -> RLMResult:
-        """
-        Execute a query against the context using RLM.
-
-        The LLM will explore the context programmatically through a REPL,
-        writing Python code to navigate, analyze, and build up an answer.
-
-        Args:
-            query: The question to answer
-            context: The context to explore (typically from load_context)
-
-        Returns:
-            RLMResult with answer, trajectory, and metadata.
-            For custom signatures, structured outputs available via result.outputs dict.
-
-        Raises:
-            ValueError: If query or context is empty/None
-        """
+    def query(self, query: str, context: str) -> RLMResult:
         import concurrent.futures
         from .fileutils import estimate_tokens
 
-        # Validate inputs
         if not query or not query.strip():
             raise ValueError("Query cannot be empty")
         if not context or not context.strip():
             raise ValueError("Context cannot be empty")
 
-        # Run preflight validation if enabled
         if self.config.validate:
             from .validation import preflight_check
-            result = preflight_check(
-                api_key_required=True,
-                model=self.config.model,
-                budget=self.config.max_budget,
-                context=context,
-                check_network=False,  # Skip network check for speed
-            )
+            result = preflight_check(api_key_required=True, model=self.config.model,
+                                     budget=self.config.max_budget, context=context, check_network=False)
             if not result.passed:
                 errors = [e.message for e in result.errors]
                 raise ValueError(f"Preflight check failed: {'; '.join(errors)}")
 
-        # Rebuild RLM if tools were added (lazy rebuild)
         if self._rlm_dirty:
             self._rlm = self._create_rlm()
             self._rlm_dirty = False
 
-        # Reset tool call counters for this query
         self._tool_call_counts.clear()
-        
         self._start_time = time.time()
 
-        # Notify callback of start
         if self._progress_callback:
-            context_tokens = estimate_tokens(context)
-            self._progress_callback.on_start(query, context_tokens)
+            self._progress_callback.on_start(query, estimate_tokens(context))
 
         def _execute_rlm() -> Any:
-            """Execute RLM with thread-local DSPy configuration."""
-            # Create DSPy callback to track internal operations
             dspy_callback = DspyProgressCallback(self._progress_callback)
-            
-            # Use thread-local configuration to avoid global state pollution
-            # Include callback to get visibility into DSPy's internal operations
             with dspy.settings.context(lm=self._lm, callbacks=[dspy_callback]):
                 result = self._rlm(context=context, query=query)
-                
-                # Log stats if verbose
                 if self.config.verbose:
                     dspy_stats = dspy_callback.get_stats()
-                    tool_counts = self._tool_call_counts
-                    total_tool_calls = sum(tool_counts.values())
-                    
-                    _logger.info(
-                        "DSPy stats: %d LLM calls, %d tool calls",
-                        dspy_stats["lm_calls"],
-                        total_tool_calls,
-                    )
-                    
-                    # Show tool breakdown if any tools were used
-                    if tool_counts:
-                        top_tools = sorted(tool_counts.items(), key=lambda x: -x[1])[:5]
-                        tool_summary = ", ".join(f"{name}:{count}" for name, count in top_tools)
-                        _logger.debug("Tool breakdown: %s", tool_summary)
-                
+                    _logger.info("DSPy stats: %d LLM calls, %d tool calls",
+                                 dspy_stats["lm_calls"], sum(self._tool_call_counts.values()))
                 return result
 
         try:
-            # Execute with timeout if configured
             if self.config.max_timeout and self.config.max_timeout > 0:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                     future = executor.submit(_execute_rlm)
                     try:
                         prediction = future.result(timeout=self.config.max_timeout)
                     except concurrent.futures.TimeoutError:
-                        raise TimeoutExceededError(
-                            self.config.max_timeout, self.config.max_timeout
-                        )
+                        raise TimeoutExceededError(self.config.max_timeout, self.config.max_timeout)
             else:
                 prediction = _execute_rlm()
 
             elapsed = time.time() - self._start_time
-
-            # Build result from prediction
             result = self._build_result(prediction, elapsed)
-
-            # Notify callback of completion
             if self._progress_callback:
                 self._progress_callback.on_complete(result)
-
             return result
 
         except TimeoutExceededError:
             elapsed = time.time() - self._start_time if self._start_time else 0
-            _logger.warning("RLM execution timed out after %.1fs", elapsed)
-            error_result = RLMResult(
-                answer="",
-                success=False,
-                error=f"Query timed out after {elapsed:.1f}s (limit: {self.config.max_timeout}s)",
-                elapsed_time=elapsed,
-            )
+            _logger.warning("RLM timed out after %.1fs", elapsed)
             if self._progress_callback:
                 self._progress_callback.on_error(TimeoutExceededError(self.config.max_timeout, elapsed))
-            return error_result
-
+            return RLMResult(answer="", success=False,
+                             error=f"Timed out after {elapsed:.1f}s", elapsed_time=elapsed)
         except Exception as e:
             elapsed = time.time() - self._start_time if self._start_time else 0
             if self._progress_callback:
                 self._progress_callback.on_error(e)
             _logger.exception("RLM execution failed")
-            return RLMResult(
-                answer="",
-                success=False,
-                error=str(e),
-                elapsed_time=elapsed,
-            )
+            return RLMResult(answer="", success=False, error=str(e), elapsed_time=elapsed)
 
-    async def query_async(
-        self,
-        query: str,
-        context: str,
-    ) -> RLMResult:
-        """Async version of query."""
+    async def query_async(self, query: str, context: str) -> RLMResult:
         self._start_time = time.time()
-
         try:
             with dspy.settings.context(lm=self._lm):
                 prediction = await self._rlm.aforward(context=context, query=query)
-
-            elapsed = time.time() - self._start_time
-
-            # Build result from prediction (handles structured outputs)
-            return self._build_result(prediction, elapsed)
-
+            return self._build_result(prediction, time.time() - self._start_time)
         except Exception as e:
             elapsed = time.time() - self._start_time if self._start_time else 0
-            _logger.exception("RLM async execution failed")
-            return RLMResult(
-                answer="",
-                success=False,
-                error=str(e),
-                elapsed_time=elapsed,
-            )
+            return RLMResult(answer="", success=False, error=str(e), elapsed_time=elapsed)
 
     def add_tool(self, name: str, func: Callable[..., str]) -> None:
-        """
-        Add a custom tool function available in the REPL.
-
-        The tool will be callable by name from the LLM's code.
-
-        Args:
-            name: Tool name (must be valid Python identifier)
-            func: Tool function (should return str)
-
-        Example:
-            ```python
-            def search_web(query: str) -> str:
-                '''Search the web for information.'''
-                return requests.get(f"https://api.search.com?q={query}").text
-
-            rlm.add_tool("search_web", search_web)
-            ```
-
-        Raises:
-            ValueError: If name is not a valid Python identifier
-            TypeError: If func is not callable
-        """
         self._validate_tools({name: func})
         self._tools[name] = func
-        # Mark RLM as needing rebuild (lazy - only rebuild when query() is called)
         self._rlm_dirty = True
 
     def _validate_tools(self, tools: dict[str, Callable]) -> None:
-        """Validate tool names and types.
-
-        Args:
-            tools: Dict of tool name -> function
-
-        Raises:
-            ValueError: If name is not a valid Python identifier or conflicts with builtins
-            TypeError: If tool is not callable
-        """
-        # Reserved names that conflict with sandbox builtins
-        RESERVED_NAMES = {
-            'print', 'len', 'range', 'enumerate', 'zip', 'map', 'filter',
-            'sorted', 'reversed', 'sum', 'min', 'max', 'abs', 'round',
-            'str', 'int', 'float', 'bool', 'list', 'dict', 'set', 'tuple',
-            'SUBMIT', 'FINAL',  # RLM special functions
-        }
-
+        RESERVED = {'print', 'len', 'range', 'str', 'int', 'float', 'bool', 'list', 'dict', 'SUBMIT', 'FINAL'}
         for name, func in tools.items():
-            # Check valid identifier
             if not name.isidentifier():
-                raise ValueError(f"Invalid tool name '{name}': must be a valid Python identifier")
-
-            # Check not reserved
-            if name in RESERVED_NAMES:
-                raise ValueError(f"Tool name '{name}' conflicts with built-in function")
-
-            # Check callable
+                raise ValueError(f"Invalid tool name '{name}'")
+            if name in RESERVED:
+                raise ValueError(f"Tool name '{name}' conflicts with built-in")
             if not callable(func):
-                raise TypeError(f"Tool '{name}' must be callable, got {type(func).__name__}")
+                raise TypeError(f"Tool '{name}' must be callable")
 
-    def batch(
-        self,
-        queries: list[dict[str, str]],
-        context: str | None = None,
-        num_threads: int = 4,
-        max_errors: int | None = None,
-        return_failed: bool = False,
-    ) -> list[RLMResult]:
-        """
-        Process multiple queries in parallel.
-
-        This is much faster than sequential query() calls when you have
-        multiple independent questions about the same or different contexts.
-
-        Args:
-            queries: List of query dicts. Each dict should have:
-                - "query": The question to ask (required)
-                - "context": Optional context (uses shared context if not provided)
-            context: Shared context for all queries (used if not in query dict)
-            num_threads: Number of parallel threads (default: 4)
-            max_errors: Maximum failures before stopping (default: None = no limit)
-            return_failed: If True, include failed results (default: False)
-
-        Returns:
-            List of RLMResult in same order as input queries.
-            Failed queries have success=False and error message.
-
-        Example:
-            ```python
-            rlm = RLM(config=config)
-            context = rlm.load_context(["src/"])
-
-            # Same context, different queries (parallel)
-            results = rlm.batch([
-                {"query": "Summarize the architecture"},
-                {"query": "Find security issues"},
-                {"query": "Find performance bottlenecks"},
-            ], context=context, num_threads=3)
-
-            # Different contexts
-            results = rlm.batch([
-                {"context": file1, "query": "Find bugs"},
-                {"context": file2, "query": "Find bugs"},
-            ], num_threads=2)
-            ```
-        """
+    def batch(self, queries: list[dict[str, str]], context: str | None = None,
+              num_threads: int = 4, max_errors: int | None = None, return_failed: bool = False) -> list[RLMResult]:
         if not queries:
             return []
 
-        # Build dspy.Example list
         examples = []
         for i, q in enumerate(queries):
             query_text = q.get("query")
             if not query_text:
                 raise ValueError(f"Query {i} missing 'query' field")
-
             ctx = q.get("context", context)
             if ctx is None:
-                raise ValueError(f"Query {i} has no context (provide in query or as shared context)")
+                raise ValueError(f"Query {i} has no context")
+            examples.append(dspy.Example(context=ctx, query=query_text).with_inputs("context", "query"))
 
-            examples.append(dspy.Example(
-                context=ctx,
-                query=query_text,
-            ).with_inputs("context", "query"))
-
-        # Execute batch with thread-local configuration
         start_time = time.time()
         with dspy.settings.context(lm=self._lm):
             raw_results, failed_examples, exceptions = self._rlm.batch(
-                examples,
-                num_threads=num_threads,
-                max_errors=max_errors,
-                return_failed_examples=True,
-            )
+                examples, num_threads=num_threads, max_errors=max_errors, return_failed_examples=True)
 
         elapsed = time.time() - start_time
-
-        # Convert to RLMResult list
-        # Note: batch() returns results in order, with None for failed ones
         results: list[RLMResult] = []
-
-        # Create a map of failed example indices
         failed_indices = set()
         failed_map: dict[int, Exception] = {}
+
         if failed_examples:
             for ex, exc in zip(failed_examples, exceptions):
-                # Find the index of this failed example
                 for i, orig in enumerate(examples):
                     if orig.context == ex.context and orig.query == ex.query:
                         failed_indices.add(i)
                         failed_map[i] = exc
                         break
 
-        # Build results maintaining order
         result_idx = 0
         for i in range(len(examples)):
             if i in failed_indices:
-                # Failed query
-                error_msg = str(failed_map.get(i, "Unknown error"))
+                results.append(RLMResult(answer="", success=False, error=str(failed_map.get(i)),
+                                         elapsed_time=elapsed / len(examples)))
+            elif result_idx < len(raw_results):
+                pred = raw_results[result_idx]
+                result_idx += 1
+                extra_secrets = [self.config.api_key] if self.config.api_key else None
                 results.append(RLMResult(
-                    answer="",
-                    success=False,
-                    error=error_msg,
-                    elapsed_time=elapsed / len(examples),  # Approximate
+                    answer=_sanitize_secrets(pred.answer, extra_secrets), success=True,
+                    elapsed_time=elapsed / len(examples),
+                    trajectory=sanitize_trajectory(getattr(pred, "trajectory", []), extra_secrets),
+                    iterations=len(getattr(pred, "trajectory", [])),
                 ))
             else:
-                # Successful query
-                if result_idx < len(raw_results):
-                    pred = raw_results[result_idx]
-                    result_idx += 1
+                results.append(RLMResult(answer="", success=False, error="Result missing",
+                                         elapsed_time=elapsed / len(examples)))
 
-                    # Sanitize output
-                    extra_secrets = [self.config.api_key] if self.config.api_key else None
-                    raw_trajectory = getattr(pred, "trajectory", [])
-                    raw_reasoning = getattr(pred, "final_reasoning", "")
-
-                    results.append(RLMResult(
-                        answer=_sanitize_secrets(pred.answer, extra_secrets),
-                        success=True,
-                        elapsed_time=elapsed / len(examples),  # Approximate
-                        trajectory=_sanitize_trajectory(raw_trajectory, extra_secrets),
-                        final_reasoning=_sanitize_secrets(raw_reasoning, extra_secrets),
-                        iterations=len(raw_trajectory),
-                    ))
-                else:
-                    # Shouldn't happen, but handle gracefully
-                    results.append(RLMResult(
-                        answer="",
-                        success=False,
-                        error="Result missing from batch",
-                        elapsed_time=elapsed / len(examples),
-                    ))
-
-        # Filter out failed if not requested
         if not return_failed:
             results = [r for r in results if r.success]
 
-        _logger.info(
-            "Batch completed: %d/%d successful in %.1fs",
-            sum(1 for r in results if r.success),
-            len(queries),
-            elapsed,
-        )
-
+        _logger.info("Batch: %d/%d successful in %.1fs", sum(r.success for r in results), len(queries), elapsed)
         return results
 
     def close(self) -> None:
-        """Clean up resources."""
-        pass  # dspy.RLM handles its own cleanup
-    # Note: __enter__ and __exit__ are defined earlier in the class for context manager support
+        pass
 
-
-# =============================================================================
-# Custom Exceptions
-# =============================================================================
 
 class TimeoutExceededError(Exception):
-    """Raised when query execution exceeds the configured timeout."""
     def __init__(self, elapsed: float, timeout: float):
         self.elapsed = elapsed
         self.timeout = timeout
-        super().__init__(f"Timeout: {elapsed:.1f}s of {timeout:.1f}s")
+        super().__init__(f"Query timed out after {elapsed:.1f}s (limit: {timeout}s)")
+
+
+# Re-export types for backward compatibility
+__all__ = ["RLM", "RLMConfig", "RLMResult", "ProgressCallback", "TimeoutExceededError"]

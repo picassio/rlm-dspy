@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import os
 import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -51,7 +52,68 @@ DEFAULT_CONFIG = {
 
     # API key location
     "env_file": None,
+
+    # Optimization settings
+    "optimization": {
+        "enabled": True,                # Enable auto-optimization
+        "optimizer": "simba",           # Optimizer type: simba, mipro, copro (future: gepa)
+        "model": None,                  # null = use default model
+        "min_new_traces": 50,           # Traces needed before optimizing
+        "min_hours_between": 24,        # Minimum hours between optimizations
+        "max_budget": 0.50,             # Max cost per optimization run
+        "run_in_background": True,      # Run optimization in background thread
+    },
 }
+
+
+# Optimization config defaults (for easy access)
+DEFAULT_OPTIMIZATION_CONFIG = DEFAULT_CONFIG["optimization"]
+
+
+@dataclass
+class OptimizationConfig:
+    """Configuration for auto-optimization."""
+
+    enabled: bool = True
+    optimizer: str = "simba"  # "simba", "mipro", "copro" (future: "gepa")
+    model: str | None = None  # None = use default model from config
+    min_new_traces: int = 50
+    min_hours_between: int = 24
+    max_budget: float = 0.50
+    run_in_background: bool = True
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "OptimizationConfig":
+        """Create from dictionary."""
+        defaults = DEFAULT_OPTIMIZATION_CONFIG
+        return cls(
+            enabled=data.get("enabled", defaults["enabled"]),
+            optimizer=data.get("optimizer", defaults["optimizer"]),
+            model=data.get("model", defaults["model"]),
+            min_new_traces=data.get("min_new_traces", defaults["min_new_traces"]),
+            min_hours_between=data.get("min_hours_between", defaults["min_hours_between"]),
+            max_budget=data.get("max_budget", defaults["max_budget"]),
+            run_in_background=data.get("run_in_background", defaults["run_in_background"]),
+        )
+
+    @classmethod
+    def from_user_config(cls) -> "OptimizationConfig":
+        """Load from user config file."""
+        config = load_config()
+        opt_data = config.get("optimization", {})
+        return cls.from_dict(opt_data)
+
+    def get_model(self, default_model: str) -> str:
+        """Get the model to use for optimization.
+        
+        Args:
+            default_model: The default model from main config
+            
+        Returns:
+            The optimization model (self.model if set, else default_model)
+        """
+        return self.model if self.model else default_model
+
 
 # Template for config file with comments
 CONFIG_TEMPLATE = """# RLM-DSPy Configuration
@@ -141,6 +203,35 @@ max_timeout: {max_timeout}
 # Path to .env file with API keys (optional)
 # If not set, uses environment variables directly
 env_file: {env_file}
+
+# ============================================================================
+# Auto-Optimization Settings
+# ============================================================================
+# RLM can automatically optimize itself using collected traces.
+# When enough traces are collected, SIMBA runs in background to improve prompts.
+
+optimization:
+  # Enable/disable auto-optimization
+  enabled: {opt_enabled}
+
+  # Optimizer type: simba (future: mipro, copro, gepa)
+  optimizer: {opt_optimizer}
+
+  # Model for optimization (null = use default model above)
+  # Tip: Use same model for best results, or cheaper model to save costs
+  model: {opt_model}
+
+  # Minimum new traces before triggering optimization
+  min_new_traces: {opt_min_new_traces}
+
+  # Minimum hours between optimization runs
+  min_hours_between: {opt_min_hours_between}
+
+  # Maximum budget per optimization run in USD
+  max_budget: {opt_max_budget}
+
+  # Run optimization in background (recommended)
+  run_in_background: {opt_run_in_background}
 """
 
 
@@ -197,6 +288,9 @@ def save_config(config: dict[str, Any], use_template: bool = True) -> None:
             else:
                 return str(val)
 
+        # Get optimization config
+        opt_config = full_config.get("optimization", DEFAULT_OPTIMIZATION_CONFIG)
+
         content = CONFIG_TEMPLATE.format(
             model=fmt(full_config.get("model")),
             sub_model=fmt(full_config.get("sub_model")),
@@ -218,6 +312,14 @@ def save_config(config: dict[str, Any], use_template: bool = True) -> None:
             max_budget=fmt(full_config.get("max_budget")),
             max_timeout=fmt(full_config.get("max_timeout")),
             env_file=fmt(full_config.get("env_file")),
+            # Optimization settings
+            opt_enabled=fmt(opt_config.get("enabled", True)),
+            opt_optimizer=fmt(opt_config.get("optimizer", "simba")),
+            opt_model=fmt(opt_config.get("model")),
+            opt_min_new_traces=fmt(opt_config.get("min_new_traces", 50)),
+            opt_min_hours_between=fmt(opt_config.get("min_hours_between", 24)),
+            opt_max_budget=fmt(opt_config.get("max_budget", 0.50)),
+            opt_run_in_background=fmt(opt_config.get("run_in_background", True)),
         )
 
         _atomic_write(CONFIG_FILE, content)

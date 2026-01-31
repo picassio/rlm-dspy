@@ -44,44 +44,30 @@ class TestDaemonConfig:
 class TestIndexEventHandler:
     """Test IndexEventHandler class."""
 
-    def test_should_ignore(self, tmp_path):
-        """Test file ignore logic."""
+    def test_should_process(self, tmp_path):
+        """Test file processing logic (_should_process combines ignore and watch)."""
         from rlm_dspy.core.daemon import IndexEventHandler, DaemonConfig
         from queue import Queue
 
         config = DaemonConfig()
         queue = Queue()
-        handler = IndexEventHandler("test", queue, config)
+        handler = IndexEventHandler("test", queue, config.watch_patterns, config.ignore_patterns)
 
-        # Should ignore
-        assert handler._should_ignore(str(tmp_path / "test.pyc"))
-        assert handler._should_ignore(str(tmp_path / "__pycache__" / "test.py"))
-        assert handler._should_ignore(str(tmp_path / ".git" / "config"))
-        assert handler._should_ignore(str(tmp_path / "node_modules" / "pkg" / "index.js"))
+        # Should NOT process (ignored or wrong extension)
+        assert not handler._should_process(str(tmp_path / "test.pyc"))
+        assert not handler._should_process(str(tmp_path / "__pycache__" / "test.py"))
+        assert not handler._should_process(str(tmp_path / ".git" / "config"))
+        assert not handler._should_process(str(tmp_path / "node_modules" / "pkg" / "index.js"))
+        assert not handler._should_process(str(tmp_path / "README.md"))
+        assert not handler._should_process(str(tmp_path / "config.yaml"))
+        assert not handler._should_process(str(tmp_path / "image.png"))
 
-        # Should not ignore
-        assert not handler._should_ignore(str(tmp_path / "test.py"))
-        assert not handler._should_ignore(str(tmp_path / "src" / "main.py"))
-
-    def test_should_watch(self, tmp_path):
-        """Test file watch logic."""
-        from rlm_dspy.core.daemon import IndexEventHandler, DaemonConfig
-        from queue import Queue
-
-        config = DaemonConfig()
-        queue = Queue()
-        handler = IndexEventHandler("test", queue, config)
-
-        # Should watch
-        assert handler._should_watch(str(tmp_path / "test.py"))
-        assert handler._should_watch(str(tmp_path / "app.js"))
-        assert handler._should_watch(str(tmp_path / "main.go"))
-        assert handler._should_watch(str(tmp_path / "lib.rs"))
-
-        # Should not watch
-        assert not handler._should_watch(str(tmp_path / "README.md"))
-        assert not handler._should_watch(str(tmp_path / "config.yaml"))
-        assert not handler._should_watch(str(tmp_path / "image.png"))
+        # Should process (valid extension, not ignored)
+        assert handler._should_process(str(tmp_path / "test.py"))
+        assert handler._should_process(str(tmp_path / "src" / "main.py"))
+        assert handler._should_process(str(tmp_path / "app.js"))
+        assert handler._should_process(str(tmp_path / "main.go"))
+        assert handler._should_process(str(tmp_path / "lib.rs"))
 
 
 class TestIndexDaemon:
@@ -98,7 +84,8 @@ class TestIndexDaemon:
         daemon = IndexDaemon(config)
 
         assert not daemon.is_running
-        assert daemon.list_watches() == []
+        status = daemon.get_status()
+        assert status["watching"] == []
 
     def test_get_status(self, tmp_path):
         """Test status retrieval."""
@@ -113,7 +100,7 @@ class TestIndexDaemon:
         status = daemon.get_status()
 
         assert status["running"] is False
-        assert status["watches"] == []
+        assert status["watching"] == []
         assert status["index_count"] == 0
 
 

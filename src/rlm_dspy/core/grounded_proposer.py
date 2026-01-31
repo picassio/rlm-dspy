@@ -1,8 +1,6 @@
-"""
-Grounded Proposer for data-aware prompt improvements.
+"""Grounded Proposer for data-aware prompt improvements.
 
-Generates tips and prompt augmentations based on actual failure patterns,
-following DSPy's MIPROv2 GroundedProposer pattern.
+Generates tips based on failure patterns, following DSPy's MIPROv2 pattern.
 """
 
 import json
@@ -86,13 +84,10 @@ class ProposerConfig:
 
 # Default tips based on common failure patterns
 DEFAULT_TIPS = [
-    "Always use read_file() to verify line numbers before claiming bugs exist",
-    "Check for existing error handling before reporting missing guards",
-    "Use ripgrep or find_functions first to locate relevant code, then read_file to verify",
-    "Quote the actual problematic code when reporting issues",
-    "Verify that reported vulnerabilities aren't already mitigated by existing checks",
-    "Search tools are CASE-SENSITIVE - use ripgrep with '-i' flag or check exact spelling",
-    "When claiming 'X is not used', try BOTH case-sensitive AND case-insensitive search",
+    "Use read_file() to verify line numbers before claiming bugs exist",
+    "Use ripgrep/find_functions first, then read_file to verify",
+    "Quote actual code when reporting issues",
+    "Search tools are CASE-SENSITIVE - use '-i' flag or check exact spelling",
 ]
 
 
@@ -281,11 +276,7 @@ class GroundedProposer:
             logger.warning("Failed to refresh tips: %s", e)
     
     def generate_tips(self) -> list[str]:
-        """
-        Generate tips based on patterns in successes vs failures.
-        
-        Returns list of actionable tips to add to prompts.
-        """
+        """Generate tips based on patterns in successes vs failures."""
         if not self.failures:
             return DEFAULT_TIPS.copy()
         
@@ -319,12 +310,7 @@ class GroundedProposer:
             lm = dspy.LM(**lm_kwargs)
             
             class GenerateTips(dspy.Signature):
-                """Analyze failure and success patterns to generate actionable tips.
-                
-                Tips should be specific, actionable instructions that would prevent
-                the observed failures while maintaining what works in successes.
-                Each tip should be one sentence starting with an action verb.
-                """
+                """Generate actionable tips from failure/success patterns."""
                 failure_patterns: str = dspy.InputField(desc="Common patterns in failed queries")
                 success_patterns: str = dspy.InputField(desc="Common patterns in successful queries")
                 tips: list[str] = dspy.OutputField(desc="List of actionable tips (max 10)")
@@ -507,7 +493,6 @@ def get_grounded_proposer() -> GroundedProposer:
     if _proposer is None:
         _proposer = GroundedProposer()
     return _proposer
-
 
 def clear_grounded_proposer() -> None:
     """Clear the global grounded proposer instance."""

@@ -109,10 +109,11 @@ class MyClass:
         pass
 """)
 
-        config = IndexConfig(index_dir=tmp_path / "indexes", use_faiss=False)
-        index = CodeIndex(config)
+        from rlm_dspy.core.vector_build import extract_snippets
 
-        snippets = index._extract_snippets(tmp_path)
+        config = IndexConfig(index_dir=tmp_path / "indexes", use_faiss=False)
+
+        snippets = extract_snippets(tmp_path)
 
         # Should find function and class
         names = {s.name for s in snippets}

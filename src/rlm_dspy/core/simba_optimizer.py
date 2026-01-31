@@ -12,47 +12,108 @@ and generate improvement rules. This module provides:
 
 import json
 import logging
-from dataclasses import dataclass, field
-from datetime import datetime, UTC
+import threading
 from pathlib import Path
 from typing import Any, Callable
+
+from datetime import datetime, UTC
+
+# Re-export from optimization_state for backwards compatibility
+from .optimization_state import (
+    OptimizationResult,
+    OptimizationState,
+    SavedOptimization,
+    OPTIMIZATION_DIR,
+    OPTIMIZED_PROGRAM_FILE,
+    OPTIMIZATION_STATE_FILE,
+    load_optimization_state,
+    save_optimization_state,
+    load_optimized_program,
+    save_optimized_program,
+    clear_optimization,
+    get_trace_count,
+    should_optimize,
+    is_optimization_running,
+    set_optimization_running,
+)
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class OptimizationResult:
-    """Result of SIMBA optimization."""
+def run_background_optimization(config: Any = None, model: str | None = None) -> None:
+    """Run SIMBA optimization in background thread.
+    
+    Args:
+        config: OptimizationConfig (optional)
+        model: Model to use for optimization (optional)
+    """
+    # Prevent multiple simultaneous optimizations
+    if not set_optimization_running(True):
+        logger.debug("Background optimization already running")
+        return
 
-    improved: bool
-    baseline_score: float
-    optimized_score: float
-    improvement: float  # Percentage improvement
-    num_steps: int
-    num_candidates: int
-    best_program_idx: int
-    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
+    if config is None:
+        from .user_config import OptimizationConfig
+        config = OptimizationConfig.from_user_config()
 
-    def __str__(self) -> str:
-        if self.improved:
-            return (
-                f"✓ Improved by {self.improvement:.1f}% "
-                f"({self.baseline_score:.2f} → {self.optimized_score:.2f})"
+    def _optimize():
+        try:
+            logger.info("Starting background %s optimization...", config.optimizer)
+
+            # Get the RLM program to optimize
+            from .rlm import RLM
+            rlm = RLM()
+
+            # Get optimizer
+            optimizer = get_simba_optimizer(
+                batch_size=16,
+                num_candidates=4,
+                max_steps=4,
             )
-        return f"No improvement ({self.baseline_score:.2f})"
 
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary."""
-        return {
-            "improved": self.improved,
-            "baseline_score": self.baseline_score,
-            "optimized_score": self.optimized_score,
-            "improvement": self.improvement,
-            "num_steps": self.num_steps,
-            "num_candidates": self.num_candidates,
-            "best_program_idx": self.best_program_idx,
-            "timestamp": self.timestamp.isoformat(),
-        }
+            # Run optimization
+            optimized_program, result = optimizer.optimize_from_traces(
+                program=rlm._rlm,
+                min_score=0.7,
+                max_examples=100,
+            )
+
+            if result.improved:
+                # Save the optimized program
+                save_optimized_program(optimized_program, result, config.optimizer)
+
+                # Update state
+                state = OptimizationState(
+                    last_optimization=datetime.now(UTC),
+                    traces_at_last_optimization=get_trace_count(),
+                    last_result=result,
+                    optimizer_type=config.optimizer,
+                )
+                save_optimization_state(state)
+
+                logger.info("Background optimization complete: +%.1f%% improvement", result.improvement)
+            else:
+                # Still update state to prevent re-running
+                state = OptimizationState(
+                    last_optimization=datetime.now(UTC),
+                    traces_at_last_optimization=get_trace_count(),
+                    last_result=result,
+                    optimizer_type=config.optimizer,
+                )
+                save_optimization_state(state)
+                logger.info("Background optimization complete: no improvement")
+
+        except Exception as e:
+            logger.warning("Background optimization failed: %s", e)
+        finally:
+            set_optimization_running(False)
+
+    if config.run_in_background:
+        thread = threading.Thread(target=_optimize, daemon=True, name="simba-optimizer")
+        thread.start()
+        logger.debug("Started background optimization thread")
+    else:
+        _optimize()
 
 
 def grounded_metric(example: Any, prediction: dict[str, Any]) -> float:
@@ -185,6 +246,7 @@ class SIMBAOptimizer:
         program: Any,
         trainset: list[Any],
         seed: int = 42,
+        lm: Any = None,
     ) -> tuple[Any, OptimizationResult]:
         """
         Optimize a program using SIMBA.
@@ -193,16 +255,30 @@ class SIMBAOptimizer:
             program: DSPy module to optimize
             trainset: Training examples (list of dspy.Example)
             seed: Random seed for reproducibility
+            lm: Optional language model (will create default if not provided)
 
         Returns:
             Tuple of (optimized_program, optimization_result)
         """
+        import dspy
+
         # Lazy import to avoid startup cost
         try:
             from dspy.teleprompt import SIMBA
         except ImportError:
             logger.error("DSPy SIMBA not available")
             raise ImportError("DSPy SIMBA optimizer not available. Install dspy>=2.5")
+
+        # Configure LM if not already set
+        if lm is None and dspy.settings.lm is None:
+            from .user_config import load_config
+            config = load_config()
+            model = config.get("model", "openai/gpt-4o-mini")
+            lm = dspy.LM(model)
+            logger.info("Created LM for SIMBA: %s", model)
+
+        if lm is not None:
+            dspy.configure(lm=lm)
 
         # Validate trainset size
         if len(trainset) < self.batch_size:
