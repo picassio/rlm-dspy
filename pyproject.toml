@@ -97,3 +97,8 @@ strict = true
 markers = [
     "integration: marks tests as integration tests (require API key)",
 ]
+
+# Custom lint check for file length
+[tool.file-length]
+max-lines = 500
+paths = ["src", "tests"]
