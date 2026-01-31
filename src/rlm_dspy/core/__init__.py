@@ -119,6 +119,42 @@ _LAZY_IMPORTS = {
     "get_anthropic_api_key": ".anthropic_oauth_lm",
     "is_oauth_token": ".anthropic_oauth_lm",
     "create_lm_with_oauth_fallback": ".anthropic_oauth_lm",
+    # Google OAuth
+    "GoogleOAuthCredentials": ".google_oauth",
+    "google_login": ".google_oauth",
+    "google_logout": ".google_oauth",
+    "google_refresh_token": ".google_oauth",
+    "get_google_token": ".google_oauth",
+    "is_google_authenticated": ".google_oauth",
+    # Google OAuth LM
+    "GoogleOAuthLM": ".google_oauth_lm",
+    "create_google_oauth_lm": ".google_oauth_lm",
+    # Antigravity OAuth
+    "AntigravityCredentials": ".antigravity_oauth",
+    "antigravity_login": ".antigravity_oauth",
+    "antigravity_logout": ".antigravity_oauth",
+    "antigravity_refresh_token": ".antigravity_oauth",
+    "get_antigravity_token": ".antigravity_oauth",
+    "is_antigravity_authenticated": ".antigravity_oauth",
+    # Antigravity LM
+    "AntigravityLM": ".antigravity_lm",
+    "create_antigravity_lm": ".antigravity_lm",
+    # MiniMax LM
+    "MiniMaxLM": ".minimax_lm",
+    "create_minimax_lm": ".minimax_lm",
+    "get_minimax_api_key": ".minimax_lm",
+    # OpenCode LM (GLM models)
+    "OpenCodeLM": ".opencode_lm",
+    "create_opencode_lm": ".opencode_lm",
+    "get_opencode_api_key": ".opencode_lm",
+    # Z.AI LM (GLM models - native Zhipu provider)
+    "ZaiLM": ".zai_lm",
+    "create_zai_lm": ".zai_lm",
+    "get_zai_api_key": ".zai_lm",
+    # Kimi LM (Moonshot AI - Anthropic-compatible)
+    "KimiLM": ".kimi_lm",
+    "create_kimi_lm": ".kimi_lm",
+    "get_kimi_api_key": ".kimi_lm",
     # Model Registry
     "ModelInfo": ".models",
     "ModelCost": ".models",

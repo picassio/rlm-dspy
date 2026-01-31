@@ -372,11 +372,15 @@ def is_anthropic_authenticated() -> bool:
 # Generic OAuth API
 # ============================================================================
 
+# List of supported OAuth providers
+OAUTH_PROVIDERS = ["anthropic", "google", "antigravity"]
+
+
 def get_oauth_token(provider: str) -> str | None:
     """Get OAuth token for a provider.
     
     Args:
-        provider: Provider name (e.g., "anthropic")
+        provider: Provider name (e.g., "anthropic", "google", "antigravity")
         
     Returns:
         Access token or None if not authenticated
@@ -384,7 +388,16 @@ def get_oauth_token(provider: str) -> str | None:
     if provider == "anthropic":
         return get_anthropic_token()
     
-    # Add more providers here
+    if provider == "google":
+        from .google_oauth import get_google_token
+        result = get_google_token()
+        return result[0] if result else None  # Return just the token
+    
+    if provider == "antigravity":
+        from .antigravity_oauth import get_antigravity_token
+        result = get_antigravity_token()
+        return result[0] if result else None  # Return just the token
+    
     return None
 
 
@@ -401,7 +414,28 @@ def oauth_login(provider: str, **kwargs) -> OAuthCredentials:
     if provider == "anthropic":
         return anthropic_login(**kwargs)
     
-    raise ValueError(f"Unknown OAuth provider: {provider}")
+    if provider == "google":
+        from .google_oauth import google_login
+        google_creds = google_login(**kwargs)
+        # Convert to base OAuthCredentials for return type consistency
+        return OAuthCredentials(
+            provider="google",
+            access_token=google_creds.access_token,
+            refresh_token=google_creds.refresh_token,
+            expires_at=google_creds.expires_at,
+        )
+    
+    if provider == "antigravity":
+        from .antigravity_oauth import antigravity_login
+        ag_creds = antigravity_login(**kwargs)
+        return OAuthCredentials(
+            provider="antigravity",
+            access_token=ag_creds.access_token,
+            refresh_token=ag_creds.refresh_token,
+            expires_at=ag_creds.expires_at,
+        )
+    
+    raise ValueError(f"Unknown OAuth provider: {provider}. Supported: {', '.join(OAUTH_PROVIDERS)}")
 
 
 def oauth_logout(provider: str) -> bool:
@@ -416,6 +450,14 @@ def oauth_logout(provider: str) -> bool:
     if provider == "anthropic":
         return anthropic_logout()
     
+    if provider == "google":
+        from .google_oauth import google_logout
+        return google_logout()
+    
+    if provider == "antigravity":
+        from .antigravity_oauth import antigravity_logout
+        return antigravity_logout()
+    
     return False
 
 
@@ -428,6 +470,36 @@ def oauth_status(provider: str) -> dict[str, Any]:
     Returns:
         Status dictionary
     """
+    if provider == "google":
+        from .google_oauth import _load
+        google_creds = _load()
+        if not google_creds:
+            return {"authenticated": False, "provider": provider}
+        return {
+            "authenticated": True,
+            "provider": provider,
+            "email": google_creds.email,
+            "project_id": google_creds.project_id,
+            "expires_at": google_creds.expires_at,
+            "is_expired": google_creds.is_expired,
+            "created_at": google_creds.created_at,
+        }
+    
+    if provider == "antigravity":
+        from .antigravity_oauth import _load as _load_ag
+        ag_creds = _load_ag()
+        if not ag_creds:
+            return {"authenticated": False, "provider": provider}
+        return {
+            "authenticated": True,
+            "provider": provider,
+            "email": ag_creds.email,
+            "project_id": ag_creds.project_id,
+            "expires_at": ag_creds.expires_at,
+            "is_expired": ag_creds.is_expired,
+            "created_at": ag_creds.created_at,
+        }
+    
     credentials = _load_credentials(provider)
     
     if not credentials:

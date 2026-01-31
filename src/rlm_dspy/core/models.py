@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .oauth import get_oauth_token, is_anthropic_authenticated
+from .google_oauth import is_google_authenticated
+from .antigravity_oauth import is_antigravity_authenticated
 
 
 @dataclass
@@ -215,9 +217,222 @@ OPENROUTER_MODELS: list[ModelInfo] = [
     ),
 ]
 
+ANTIGRAVITY_MODELS: list[ModelInfo] = [
+    ModelInfo(
+        id="antigravity/gemini-3-flash",
+        name="Gemini 3 Flash (Antigravity)",
+        provider="antigravity",
+        api="antigravity",
+        reasoning=True,
+        input_types=["text", "image"],
+        context_window=1000000,
+        max_tokens=65536,
+        cost=ModelCost(input=0.15, output=0.6),
+    ),
+    ModelInfo(
+        id="antigravity/gemini-3-pro-low",
+        name="Gemini 3 Pro Low (Antigravity)",
+        provider="antigravity",
+        api="antigravity",
+        reasoning=True,
+        input_types=["text", "image"],
+        context_window=1000000,
+        max_tokens=65536,
+        cost=ModelCost(input=1.25, output=10.0),
+    ),
+    ModelInfo(
+        id="antigravity/gemini-3-pro-high",
+        name="Gemini 3 Pro High (Antigravity)",
+        provider="antigravity",
+        api="antigravity",
+        reasoning=True,
+        input_types=["text", "image"],
+        context_window=1000000,
+        max_tokens=65536,
+        cost=ModelCost(input=1.25, output=10.0),
+    ),
+    ModelInfo(
+        id="antigravity/claude-sonnet-4-5",
+        name="Claude Sonnet 4.5 (Antigravity)",
+        provider="antigravity",
+        api="antigravity",
+        reasoning=False,
+        input_types=["text", "image"],
+        context_window=200000,
+        max_tokens=64000,
+        cost=ModelCost(input=3.0, output=15.0),
+    ),
+    ModelInfo(
+        id="antigravity/claude-sonnet-4-5-thinking",
+        name="Claude Sonnet 4.5 Thinking (Antigravity)",
+        provider="antigravity",
+        api="antigravity",
+        reasoning=True,
+        input_types=["text", "image"],
+        context_window=200000,
+        max_tokens=64000,
+        cost=ModelCost(input=3.0, output=15.0),
+    ),
+    ModelInfo(
+        id="antigravity/claude-opus-4-5-thinking",
+        name="Claude Opus 4.5 Thinking (Antigravity)",
+        provider="antigravity",
+        api="antigravity",
+        reasoning=True,
+        input_types=["text", "image"],
+        context_window=200000,
+        max_tokens=64000,
+        cost=ModelCost(input=5.0, output=25.0),
+    ),
+    ModelInfo(
+        id="antigravity/gpt-oss-120b-medium",
+        name="GPT-OSS 120B Medium (Antigravity)",
+        provider="antigravity",
+        api="antigravity",
+        reasoning=True,
+        input_types=["text"],
+        context_window=128000,
+        max_tokens=16384,
+        cost=ModelCost(input=1.0, output=3.0),
+    ),
+]
+
+KIMI_MODELS: list[ModelInfo] = [
+    ModelInfo(
+        id="kimi/k2p5",
+        name="Kimi K2.5",
+        provider="kimi",
+        api="anthropic-compatible",
+        reasoning=True,
+        input_types=["text", "image"],
+        context_window=262144,
+        max_tokens=32768,
+        cost=ModelCost(input=0.0, output=0.0),  # Free tier
+    ),
+    ModelInfo(
+        id="kimi/kimi-k2-thinking",
+        name="Kimi K2 Thinking",
+        provider="kimi",
+        api="anthropic-compatible",
+        reasoning=True,
+        input_types=["text"],
+        context_window=262144,
+        max_tokens=32768,
+        cost=ModelCost(input=0.0, output=0.0),  # Free tier
+    ),
+]
+
+ZAI_MODELS: list[ModelInfo] = [
+    ModelInfo(
+        id="zai/glm-4.5",
+        name="GLM 4.5 (Z.AI)",
+        provider="zai",
+        api="openai-compatible",
+        reasoning=True,
+        input_types=["text"],
+        context_window=131072,
+        max_tokens=98304,
+        cost=ModelCost(input=0.6, output=2.2),
+    ),
+    ModelInfo(
+        id="zai/glm-4.5-air",
+        name="GLM 4.5 Air (Z.AI)",
+        provider="zai",
+        api="openai-compatible",
+        reasoning=True,
+        input_types=["text"],
+        context_window=131072,
+        max_tokens=131072,
+        cost=ModelCost(input=0.05, output=0.22),
+    ),
+    ModelInfo(
+        id="zai/glm-4.6",
+        name="GLM 4.6 (Z.AI)",
+        provider="zai",
+        api="openai-compatible",
+        reasoning=True,
+        input_types=["text"],
+        context_window=204800,
+        max_tokens=131072,
+        cost=ModelCost(input=0.35, output=1.4),
+    ),
+    ModelInfo(
+        id="zai/glm-4.7",
+        name="GLM 4.7 (Z.AI)",
+        provider="zai",
+        api="openai-compatible",
+        reasoning=True,
+        input_types=["text"],
+        context_window=204800,
+        max_tokens=131072,
+        cost=ModelCost(input=0.43, output=1.75),
+    ),
+]
+
+OPENCODE_MODELS: list[ModelInfo] = [
+    ModelInfo(
+        id="opencode/glm-4.6",
+        name="GLM 4.6 (OpenCode)",
+        provider="opencode",
+        api="openai-compatible",
+        reasoning=True,
+        input_types=["text"],
+        context_window=204800,
+        max_tokens=131072,
+        cost=ModelCost(input=0.35, output=1.4),
+    ),
+    ModelInfo(
+        id="opencode/glm-4.7",
+        name="GLM 4.7 (OpenCode)",
+        provider="opencode",
+        api="openai-compatible",
+        reasoning=True,
+        input_types=["text"],
+        context_window=204800,
+        max_tokens=131072,
+        cost=ModelCost(input=0.6, output=2.2),
+    ),
+    ModelInfo(
+        id="opencode/glm-4.7-free",
+        name="GLM 4.7 Free (OpenCode)",
+        provider="opencode",
+        api="openai-compatible",
+        reasoning=True,
+        input_types=["text"],
+        context_window=204800,
+        max_tokens=131072,
+        cost=ModelCost(input=0.0, output=0.0),
+    ),
+]
+
+MINIMAX_MODELS: list[ModelInfo] = [
+    ModelInfo(
+        id="minimax/MiniMax-M2",
+        name="MiniMax M2",
+        provider="minimax",
+        api="anthropic-compatible",
+        reasoning=True,
+        input_types=["text"],
+        context_window=196608,
+        max_tokens=128000,
+        cost=ModelCost(input=0.3, output=1.2),
+    ),
+    ModelInfo(
+        id="minimax/MiniMax-M2.1",
+        name="MiniMax M2.1",
+        provider="minimax",
+        api="anthropic-compatible",
+        reasoning=True,
+        input_types=["text"],
+        context_window=196608,
+        max_tokens=128000,
+        cost=ModelCost(input=0.3, output=1.2),
+    ),
+]
+
 # All built-in models
 ALL_MODELS: list[ModelInfo] = (
-    ANTHROPIC_MODELS + OPENAI_MODELS + GOOGLE_MODELS + OPENROUTER_MODELS
+    ANTHROPIC_MODELS + OPENAI_MODELS + GOOGLE_MODELS + OPENROUTER_MODELS + ANTIGRAVITY_MODELS + KIMI_MODELS + MINIMAX_MODELS + OPENCODE_MODELS + ZAI_MODELS
 )
 
 
@@ -235,6 +450,10 @@ PROVIDER_ENV_VARS: dict[str, list[str]] = {
     "fireworks": ["FIREWORKS_API_KEY"],
     "mistral": ["MISTRAL_API_KEY"],
     "deepseek": ["DEEPSEEK_API_KEY"],
+    "minimax": ["MINIMAX_API_KEY"],
+    "opencode": ["OPENCODE_API_KEY"],
+    "zai": ["ZAI_API_KEY"],
+    "kimi": ["KIMI_API_KEY"],
 }
 
 
@@ -242,6 +461,12 @@ def has_provider_auth(provider: str) -> bool:
     """Check if a provider has authentication configured."""
     # Check OAuth first
     if provider == "anthropic" and is_anthropic_authenticated():
+        return True
+    
+    if provider == "google" and is_google_authenticated():
+        return True
+    
+    if provider == "antigravity" and is_antigravity_authenticated():
         return True
     
     # Check environment variables
@@ -258,6 +483,16 @@ def get_provider_api_key(provider: str) -> str | None:
     # Check OAuth first
     if provider == "anthropic":
         token = get_oauth_token("anthropic")
+        if token:
+            return token
+    
+    if provider == "google":
+        token = get_oauth_token("google")
+        if token:
+            return token
+    
+    if provider == "antigravity":
+        token = get_oauth_token("antigravity")
         if token:
             return token
     

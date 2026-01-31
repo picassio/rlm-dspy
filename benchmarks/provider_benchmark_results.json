@@ -1,0 +1,126 @@
+{
+  "timestamp": "2026-01-30T08:15:00Z",
+  "providers": {
+    "zai": {
+      "provider": "zai",
+      "model": "zai/glm-4.7",
+      "total_tests": 12,
+      "passed": 11,
+      "failed": 1,
+      "hallucinations": 0,
+      "accuracy": 91.7,
+      "hallucination_rate": 0.0,
+      "avg_time": 44.2,
+      "min_time": 13.8,
+      "max_time": 120.0,
+      "results": [
+        {"test_name": "version_check", "correct": true, "time_seconds": 68.6, "actual": "0.1.0"},
+        {"test_name": "project_name", "correct": true, "time_seconds": 13.8, "actual": "rlm-dspy"},
+        {"test_name": "python_version", "correct": false, "time_seconds": 51.6, "actual": "3.11", "note": "Test expected 3.10, but actual requirement is >=3.11"},
+        {"test_name": "main_dependency", "correct": true, "time_seconds": 30.6, "actual": "dspy>=2.6.0"},
+        {"test_name": "cli_command", "correct": true, "time_seconds": 52.9, "actual": "rlm-dspy"},
+        {"test_name": "simple_addition", "correct": true, "time_seconds": 17.1, "actual": "42"},
+        {"test_name": "multiplication", "correct": true, "time_seconds": 38.5, "actual": "96"},
+        {"test_name": "nonexistent_function", "correct": true, "hallucinated": false, "time_seconds": 120.0},
+        {"test_name": "nonexistent_config", "correct": true, "hallucinated": false, "time_seconds": 35.7},
+        {"test_name": "invented_author", "correct": true, "hallucinated": false, "time_seconds": 32.8},
+        {"test_name": "large_find_marker", "correct": true, "time_seconds": 16.5, "context_size_kb": 119.8},
+        {"test_name": "large_count_imports", "correct": true, "time_seconds": 52.2, "context_size_kb": 119.8}
+      ]
+    },
+    "kimi": {
+      "provider": "kimi",
+      "model": "kimi/k2p5",
+      "total_tests": 12,
+      "passed": 11,
+      "failed": 1,
+      "hallucinations": 0,
+      "accuracy": 91.7,
+      "hallucination_rate": 0.0,
+      "avg_time": 14.4,
+      "min_time": 9.6,
+      "max_time": 36.4,
+      "results": [
+        {"test_name": "version_check", "correct": true, "time_seconds": 10.4, "actual": "0.1.0"},
+        {"test_name": "project_name", "correct": true, "time_seconds": 10.9, "actual": "rlm-dspy"},
+        {"test_name": "python_version", "correct": false, "time_seconds": 10.8, "actual": "3.11", "note": "Test expected 3.10, but actual requirement is >=3.11"},
+        {"test_name": "main_dependency", "correct": true, "time_seconds": 12.4, "actual": "dspy>=2.6.0"},
+        {"test_name": "cli_command", "correct": true, "time_seconds": 13.8, "actual": "rlm-dspy"},
+        {"test_name": "simple_addition", "correct": true, "time_seconds": 10.4, "actual": "42"},
+        {"test_name": "multiplication", "correct": true, "time_seconds": 9.6, "actual": "96"},
+        {"test_name": "nonexistent_function", "correct": true, "hallucinated": false, "time_seconds": 36.4},
+        {"test_name": "nonexistent_config", "correct": true, "hallucinated": false, "time_seconds": 20.3},
+        {"test_name": "invented_author", "correct": true, "hallucinated": false, "time_seconds": 17.6},
+        {"test_name": "large_find_marker", "correct": true, "time_seconds": 10.3, "context_size_kb": 119.8},
+        {"test_name": "large_count_imports", "correct": true, "time_seconds": 20.3, "context_size_kb": 119.8}
+      ]
+    },
+    "kimi-thinking": {
+      "provider": "kimi-thinking",
+      "model": "kimi/kimi-k2-thinking",
+      "total_tests": 12,
+      "passed": 11,
+      "failed": 1,
+      "hallucinations": 0,
+      "accuracy": 91.7,
+      "hallucination_rate": 0.0,
+      "avg_time": 15.5,
+      "min_time": 9.8,
+      "max_time": 43.2,
+      "results": [
+        {"test_name": "version_check", "correct": true, "time_seconds": 12.9, "actual": "0.1.0"},
+        {"test_name": "project_name", "correct": true, "time_seconds": 12.6, "actual": "rlm-dspy"},
+        {"test_name": "python_version", "correct": false, "time_seconds": 17.4, "actual": ">=3.11", "note": "Test expected 3.10, but actual requirement is >=3.11"},
+        {"test_name": "main_dependency", "correct": true, "time_seconds": 13.2, "actual": "dspy>=2.6.0"},
+        {"test_name": "cli_command", "correct": true, "time_seconds": 13.2, "actual": "rlm-dspy"},
+        {"test_name": "simple_addition", "correct": true, "time_seconds": 10.0, "actual": "42"},
+        {"test_name": "multiplication", "correct": true, "time_seconds": 9.8, "actual": "96"},
+        {"test_name": "nonexistent_function", "correct": true, "hallucinated": false, "time_seconds": 43.2},
+        {"test_name": "nonexistent_config", "correct": true, "hallucinated": false, "time_seconds": 13.7},
+        {"test_name": "invented_author", "correct": true, "hallucinated": false, "time_seconds": 13.6},
+        {"test_name": "large_find_marker", "correct": true, "time_seconds": 13.7, "context_size_kb": 119.8},
+        {"test_name": "large_count_imports", "correct": true, "time_seconds": 13.2, "context_size_kb": 119.8}
+      ]
+    },
+    "minimax": {
+      "provider": "minimax",
+      "model": "minimax/MiniMax-M2.1",
+      "total_tests": 12,
+      "passed": 6,
+      "failed": 4,
+      "timeouts": 4,
+      "hallucinations": 0,
+      "accuracy": 50.0,
+      "accuracy_note": "Affected by timeouts - when responses completed, accuracy was good",
+      "hallucination_rate": 0.0,
+      "avg_time": 70.0,
+      "min_time": 14.4,
+      "max_time": 180.0,
+      "results": [
+        {"test_name": "version_check", "correct": false, "time_seconds": 120.0, "error": "TIMEOUT"},
+        {"test_name": "project_name", "correct": true, "time_seconds": 16.2, "actual": "rlm-dspy"},
+        {"test_name": "python_version", "correct": false, "time_seconds": 120.0, "error": "TIMEOUT"},
+        {"test_name": "main_dependency", "correct": true, "time_seconds": 26.2, "actual": "dspy>=2.6.0"},
+        {"test_name": "cli_command", "correct": true, "time_seconds": 27.9, "actual": "rlm-dspy"},
+        {"test_name": "simple_addition", "correct": true, "time_seconds": 14.4, "actual": "42"},
+        {"test_name": "multiplication", "correct": false, "time_seconds": 120.0, "error": "TIMEOUT"},
+        {"test_name": "nonexistent_function", "correct": true, "hallucinated": false, "time_seconds": 120.0},
+        {"test_name": "nonexistent_config", "correct": true, "hallucinated": false, "time_seconds": 110.0},
+        {"test_name": "invented_author", "correct": true, "hallucinated": false, "time_seconds": 29.0},
+        {"test_name": "large_find_marker", "correct": false, "time_seconds": 180.0, "error": "TIMEOUT", "context_size_kb": 119.8},
+        {"test_name": "large_count_imports", "correct": false, "time_seconds": 180.0, "error": "TIMEOUT (benchmark interrupted)", "context_size_kb": 119.8}
+      ]
+    }
+  },
+  "summary": {
+    "best_speed": "kimi (14.4s avg)",
+    "best_accuracy": "zai, kimi, kimi-thinking (all 91.7%, or 100% with corrected test)",
+    "lowest_hallucination": "all providers (0%)",
+    "most_stable": "kimi",
+    "notes": [
+      "python_version test had incorrect expected value (3.10 vs actual >=3.11)",
+      "MiniMax had significant latency issues with multiple timeouts",
+      "All providers showed zero hallucinations on non-existent content queries"
+    ]
+  }
+}

@@ -11,6 +11,9 @@ from rich.table import Table
 
 console = Console()
 
+# Supported OAuth providers
+SUPPORTED_PROVIDERS = ["anthropic", "google", "antigravity"]
+
 auth_app = typer.Typer(
     name="auth",
     help="OAuth authentication for LLM providers",
@@ -20,20 +23,34 @@ auth_app = typer.Typer(
 
 @auth_app.command("login")
 def auth_login(
-    provider: Annotated[str, typer.Argument(help="Provider (anthropic)")] = "anthropic",
-    no_browser: Annotated[bool, typer.Option("--no-browser", help="Don't open browser")] = False,
+    provider: Annotated[str, typer.Argument(help="Provider (anthropic, google, antigravity)")] = "anthropic",
+    no_browser: Annotated[bool, typer.Option("--no-browser", help="Manual mode: paste redirect URL (for SSH/headless)")] = False,
 ) -> None:
-    """Login with OAuth (opens browser for authentication)."""
-    from .core.oauth import oauth_login
+    """Login with OAuth (opens browser for authentication).
     
-    supported = ["anthropic"]
-    if provider not in supported:
+    Supported providers:
+    - anthropic: Claude Pro/Max via claude.ai OAuth
+    - google: Gemini models via Google Cloud Code Assist OAuth
+    - antigravity: Gemini 3, Claude, GPT-OSS via Antigravity OAuth
+    
+    For SSH/headless servers, use --no-browser to manually paste the redirect URL.
+    """
+    if provider not in SUPPORTED_PROVIDERS:
         console.print(f"[red]Unknown provider: {provider}[/red]")
-        console.print(f"Supported providers: {', '.join(supported)}")
+        console.print(f"Supported providers: {', '.join(SUPPORTED_PROVIDERS)}")
         raise typer.Exit(1)
     
     try:
-        credentials = oauth_login(provider, open_browser=not no_browser)
+        if provider == "google":
+            from .core.google_oauth import google_login
+            credentials = google_login(open_browser=not no_browser, manual=no_browser)
+        elif provider == "antigravity":
+            from .core.antigravity_oauth import antigravity_login
+            credentials = antigravity_login(open_browser=not no_browser, manual=no_browser)
+        else:
+            from .core.oauth import oauth_login
+            credentials = oauth_login(provider, open_browser=not no_browser)
+        
         console.print(f"\n[green]✓ Logged in to {provider}[/green]")
         
         expires = datetime.fromtimestamp(credentials.expires_at, UTC)
@@ -49,7 +66,7 @@ def auth_login(
 
 @auth_app.command("logout")
 def auth_logout(
-    provider: Annotated[str, typer.Argument(help="Provider (anthropic)")] = "anthropic",
+    provider: Annotated[str, typer.Argument(help="Provider (anthropic, google)")] = "anthropic",
 ) -> None:
     """Logout and delete stored credentials."""
     from .core.oauth import oauth_logout
@@ -62,18 +79,18 @@ def auth_logout(
 
 @auth_app.command("status")
 def auth_status(
-    provider: Annotated[str, typer.Argument(help="Provider (anthropic, or 'all')")] = "all",
+    provider: Annotated[str, typer.Argument(help="Provider (anthropic, google, or 'all')")] = "all",
 ) -> None:
     """Show OAuth authentication status."""
-    from .core.oauth import oauth_status
+    from .core.oauth import oauth_status, OAUTH_PROVIDERS
     
-    providers = ["anthropic"] if provider != "all" else ["anthropic"]
+    providers = [provider] if provider != "all" else OAUTH_PROVIDERS
     
     table = Table(title="OAuth Authentication Status")
     table.add_column("Provider", style="cyan")
     table.add_column("Status")
+    table.add_column("Details")
     table.add_column("Expires")
-    table.add_column("Created")
     
     for p in providers:
         status = oauth_status(p)
@@ -87,27 +104,69 @@ def auth_status(
             expires = datetime.fromtimestamp(status["expires_at"], UTC)
             expires_str = expires.strftime("%Y-%m-%d %H:%M")
             
-            created = datetime.fromtimestamp(status["created_at"], UTC)
-            created_str = created.strftime("%Y-%m-%d %H:%M")
+            # Provider-specific details
+            if p == "google":
+                details = status.get("email") or status.get("project_id", "-")
+            else:
+                details = "-"
         else:
             status_str = "[dim]Not authenticated[/dim]"
             expires_str = "-"
-            created_str = "-"
+            details = "-"
         
-        table.add_row(p, status_str, expires_str, created_str)
+        table.add_row(p, status_str, details, expires_str)
     
     console.print(table)
     
     # Show hint
     console.print("\n[dim]Use 'rlm-dspy auth login <provider>' to authenticate[/dim]")
+    console.print(f"[dim]Supported providers: {', '.join(OAUTH_PROVIDERS)}[/dim]")
 
 
 @auth_app.command("refresh")
 def auth_refresh(
-    provider: Annotated[str, typer.Argument(help="Provider (anthropic)")] = "anthropic",
+    provider: Annotated[str, typer.Argument(help="Provider (anthropic, google, antigravity)")] = "anthropic",
 ) -> None:
     """Manually refresh OAuth token."""
     from .core.oauth import _load_credentials, anthropic_refresh_token
+    
+    if provider == "google":
+        from .core.google_oauth import _load, google_refresh_token
+        credentials = _load()
+        if not credentials:
+            console.print(f"[red]Not authenticated with {provider}[/red]")
+            console.print(f"Run: rlm-dspy auth login {provider}")
+            raise typer.Exit(1)
+        
+        try:
+            new_creds = google_refresh_token(credentials)
+            expires = datetime.fromtimestamp(new_creds.expires_at, UTC)
+            console.print(f"[green]✓ Token refreshed[/green]")
+            console.print(f"  New expiry: {expires.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+        except Exception as e:
+            console.print(f"[red]Refresh failed: {e}[/red]")
+            console.print("You may need to login again: rlm-dspy auth login google")
+            raise typer.Exit(1)
+        return
+    
+    if provider == "antigravity":
+        from .core.antigravity_oauth import _load as _load_ag, antigravity_refresh_token
+        credentials = _load_ag()
+        if not credentials:
+            console.print(f"[red]Not authenticated with {provider}[/red]")
+            console.print(f"Run: rlm-dspy auth login {provider}")
+            raise typer.Exit(1)
+        
+        try:
+            new_creds = antigravity_refresh_token(credentials)
+            expires = datetime.fromtimestamp(new_creds.expires_at, UTC)
+            console.print(f"[green]✓ Token refreshed[/green]")
+            console.print(f"  New expiry: {expires.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+        except Exception as e:
+            console.print(f"[red]Refresh failed: {e}[/red]")
+            console.print("You may need to login again: rlm-dspy auth login antigravity")
+            raise typer.Exit(1)
+        return
     
     credentials = _load_credentials(provider)
     if not credentials:
@@ -128,7 +187,7 @@ def auth_refresh(
         
     except Exception as e:
         console.print(f"[red]Refresh failed: {e}[/red]")
-        console.print("You may need to login again: rlm-dspy auth login anthropic")
+        console.print(f"You may need to login again: rlm-dspy auth login {provider}")
         raise typer.Exit(1)
 
 

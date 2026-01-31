@@ -80,8 +80,17 @@ def _get_config(model=None, sub_model=None, budget=None, timeout=None,
     return config
 
 
-def _load_context(rlm, paths, stdin, verbose, max_tokens=None, use_cache=True):
-    """Load context from stdin or file paths."""
+def _load_context(rlm, paths, stdin, verbose, max_tokens=None, use_cache=True, model=None):
+    """Load context from stdin or file paths.
+    
+    RLM is designed to handle arbitrarily large contexts via its REPL environment.
+    The LLM only sees a preview (500 chars) and metadata, then explores the full
+    context via code. We only truncate if explicitly requested via --max-tokens.
+    """
+    # Note: RLM handles large contexts by design - only truncate if explicitly requested
+    if max_tokens is not None and verbose:
+        console.print(f"[dim]Context will be truncated to {max_tokens:,} tokens[/dim]")
+    
     if stdin:
         if sys.stdin.isatty():
             console.print("[yellow]Reading from stdin (Ctrl+D when done)...[/yellow]")
@@ -214,7 +223,7 @@ def register_commands(app: typer.Typer) -> None:
 
         from .core.rlm import RLM
         rlm = RLM(config=config, signature=sig, use_tools=not no_tools)
-        context = _load_context(rlm, paths, stdin, verbose or debug, max_tokens, not no_cache)
+        context = _load_context(rlm, paths, stdin, verbose or debug, max_tokens, not no_cache, config.model)
 
         if dry_run:
             from .core.validation import preflight_check
@@ -235,13 +244,21 @@ def register_commands(app: typer.Typer) -> None:
                 raise typer.Exit(1)
 
         if validate and result.success:
-            from .guards import validate_groundedness
+            from .guards import validate_trajectory
             console.print("\n[dim]Validating output...[/dim]")
-            validation = validate_groundedness(result.answer, context, query)
+            
+            # Use fast trajectory-based validation
+            # This checks if answer terms appeared in code execution outputs
+            validation = validate_trajectory(result)
+            grounded_score = validation.score
+            
             if validation.is_grounded:
-                console.print(f"[green]✓ Output validated ({validation.score:.0%} grounded)[/green]")
+                console.print(f"[green]✓ Output validated ({validation.score:.0%} grounded in trajectory)[/green]")
             else:
-                console.print(f"[yellow]⚠ Potential hallucinations ({validation.score:.0%} grounded)[/yellow]")
+                console.print(f"[yellow]⚠ Potential issues ({validation.score:.0%} grounded)[/yellow]")
+                if validation.missing_terms:
+                    missing_sample = validation.missing_terms[:5]
+                    console.print(f"[dim]  Terms not found in execution: {', '.join(missing_sample)}[/dim]")
 
             # Record trace for future optimization
             try:
@@ -254,7 +271,7 @@ def register_commands(app: typer.Typer) -> None:
                     code_blocks=metadata.get("code_blocks", []),
                     outputs=metadata.get("outputs", []),
                     final_answer=result.answer,
-                    grounded_score=validation.score,
+                    grounded_score=grounded_score,
                 )
             except Exception:
                 pass  # Don't fail on trace recording errors
@@ -271,12 +288,14 @@ def register_commands(app: typer.Typer) -> None:
     ) -> None:
         """Generate a comprehensive analysis of files."""
         from .core.rlm import RLM
+        
         config = _get_config(model)
         rlm = RLM(config=config)
 
         with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"),
                       console=console) as progress:
             progress.add_task("Loading...", total=None)
+            # RLM handles large contexts via REPL - no need to truncate
             context = rlm.load_context([str(p) for p in paths])
 
             progress.add_task("Analyzing...", total=None)
@@ -358,6 +377,7 @@ def register_commands(app: typer.Typer) -> None:
         context = None
         if paths:
             rlm = RLM(config=config)
+            # RLM handles large contexts via REPL - no need to truncate
             context = rlm.load_context([str(p) for p in paths])
 
         result = preflight_check(api_key_required=True, model=config.model, 

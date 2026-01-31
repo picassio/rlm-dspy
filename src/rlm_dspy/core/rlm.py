@@ -191,44 +191,226 @@ VERIFICATION RULES:
             return WrappedSignature
 
     def _setup_dspy(self) -> None:
-        lm_kwargs: dict[str, Any] = {"model": self.config.model, "api_key": self.config.api_key}
+        from .models import find_model
+        
+        lm_kwargs: dict[str, Any] = {"api_key": self.config.api_key}
         if self.config.api_base:
             lm_kwargs["api_base"] = self.config.api_base
         
-        # Check for Anthropic OAuth token
-        api_key = self.config.api_key
-        if self.config.model.startswith("anthropic/") and not api_key:
-            from .anthropic_oauth_lm import get_anthropic_api_key, is_oauth_token, CLAUDE_CODE_HEADERS
-            oauth_key = get_anthropic_api_key()
-            if oauth_key:
-                api_key = oauth_key
-                lm_kwargs["api_key"] = api_key
-                if is_oauth_token(oauth_key):
-                    _logger.info("Using Anthropic OAuth token (Claude Pro/Max)")
-                    lm_kwargs["extra_headers"] = CLAUDE_CODE_HEADERS
+        # Set max_tokens based on model's capability
+        model_info = find_model(self.config.model)
+        if model_info:
+            lm_kwargs["max_tokens"] = model_info.max_tokens
+            _logger.debug(f"Using max_tokens={model_info.max_tokens} for {model_info.name}")
         
-        self._lm = dspy.LM(**lm_kwargs)
+        # Check for Anthropic models - may need OAuth or different API key handling
+        # LiteLLM has a bug where it sends OAuth tokens as x-api-key which fails
+        if self.config.model.startswith("anthropic/"):
+            from .anthropic_oauth_lm import get_anthropic_api_key, is_oauth_token, AnthropicOAuthLM
+            
+            # Check if the configured api_key is actually an Anthropic key
+            api_key = self.config.api_key
+            is_anthropic_key = api_key and (
+                api_key.startswith("sk-ant-api") or 
+                api_key.startswith("sk-ant-oat")
+            )
+            
+            if not is_anthropic_key:
+                # Try to get an Anthropic-specific key/token
+                api_key = get_anthropic_api_key()
+            
+            if api_key:
+                if is_oauth_token(api_key):
+                    _logger.info("Using Anthropic OAuth token (Claude Pro/Max)")
+                    # Use custom LM that bypasses LiteLLM for OAuth
+                    model_id = self.config.model.split("/", 1)[1]
+                    self._lm = AnthropicOAuthLM(model_id, auth_token=api_key)
+                    dspy.settings.configure(async_max_workers=self.config.max_workers, num_threads=self.config.max_workers)
+                    return
+                else:
+                    # Regular Anthropic API key
+                    lm_kwargs["api_key"] = api_key
+        
+        # Check for Google models - may need OAuth
+        # LiteLLM doesn't support OAuth tokens for Google, so we use our custom LM
+        if self.config.model.startswith("google/"):
+            from .google_oauth import get_google_token
+            from .google_oauth_lm import GoogleOAuthLM
+            
+            google_creds = get_google_token()
+            if google_creds:
+                token, project_id = google_creds
+                _logger.info("Using Google OAuth token (Gemini CLI)")
+                model_id = self.config.model.split("/", 1)[1]
+                max_tokens = model_info.max_tokens if model_info else 8192
+                self._lm = GoogleOAuthLM(model_id, auth_token=token, project_id=project_id, max_tokens=max_tokens)
+                dspy.settings.configure(async_max_workers=self.config.max_workers, num_threads=self.config.max_workers)
+                return
+        
+        # Check for Antigravity models - use custom LM
+        if self.config.model.startswith("antigravity/"):
+            from .antigravity_oauth import get_antigravity_token
+            from .antigravity_lm import AntigravityLM
+            
+            ag_creds = get_antigravity_token()
+            if ag_creds:
+                token, project_id = ag_creds
+                _logger.info("Using Antigravity OAuth token")
+                model_id = self.config.model.split("/", 1)[1]
+                max_tokens = model_info.max_tokens if model_info else 8192
+                self._lm = AntigravityLM(model_id, auth_token=token, project_id=project_id, max_tokens=max_tokens)
+                dspy.settings.configure(async_max_workers=self.config.max_workers, num_threads=self.config.max_workers)
+                return
+        
+        # Check for MiniMax models - use custom LM with Anthropic-compatible API
+        if self.config.model.startswith("minimax/"):
+            from .minimax_lm import MiniMaxLM
+            
+            model_id = self.config.model.split("/", 1)[1]
+            max_tokens = model_info.max_tokens if model_info else 8192
+            china = "-cn" in self.config.model.lower()
+            self._lm = MiniMaxLM(model_id, max_tokens=max_tokens, china=china)
+            dspy.settings.configure(async_max_workers=self.config.max_workers, num_threads=self.config.max_workers)
+            return
+        
+        # Check for OpenCode models (GLM) - use custom LM with OpenAI-compatible API
+        if self.config.model.startswith("opencode/"):
+            from .opencode_lm import OpenCodeLM
+            
+            model_id = self.config.model.split("/", 1)[1]
+            max_tokens = model_info.max_tokens if model_info else 8192
+            self._lm = OpenCodeLM(model_id, max_tokens=max_tokens)
+            dspy.settings.configure(async_max_workers=self.config.max_workers, num_threads=self.config.max_workers)
+            return
+        
+        # Check for Z.AI models (GLM) - native Zhipu provider
+        if self.config.model.startswith("zai/"):
+            from .zai_lm import ZaiLM
+            
+            model_id = self.config.model.split("/", 1)[1]
+            max_tokens = model_info.max_tokens if model_info else 8192
+            self._lm = ZaiLM(model_id, max_tokens=max_tokens)
+            dspy.settings.configure(async_max_workers=self.config.max_workers, num_threads=self.config.max_workers)
+            return
+        
+        # Check for Kimi models - Anthropic-compatible API
+        if self.config.model.startswith("kimi/"):
+            from .kimi_lm import KimiLM
+            
+            model_id = self.config.model.split("/", 1)[1]
+            max_tokens = model_info.max_tokens if model_info else 8192
+            self._lm = KimiLM(model_id, max_tokens=max_tokens)
+            dspy.settings.configure(async_max_workers=self.config.max_workers, num_threads=self.config.max_workers)
+            return
+        
+        self._lm = dspy.LM(model=self.config.model, **lm_kwargs)
         dspy.settings.configure(async_max_workers=self.config.max_workers, num_threads=self.config.max_workers)
 
     def _create_sub_lm(self) -> dspy.LM | None:
         if self.config.sub_model == self.config.model:
             return None
-        lm_kwargs: dict[str, Any] = {"model": self.config.sub_model, "api_key": self.config.api_key}
+        
+        from .models import find_model
+        
+        lm_kwargs: dict[str, Any] = {"api_key": self.config.api_key}
         if self.config.api_base:
             lm_kwargs["api_base"] = self.config.api_base
         
-        # Check for Anthropic OAuth token for sub model
-        api_key = self.config.api_key
-        if self.config.sub_model.startswith("anthropic/") and not api_key:
-            from .anthropic_oauth_lm import get_anthropic_api_key, is_oauth_token, CLAUDE_CODE_HEADERS
-            oauth_key = get_anthropic_api_key()
-            if oauth_key:
-                api_key = oauth_key
-                lm_kwargs["api_key"] = api_key
-                if is_oauth_token(oauth_key):
-                    lm_kwargs["extra_headers"] = CLAUDE_CODE_HEADERS
+        # Set max_tokens based on model's capability
+        model_info = find_model(self.config.sub_model)
+        if model_info:
+            lm_kwargs["max_tokens"] = model_info.max_tokens
         
-        return dspy.LM(**lm_kwargs)
+        # Check for Anthropic sub model - may need OAuth
+        if self.config.sub_model.startswith("anthropic/"):
+            from .anthropic_oauth_lm import get_anthropic_api_key, is_oauth_token, AnthropicOAuthLM
+            
+            # Check if the configured api_key is actually an Anthropic key
+            api_key = self.config.api_key
+            is_anthropic_key = api_key and (
+                api_key.startswith("sk-ant-api") or 
+                api_key.startswith("sk-ant-oat")
+            )
+            
+            if not is_anthropic_key:
+                api_key = get_anthropic_api_key()
+            
+            if api_key and is_oauth_token(api_key):
+                model_id = self.config.sub_model.split("/", 1)[1]
+                return AnthropicOAuthLM(model_id, auth_token=api_key)
+            elif api_key:
+                lm_kwargs["api_key"] = api_key
+        
+        # Check for Google sub model - may need OAuth
+        if self.config.sub_model.startswith("google/"):
+            from .google_oauth import get_google_token
+            from .google_oauth_lm import GoogleOAuthLM
+            
+            google_creds = get_google_token()
+            if google_creds:
+                token, project_id = google_creds
+                model_id = self.config.sub_model.split("/", 1)[1]
+                from .models import find_model
+                model_info = find_model(self.config.sub_model)
+                max_tokens = model_info.max_tokens if model_info else 8192
+                return GoogleOAuthLM(model_id, auth_token=token, project_id=project_id, max_tokens=max_tokens)
+        
+        # Check for Antigravity sub model - may need OAuth
+        if self.config.sub_model.startswith("antigravity/"):
+            from .antigravity_oauth import get_antigravity_token
+            from .antigravity_lm import AntigravityLM
+            
+            ag_creds = get_antigravity_token()
+            if ag_creds:
+                token, project_id = ag_creds
+                model_id = self.config.sub_model.split("/", 1)[1]
+                from .models import find_model
+                model_info = find_model(self.config.sub_model)
+                max_tokens = model_info.max_tokens if model_info else 8192
+                return AntigravityLM(model_id, auth_token=token, project_id=project_id, max_tokens=max_tokens)
+        
+        # Check for MiniMax sub model
+        if self.config.sub_model.startswith("minimax/"):
+            from .minimax_lm import MiniMaxLM
+            
+            model_id = self.config.sub_model.split("/", 1)[1]
+            from .models import find_model
+            model_info = find_model(self.config.sub_model)
+            max_tokens = model_info.max_tokens if model_info else 8192
+            china = "-cn" in self.config.sub_model.lower()
+            return MiniMaxLM(model_id, max_tokens=max_tokens, china=china)
+        
+        # Check for OpenCode sub model (GLM)
+        if self.config.sub_model.startswith("opencode/"):
+            from .opencode_lm import OpenCodeLM
+            
+            model_id = self.config.sub_model.split("/", 1)[1]
+            from .models import find_model
+            model_info = find_model(self.config.sub_model)
+            max_tokens = model_info.max_tokens if model_info else 8192
+            return OpenCodeLM(model_id, max_tokens=max_tokens)
+        
+        # Check for Z.AI sub model (GLM)
+        if self.config.sub_model.startswith("zai/"):
+            from .zai_lm import ZaiLM
+            
+            model_id = self.config.sub_model.split("/", 1)[1]
+            from .models import find_model
+            model_info = find_model(self.config.sub_model)
+            max_tokens = model_info.max_tokens if model_info else 8192
+            return ZaiLM(model_id, max_tokens=max_tokens)
+        
+        # Check for Kimi sub model
+        if self.config.sub_model.startswith("kimi/"):
+            from .kimi_lm import KimiLM
+            
+            model_id = self.config.sub_model.split("/", 1)[1]
+            from .models import find_model
+            model_info = find_model(self.config.sub_model)
+            max_tokens = model_info.max_tokens if model_info else 8192
+            return KimiLM(model_id, max_tokens=max_tokens)
+        
+        return dspy.LM(model=self.config.sub_model, **lm_kwargs)
 
     def _get_or_create_interpreter(self):
         if self._interpreter is not None:
