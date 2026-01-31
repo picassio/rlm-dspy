@@ -131,21 +131,23 @@ def index_code(path: str, kind: str | None = None, name: str | None = None) -> s
             files = files[:200]
             idx = index_files(files)
 
+        # Filter definitions manually (ASTIndex doesn't have filter method)
+        definitions = idx.definitions
         if kind:
-            idx = idx.filter(kind=kind)
+            definitions = [d for d in definitions if d.kind == kind]
         if name:
-            idx = idx.filter(name=name)
+            definitions = [d for d in definitions if name.lower() in d.name.lower()]
 
-        if not idx or not idx.definitions:
+        if not definitions:
             return "(no definitions found)"
 
         output = []
-        for d in idx.definitions[:100]:
+        for d in definitions[:100]:
             parent_info = f" ({d.parent})" if d.parent else ""
             output.append(f"{d.file}:{d.line} | {d.kind}: {d.name}{parent_info}")
 
-        if len(idx.definitions) > 100:
-            output.append(f"... ({len(idx.definitions) - 100} more)")
+        if len(definitions) > 100:
+            output.append(f"... ({len(definitions) - 100} more)")
 
         return '\n'.join(output)
     except Exception as e:

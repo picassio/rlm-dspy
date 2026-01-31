@@ -368,7 +368,7 @@ class ProjectRegistry:
             name = f"{base_name}-{counter}"
             counter += 1
         try:
-            return self.add(name, path)
+            return self.add(path, name)
         except ValueError:
             return None
 
