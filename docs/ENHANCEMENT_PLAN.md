@@ -82,9 +82,9 @@ max_timeout: 600
 # List of MCP servers to auto-connect
 # mcp_servers:
 #   - name: filesystem
-#     command: npx @anthropic/mcp-server-filesystem /path/to/allowed/dir
+#     command: npx @modelcontextprotocol/server-filesystem /path/to/allowed/dir
 #   - name: github
-#     command: npx @anthropic/mcp-server-github
+#     command: npx @modelcontextprotocol/server-github
 
 # ============================================================================
 # API Key Location
@@ -100,7 +100,7 @@ env_file: ~/.env
 # ============================================================================
 OPENAI_API_KEY=sk-...
 OPENROUTER_API_KEY=sk-or-v1-...
-ANTHROPIC_API_KEY=sk-ant-...
+DEEPSEEK_API_KEY=sk-...
 
 # ============================================================================
 # Embedding API Keys (may be same as LLM keys)
@@ -1209,9 +1209,9 @@ MCP allows connecting to external tools (filesystem, GitHub, databases, etc.) vi
 # MCP Settings (optional)
 mcp_servers:
   - name: filesystem
-    command: npx @anthropic/mcp-server-filesystem /path/to/allowed/dir
+    command: npx @modelcontextprotocol/server-filesystem /path/to/allowed/dir
   - name: github
-    command: npx @anthropic/mcp-server-github
+    command: npx @modelcontextprotocol/server-github
     env:
       GITHUB_TOKEN: ${GITHUB_TOKEN}
 ```

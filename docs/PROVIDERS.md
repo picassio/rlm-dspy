@@ -30,14 +30,6 @@ rlm-dspy ask "..." ./src --model openai/gpt-4o-mini
 rlm-dspy ask "..." ./src --model openai/o1-preview
 ```
 
-### Anthropic
-```bash
-export ANTHROPIC_API_KEY="sk-ant-..."
-rlm-dspy ask "..." ./src --model anthropic/claude-sonnet-4-20250514
-rlm-dspy ask "..." ./src --model anthropic/claude-3-5-sonnet-20241022
-rlm-dspy ask "..." ./src --model anthropic/claude-3-haiku-20240307
-```
-
 ### Google (Gemini)
 ```bash
 export GEMINI_API_KEY="..."
@@ -108,8 +100,8 @@ rlm-dspy ask "..." ./src \
 ```bash
 # Uses AWS credentials from environment or ~/.aws/credentials
 export AWS_REGION="us-east-1"
-rlm-dspy ask "..." ./src --model bedrock/anthropic.claude-3-sonnet-20240229-v1:0
 rlm-dspy ask "..." ./src --model bedrock/amazon.nova-pro-v1:0
+rlm-dspy ask "..." ./src --model bedrock/amazon.titan-text-express-v1
 ```
 
 ### Azure OpenAI
@@ -163,8 +155,8 @@ rlm-dspy ask "..." ./src \
 ### OpenRouter
 ```bash
 export OPENROUTER_API_KEY="sk-or-..."
-rlm-dspy ask "..." ./src --model openrouter/anthropic/claude-3.5-sonnet
 rlm-dspy ask "..." ./src --model openrouter/google/gemini-pro
+rlm-dspy ask "..." ./src --model openrouter/deepseek/deepseek-chat
 ```
 
 ### Together AI
@@ -211,7 +203,6 @@ rlm-dspy ask "..." ./src \
 | Provider | Environment Variable | Example |
 |----------|---------------------|---------|
 | OpenAI | `OPENAI_API_KEY` | `sk-...` |
-| Anthropic | `ANTHROPIC_API_KEY` | `sk-ant-...` |
 | Google | `GEMINI_API_KEY` | `AI...` |
 | DeepSeek | `DEEPSEEK_API_KEY` | `sk-...` |
 | Moonshot | `MOONSHOT_API_KEY` | `sk-...` |
@@ -243,7 +234,7 @@ rlm = RLM(RLMConfig(
 
 # Moonshot/Kimi
 rlm = RLM(RLMConfig(
-    model="moonshot/kimi-latest",
+    model="kimi/k2p5",
     api_key="sk-..."
 ))
 
@@ -264,7 +255,7 @@ result = rlm.query("What does this code do?", code_content)
 
 RLM-DSPY supports all providers available in LiteLLM:
 
-- **Major**: OpenAI, Anthropic, Google (Gemini), Cohere, AI21
+- **Major**: OpenAI, Google (Gemini), Cohere, AI21
 - **Chinese**: DeepSeek, Moonshot/Kimi, MiniMax, Qwen/Dashscope, ZhiPu/GLM
 - **Cloud**: AWS Bedrock, Azure, Google Vertex AI, Databricks
 - **Open Source**: Ollama, vLLM, LM Studio, Hugging Face

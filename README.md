@@ -304,9 +304,9 @@ RLM-DSPy supports **100+ LLM providers** via LiteLLM:
 export OPENAI_API_KEY="sk-..."
 rlm-dspy ask "..." ./src --model openai/gpt-4o
 
-# Anthropic
-export ANTHROPIC_API_KEY="sk-ant-..."
-rlm-dspy ask "..." ./src --model anthropic/claude-sonnet-4-20250514
+# DeepSeek
+export DEEPSEEK_API_KEY="sk-..."
+rlm-dspy ask "..." ./src --model deepseek/deepseek-chat
 
 # DeepSeek
 export DEEPSEEK_API_KEY="sk-..."
@@ -404,7 +404,6 @@ env_file: ~/.env
 | Model Prefix | Environment Variable |
 |--------------|---------------------|
 | `openai/` | `OPENAI_API_KEY` |
-| `anthropic/` | `ANTHROPIC_API_KEY` |
 | `deepseek/` | `DEEPSEEK_API_KEY` |
 | `gemini/` | `GEMINI_API_KEY` |
 | `groq/` | `GROQ_API_KEY` |
