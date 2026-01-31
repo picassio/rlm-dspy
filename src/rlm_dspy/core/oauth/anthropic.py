@@ -61,24 +61,27 @@ class AnthropicProvider(OAuthProvider):
         redirects to console.anthropic.com, not localhost.
         """
         verifier, challenge = generate_pkce()
-        state = generate_state()
         
-        # Build authorization URL
+        # Build authorization URL (use verifier as state for simplicity)
         params = {
+            "code": "true",
             "client_id": self.config.client_id,
-            "redirect_uri": self.config.redirect_uri,
             "response_type": "code",
+            "redirect_uri": self.config.redirect_uri,
             "scope": " ".join(self.config.scopes),
-            "state": state,
             "code_challenge": challenge,
             "code_challenge_method": "S256",
+            "state": verifier,
         }
         
         auth_url = f"{self.config.auth_url}?{urlencode(params)}"
         
         # Open browser
-        print(f"\nOpening browser for Anthropic authentication...")
-        print(f"If browser doesn't open, visit:\n{auth_url}\n")
+        print("\n" + "=" * 60)
+        print("Anthropic OAuth Login (Claude Pro/Max)")
+        print("=" * 60)
+        print("\nOpening browser for authentication...")
+        print(f"\nIf browser doesn't open, visit:\n{auth_url}\n")
         
         try:
             webbrowser.open(auth_url)
@@ -86,15 +89,26 @@ class AnthropicProvider(OAuthProvider):
             pass
         
         # Ask user to paste the authorization code
-        print("After authorizing, you'll be redirected to a page with a code.")
-        print("Copy the 'code' parameter from the URL and paste it here.\n")
+        print("After authorizing, you'll see a page with an authorization code.")
+        print("Copy the FULL code (format: CODE#STATE) and paste it below.\n")
         
-        code = input("Authorization code: ").strip()
-        if not code:
+        try:
+            auth_code = input("Authorization code: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            raise AuthenticationError("Authentication cancelled by user")
+        
+        if not auth_code:
             raise AuthenticationError("No authorization code provided")
         
+        # Parse code and state (format: CODE#STATE)
+        if "#" in auth_code:
+            code, state = auth_code.split("#", 1)
+        else:
+            code = auth_code
+            state = verifier
+        
         # Exchange code for tokens
-        credentials = self._exchange_code(code, verifier)
+        credentials = self._exchange_code(code, state, verifier)
         
         # Save credentials
         save_credentials(credentials)
@@ -102,21 +116,23 @@ class AnthropicProvider(OAuthProvider):
         print(f"\n✓ Authenticated with Anthropic!")
         return credentials
     
-    def _exchange_code(self, code: str, verifier: str) -> OAuthCredentials:
+    def _exchange_code(self, code: str, state: str, verifier: str) -> OAuthCredentials:
         """Exchange authorization code for tokens."""
-        data = {
+        # Anthropic expects JSON payload, not form-encoded
+        payload = {
             "grant_type": "authorization_code",
             "client_id": self.config.client_id,
-            "redirect_uri": self.config.redirect_uri,
             "code": code,
+            "state": state,
+            "redirect_uri": self.config.redirect_uri,
             "code_verifier": verifier,
         }
         
         try:
             response = httpx.post(
                 self.config.token_url,
-                data=data,
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                json=payload,
+                headers={"Content-Type": "application/json"},
                 timeout=30,
             )
             
@@ -133,14 +149,14 @@ class AnthropicProvider(OAuthProvider):
         except httpx.HTTPError as e:
             raise AuthenticationError(f"Token exchange failed: {e}")
         
-        # Create credentials
+        # Create credentials (with 5 min buffer like old code)
         expires_in = token_data.get("expires_in", 3600)
         
         return OAuthCredentials(
             provider=self.config.provider_name,
             access_token=token_data["access_token"],
             refresh_token=token_data.get("refresh_token", ""),
-            expires_at=time.time() + expires_in,
+            expires_at=time.time() + expires_in - 300,
         )
     
     def refresh(self, credentials: OAuthCredentials) -> OAuthCredentials:
@@ -148,7 +164,8 @@ class AnthropicProvider(OAuthProvider):
         if not credentials.refresh_token:
             raise TokenRefreshError("No refresh token available")
         
-        data = {
+        # Anthropic expects JSON payload
+        payload = {
             "grant_type": "refresh_token",
             "client_id": self.config.client_id,
             "refresh_token": credentials.refresh_token,
@@ -157,8 +174,8 @@ class AnthropicProvider(OAuthProvider):
         try:
             response = httpx.post(
                 self.config.token_url,
-                data=data,
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                json=payload,
+                headers={"Content-Type": "application/json"},
                 timeout=30,
             )
             
@@ -175,9 +192,10 @@ class AnthropicProvider(OAuthProvider):
         except httpx.HTTPError as e:
             raise TokenRefreshError(f"Token refresh failed: {e}")
         
-        # Update credentials
+        # Update credentials (with 5 min buffer)
+        expires_in = token_data.get("expires_in", 3600)
         credentials.access_token = token_data["access_token"]
-        credentials.expires_at = time.time() + token_data.get("expires_in", 3600)
+        credentials.expires_at = time.time() + expires_in - 300
         
         # Update refresh token if provided
         if new_refresh := token_data.get("refresh_token"):
@@ -185,6 +203,8 @@ class AnthropicProvider(OAuthProvider):
         
         # Save updated credentials
         save_credentials(credentials)
+        
+        logger.info("Refreshed Anthropic OAuth token")
         
         return credentials
     
