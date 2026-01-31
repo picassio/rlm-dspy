@@ -220,6 +220,68 @@ def check_context_size(context: str) -> ValidationResult:
     )
 
 
+def check_interpreter() -> ValidationResult:
+    """Check if Deno interpreter is available.
+    
+    DSPy's RLM uses Deno for code execution. Without Deno,
+    the REPL loop won't work.
+    """
+    import shutil
+    import subprocess
+    from pathlib import Path
+    
+    # Check common locations
+    deno_paths = [
+        shutil.which("deno"),  # In PATH
+        Path.home() / ".deno" / "bin" / "deno",  # Default install location
+        Path("/usr/local/bin/deno"),
+        Path("/usr/bin/deno"),
+    ]
+    
+    deno_path = None
+    for path in deno_paths:
+        if path and Path(path).exists():
+            deno_path = path
+            break
+    
+    if not deno_path:
+        return ValidationResult(
+            name="Interpreter",
+            passed=False,
+            message="Deno not found",
+            severity="error",
+            suggestion="Install Deno: curl -fsSL https://deno.land/install.sh | sh",
+        )
+    
+    # Try to get version
+    try:
+        result = subprocess.run(
+            [str(deno_path), "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            # Extract version from first line
+            version_line = result.stdout.split("\n")[0]
+            version = version_line.replace("deno ", "").strip()
+            return ValidationResult(
+                name="Interpreter",
+                passed=True,
+                message=f"Deno {version}",
+            )
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+    
+    return ValidationResult(
+        name="Interpreter",
+        passed=True,
+        message=f"Deno found at {deno_path}",
+        severity="warning",
+        suggestion="Could not verify Deno version",
+    )
+
+
 def preflight_check(
     api_key_required: bool = True,
     model: str | None = None,
@@ -227,6 +289,7 @@ def preflight_check(
     budget: float | None = None,
     context: str | None = None,
     check_network: bool = True,
+    check_interpreter: bool = True,
 ) -> PreflightResult:
     """
     Run all preflight checks before an expensive operation.
@@ -238,6 +301,7 @@ def preflight_check(
         budget: Budget to validate
         context: Context string to check size
         check_network: Whether to check API endpoint
+        check_interpreter: Whether to check Deno availability
 
     Returns:
         PreflightResult with all check results
@@ -250,6 +314,12 @@ def preflight_check(
     # Model format
     if model:
         result.add(check_model_format(model))
+
+    # Interpreter (Deno)
+    if check_interpreter:
+        # Import here to avoid name collision with parameter
+        from . import validation as val_module
+        result.add(val_module.check_interpreter())
 
     # API endpoint (optional, can be slow)
     if check_network and api_base:
