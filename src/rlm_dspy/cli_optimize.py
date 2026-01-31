@@ -198,10 +198,12 @@ def optimize_simba(
     from .core.simba_optimizer import get_simba_optimizer, create_training_example
 
     collector = get_trace_collector()
-    traces = collector.list_traces(min_score=min_score, limit=max_examples)
+    # Filter traces by grounded_score
+    all_traces = list(collector.traces)
+    traces = [t for t in all_traces if t.grounded_score >= min_score][:max_examples]
 
     if not traces:
-        console.print("[yellow]No traces found with score >= {min_score}[/yellow]")
+        console.print(f"[yellow]No traces found with score >= {min_score}[/yellow]")
         console.print("Run some queries first to collect training data.")
         raise typer.Exit(1)
 
@@ -210,7 +212,7 @@ def optimize_simba(
     if dry_run:
         console.print("\n[bold]Would train on:[/bold]")
         for trace in traces[:10]:
-            console.print(f"  - {trace.query[:50]}... (score: {trace.score:.2f})")
+            console.print(f"  - {trace.query[:50]}... (score: {trace.grounded_score:.2f})")
         if len(traces) > 10:
             console.print(f"  ... and {len(traces) - 10} more")
         return

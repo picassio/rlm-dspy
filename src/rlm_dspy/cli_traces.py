@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Annotated
 
@@ -125,10 +124,8 @@ def traces_export(
     from .core.trace_collector import get_trace_collector
 
     collector = get_trace_collector()
-    traces = collector.list_traces(limit=1000)
-
-    output.write_text(json.dumps(traces, indent=2))
-    console.print(f"[green]✓[/green] Exported {len(traces)} traces to {output}")
+    count = collector.export(output)
+    console.print(f"[green]✓[/green] Exported {count} traces to {output}")
 
 
 @traces_app.command("import")
@@ -143,13 +140,7 @@ def traces_import(
         raise typer.Exit(1)
 
     collector = get_trace_collector()
-    traces = json.loads(input_file.read_text())
-
-    count = 0
-    for trace in traces:
-        if collector.add_trace(trace):
-            count += 1
-
+    count = collector.import_traces(input_file)
     console.print(f"[green]✓[/green] Imported {count} traces")
 
 
