@@ -103,6 +103,22 @@ _LAZY_IMPORTS = {
     "accuracy_metric": ".simba_optimizer",
     "create_training_example": ".simba_optimizer",
     "get_simba_optimizer": ".simba_optimizer",
+    # OAuth (lightweight)
+    "OAuthCredentials": ".oauth",
+    "anthropic_login": ".oauth",
+    "anthropic_logout": ".oauth",
+    "anthropic_refresh_token": ".oauth",
+    "get_anthropic_token": ".oauth",
+    "is_anthropic_authenticated": ".oauth",
+    "oauth_login": ".oauth",
+    "oauth_logout": ".oauth",
+    "oauth_status": ".oauth",
+    "get_oauth_token": ".oauth",
+    # Anthropic OAuth LM
+    "create_anthropic_lm": ".anthropic_oauth_lm",
+    "get_anthropic_api_key": ".anthropic_oauth_lm",
+    "is_oauth_token": ".anthropic_oauth_lm",
+    "create_lm_with_oauth_fallback": ".anthropic_oauth_lm",
 }
 
 

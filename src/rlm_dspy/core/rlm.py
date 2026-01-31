@@ -194,6 +194,19 @@ VERIFICATION RULES:
         lm_kwargs: dict[str, Any] = {"model": self.config.model, "api_key": self.config.api_key}
         if self.config.api_base:
             lm_kwargs["api_base"] = self.config.api_base
+        
+        # Check for Anthropic OAuth token
+        api_key = self.config.api_key
+        if self.config.model.startswith("anthropic/") and not api_key:
+            from .anthropic_oauth_lm import get_anthropic_api_key, is_oauth_token, CLAUDE_CODE_HEADERS
+            oauth_key = get_anthropic_api_key()
+            if oauth_key:
+                api_key = oauth_key
+                lm_kwargs["api_key"] = api_key
+                if is_oauth_token(oauth_key):
+                    _logger.info("Using Anthropic OAuth token (Claude Pro/Max)")
+                    lm_kwargs["extra_headers"] = CLAUDE_CODE_HEADERS
+        
         self._lm = dspy.LM(**lm_kwargs)
         dspy.settings.configure(async_max_workers=self.config.max_workers, num_threads=self.config.max_workers)
 
@@ -203,6 +216,18 @@ VERIFICATION RULES:
         lm_kwargs: dict[str, Any] = {"model": self.config.sub_model, "api_key": self.config.api_key}
         if self.config.api_base:
             lm_kwargs["api_base"] = self.config.api_base
+        
+        # Check for Anthropic OAuth token for sub model
+        api_key = self.config.api_key
+        if self.config.sub_model.startswith("anthropic/") and not api_key:
+            from .anthropic_oauth_lm import get_anthropic_api_key, is_oauth_token, CLAUDE_CODE_HEADERS
+            oauth_key = get_anthropic_api_key()
+            if oauth_key:
+                api_key = oauth_key
+                lm_kwargs["api_key"] = api_key
+                if is_oauth_token(oauth_key):
+                    lm_kwargs["extra_headers"] = CLAUDE_CODE_HEADERS
+        
         return dspy.LM(**lm_kwargs)
 
     def _get_or_create_interpreter(self):
