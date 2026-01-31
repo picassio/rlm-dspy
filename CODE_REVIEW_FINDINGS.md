@@ -279,21 +279,61 @@ The codebase has tests (638 passing), but the analysis suggests adding:
 ## Priority Action Items
 
 ### Immediate (Security)
-1. [ ] Fix path traversal vulnerability in `validate_path_safety`
-2. [ ] Add atomic writes to state file operations
-3. [ ] Add safeguards to process killing function
+1. [x] ~~Fix path traversal vulnerability in `validate_path_safety`~~ - Already fixed in codebase
+2. [x] Add atomic writes to state file operations - **FIXED**
+3. [x] Add safeguards to process killing function - **FIXED** (SIGTERM first, then SIGKILL)
 
 ### Short-term (Reliability)
-4. [ ] Add timeout to async query method
+4. [x] Add timeout to async query method - **FIXED** (uses config.max_timeout)
 5. [ ] Add file size limits to JSON loading
 6. [ ] Add symlink handling option
 
 ### Medium-term (Performance)
-7. [ ] Implement LRU cache with eviction for vector index
-8. [ ] Optimize cache eviction in AST index
+7. [x] Implement LRU cache with eviction for vector index - **FIXED** (MAX_CACHED_INDEXES=50)
+8. [x] Optimize cache eviction in AST index - **FIXED** (batch eviction of 10%)
 9. [ ] Add dictionary lookup to project registry
 
 ### Long-term (Architecture)
 10. [ ] Consolidate OAuth modules
 11. [ ] Implement RLM builder pattern
 12. [ ] Unify configuration management
+
+---
+
+## Fixes Applied (2026-01-30)
+
+### 1. Atomic State File Writes
+**Files**: `core/optimization_state.py`
+
+Both `save_optimization_state()` and `save_optimized_program()` now use:
+- Write to temp file first
+- Atomic rename via `Path.replace()`
+- Cleanup on failure
+
+### 2. Safer Process Killing
+**File**: `core/fileutils_base.py`
+
+`_kill_blocking_processes()` now:
+- Sends SIGTERM first (graceful)
+- Waits 2 seconds for graceful shutdown
+- Only sends SIGKILL for non-responsive processes
+- Skips PID 1 and system processes
+- Handles PermissionError gracefully
+
+### 3. Async Query Timeout
+**File**: `core/rlm.py`
+
+`query_async()` now uses `asyncio.timeout()` with `config.max_timeout`.
+
+### 4. Vector Index Cache Eviction
+**File**: `core/vector_index.py`
+
+Added LRU-style eviction:
+- `MAX_CACHED_INDEXES = 50`
+- `_evict_if_needed()` removes oldest entries
+- Uses `OrderedDict` for LRU ordering
+
+### 5. AST Index Batch Eviction
+**File**: `core/ast_index.py`
+
+Cache eviction now removes 10% of entries at once instead of one-by-one.

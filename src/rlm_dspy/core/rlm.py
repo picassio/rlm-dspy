@@ -583,11 +583,23 @@ VERIFICATION RULES:
             return RLMResult(answer="", success=False, error=str(e), elapsed_time=elapsed)
 
     async def query_async(self, query: str, context: str) -> RLMResult:
+        """Execute async query with timeout support.
+        
+        Uses config.max_timeout for the timeout value.
+        """
+        import asyncio
+        
         self._start_time = time.time()
         try:
-            with dspy.settings.context(lm=self._lm):
-                prediction = await self._rlm.aforward(context=context, query=query)
+            async with asyncio.timeout(self.config.max_timeout):
+                with dspy.settings.context(lm=self._lm):
+                    prediction = await self._rlm.aforward(context=context, query=query)
             return self._build_result(prediction, time.time() - self._start_time)
+        except asyncio.TimeoutError:
+            elapsed = time.time() - self._start_time if self._start_time else 0
+            error_msg = f"Query timed out after {self.config.max_timeout}s"
+            _logger.warning(error_msg)
+            return RLMResult(answer="", success=False, error=error_msg, elapsed_time=elapsed)
         except Exception as e:
             elapsed = time.time() - self._start_time if self._start_time else 0
             return RLMResult(answer="", success=False, error=str(e), elapsed_time=elapsed)

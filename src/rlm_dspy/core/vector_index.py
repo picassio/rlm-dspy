@@ -24,13 +24,27 @@ logger = logging.getLogger(__name__)
 class CodeIndex:
     """Manages vector indexes for code repositories."""
 
+    # Maximum number of indexes to keep in memory (LRU eviction)
+    MAX_CACHED_INDEXES = 50
+    
     def __init__(self, config: IndexConfig | None = None):
         self.config = config or IndexConfig.from_user_config()
         self.config.index_dir.mkdir(parents=True, exist_ok=True)
         self._embedder = None
-        self._indexes: dict[str, tuple["Embeddings", float]] = {}
-        self._metadata: dict[str, dict[str, CodeSnippet]] = {}
-        self._corpus_idx_map: dict[str, dict[int, str]] = {}
+        # Use OrderedDict for LRU behavior
+        from collections import OrderedDict
+        self._indexes: OrderedDict[str, tuple["Embeddings", float]] = OrderedDict()
+        self._metadata: OrderedDict[str, dict[str, CodeSnippet]] = OrderedDict()
+        self._corpus_idx_map: OrderedDict[str, dict[int, str]] = OrderedDict()
+    
+    def _evict_if_needed(self) -> None:
+        """Evict oldest entries if cache exceeds MAX_CACHED_INDEXES."""
+        while len(self._indexes) > self.MAX_CACHED_INDEXES:
+            oldest_key = next(iter(self._indexes))
+            self._indexes.pop(oldest_key, None)
+            self._metadata.pop(oldest_key, None)
+            self._corpus_idx_map.pop(oldest_key, None)
+            logger.debug("Evicted cached index for: %s", oldest_key)
 
     @property
     def embedder(self):
@@ -246,6 +260,7 @@ class CodeIndex:
         self._indexes[cache_key] = (index, time.time())
         self._metadata[cache_key] = metadata
         self._corpus_idx_map[cache_key] = corpus_idx_to_id
+        self._evict_if_needed()
         self._update_registry_stats(repo_path, count, len(manifest.get("files", {})))
 
         return count

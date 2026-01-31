@@ -378,9 +378,13 @@ def index_file(path: Path | str, use_cache: bool = True) -> ASTIndex:
         if use_cache:
             cache_key = _get_cache_key(path)
             if cache_key:
-                # Evict oldest entries if cache is full (LRU)
-                while len(_index_cache) >= _MAX_CACHE_SIZE:
-                    _index_cache.popitem(last=False)  # Remove oldest (FIFO order)
+                # Evict oldest entries if cache is full (batch eviction for efficiency)
+                if len(_index_cache) >= _MAX_CACHE_SIZE:
+                    # Remove 10% of oldest entries at once
+                    evict_count = max(1, _MAX_CACHE_SIZE // 10)
+                    for _ in range(evict_count):
+                        if _index_cache:
+                            _index_cache.popitem(last=False)
                 _index_cache[cache_key] = result
 
         return result
