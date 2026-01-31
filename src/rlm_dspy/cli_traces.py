@@ -66,28 +66,33 @@ def traces_show(
     from .core.trace_collector import get_trace_collector
 
     collector = get_trace_collector()
-    trace = collector.get_trace(trace_id)
+    # Find trace by ID prefix match
+    trace = None
+    for t in collector.traces:
+        if t.trace_id.startswith(trace_id):
+            trace = t
+            break
 
     if not trace:
         console.print(f"[red]Trace not found: {trace_id}[/red]")
         raise typer.Exit(1)
 
-    console.print(f"\n[bold cyan]Trace: {trace_id}[/bold cyan]")
-    console.print(f"Query: {trace.get('query', '')}")
-    console.print(f"Status: {'[green]Success[/green]' if trace.get('success') else '[red]Failed[/red]'}")
-    console.print(f"Iterations: {trace.get('iterations', 0)}")
-    console.print(f"Time: {trace.get('elapsed_time', 0):.2f}s")
+    console.print(f"\n[bold cyan]Trace: {trace.trace_id}[/bold cyan]")
+    console.print(f"Query: {trace.query}")
+    console.print(f"Type: {trace.query_type}")
+    console.print(f"Grounded Score: {trace.grounded_score:.0%}")
+    console.print(f"Timestamp: {trace.timestamp}")
+    console.print(f"Tools Used: {', '.join(trace.tools_used) if trace.tools_used else 'None'}")
 
-    if trace.get("error"):
-        console.print(f"[red]Error: {trace['error']}[/red]")
+    if trace.final_answer:
+        console.print(f"\n[bold]Final Answer:[/bold]")
+        console.print(trace.final_answer[:500] + "..." if len(trace.final_answer) > 500 else trace.final_answer)
 
-    if full and trace.get("trajectory"):
-        console.print("\n[bold]Trajectory:[/bold]")
-        for i, step in enumerate(trace["trajectory"], 1):
+    if full and trace.reasoning_steps:
+        console.print("\n[bold]Reasoning Steps:[/bold]")
+        for i, step in enumerate(trace.reasoning_steps, 1):
             console.print(f"\n[cyan]Step {i}:[/cyan]")
-            console.print(f"Reasoning: {step.get('reasoning', '')[:200]}...")
-            if step.get("code"):
-                console.print(f"Code: {step.get('code', '')[:100]}...")
+            console.print(step[:200] + "..." if len(step) > 200 else step)
 
 
 @traces_app.command("stats")
