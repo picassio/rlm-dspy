@@ -80,9 +80,83 @@ class PreflightResult:
 def check_api_key(
     env_vars: list[str] | None = None,
     required: bool = True,
+    model: str | None = None,
 ) -> ValidationResult:
-    """Check if API key is configured."""
-    env_vars = env_vars or ["RLM_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY"]
+    """Check if API key is configured for the given model.
+    
+    Args:
+        env_vars: List of env vars to check (overrides model-based detection)
+        required: Whether API key is required
+        model: Model name to determine which API key to check
+    """
+    # Model-specific API key mapping
+    model_env_vars = {
+        "kimi/": ["KIMI_API_KEY"],
+        "minimax/": ["MINIMAX_API_KEY"],
+        "zai/": ["ZAI_API_KEY"],
+        "opencode/": ["OPENCODE_API_KEY"],
+        "openai/": ["OPENAI_API_KEY"],
+        "anthropic/": ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN"],
+        "google/": ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+        "gemini/": ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+        "deepseek/": ["DEEPSEEK_API_KEY"],
+        "openrouter/": ["OPENROUTER_API_KEY"],
+        "together/": ["TOGETHER_API_KEY"],
+        "groq/": ["GROQ_API_KEY"],
+        "ollama/": [],  # No API key needed
+        "antigravity/": [],  # OAuth only
+    }
+    
+    # Determine which env vars to check
+    if env_vars is None and model:
+        # Find matching provider
+        for prefix, vars in model_env_vars.items():
+            if model.startswith(prefix):
+                env_vars = vars
+                break
+        
+        # Check OAuth for OAuth-based models
+        if model.startswith("anthropic/"):
+            try:
+                from .oauth import is_anthropic_authenticated
+                if is_anthropic_authenticated():
+                    return ValidationResult(
+                        name="API Key",
+                        passed=True,
+                        message="Using Anthropic OAuth",
+                    )
+            except ImportError:
+                pass
+        
+        if model.startswith("google/") or model.startswith("antigravity/"):
+            try:
+                from .oauth import is_google_authenticated, is_antigravity_authenticated
+                if model.startswith("antigravity/") and is_antigravity_authenticated():
+                    return ValidationResult(
+                        name="API Key",
+                        passed=True,
+                        message="Using Antigravity OAuth",
+                    )
+                if model.startswith("google/") and is_google_authenticated():
+                    return ValidationResult(
+                        name="API Key",
+                        passed=True,
+                        message="Using Google OAuth",
+                    )
+            except ImportError:
+                pass
+    
+    # Default fallback
+    if env_vars is None:
+        env_vars = ["RLM_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY"]
+    
+    # No API key needed (e.g., Ollama)
+    if not env_vars:
+        return ValidationResult(
+            name="API Key",
+            passed=True,
+            message="No API key required",
+        )
 
     for var in env_vars:
         if os.environ.get(var):
@@ -308,8 +382,8 @@ def preflight_check(
     """
     result = PreflightResult()
 
-    # API Key
-    result.add(check_api_key(required=api_key_required))
+    # API Key (pass model for provider-specific checks)
+    result.add(check_api_key(required=api_key_required, model=model))
 
     # Model format
     if model:
