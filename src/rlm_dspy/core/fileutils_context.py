@@ -16,6 +16,13 @@ logger = logging.getLogger(__name__)
 # Pre-compiled regex for file marker extraction
 _FILE_MARKER_PATTERN = re.compile(r'(=== FILE: .+? ===\n.*?=== END FILE ===\n)', re.DOTALL)
 
+# Directories to always skip during file traversal
+SKIP_DIRS = frozenset({
+    ".git", "__pycache__", "node_modules", ".venv", "venv", ".tox",
+    ".pytest_cache", ".mypy_cache", "dist", "build", ".eggs", "eggs",
+    ".hg", ".svn", ".nox", "htmlcov", ".coverage", ".cache",
+})
+
 
 def load_gitignore_patterns(paths: list[Path]) -> list[str]:
     """Load gitignore patterns from .gitignore files in the given paths."""

@@ -23,6 +23,7 @@ from .fileutils_base import (
 
 # Re-export from context module
 from .fileutils_context import (
+    SKIP_DIRS,
     load_gitignore_patterns,
     should_skip_entry,
     collect_files,
@@ -51,6 +52,7 @@ __all__ = [
     "ensure_dir",
     "atomic_write",
     # Context utilities
+    "SKIP_DIRS",
     "load_gitignore_patterns",
     "should_skip_entry",
     "collect_files",
