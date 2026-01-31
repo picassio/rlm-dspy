@@ -37,7 +37,7 @@ ANTIGRAVITY_HEADERS = {
 
 def get_antigravity_api_key() -> tuple[str, str] | None:
     """Get Antigravity OAuth token and project ID."""
-    from .antigravity_oauth import get_antigravity_token
+    from .oauth import get_antigravity_token
     return get_antigravity_token()
 
 

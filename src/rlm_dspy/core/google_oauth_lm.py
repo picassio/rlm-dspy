@@ -35,7 +35,7 @@ GEMINI_CLI_HEADERS = {
 
 def get_google_api_key() -> tuple[str, str] | None:
     """Get Google OAuth token and project ID."""
-    from .google_oauth import get_google_token
+    from .oauth import get_google_token
     return get_google_token()
 
 

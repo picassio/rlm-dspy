@@ -50,21 +50,13 @@ def get_anthropic_api_key() -> str | None:
     
     Priority:
     1. ANTHROPIC_OAUTH_TOKEN env var
-    2. Stored OAuth credentials (auto-refreshed)
-    3. ANTHROPIC_API_KEY env var
+    2. ANTHROPIC_API_KEY env var
     
     Returns:
         API key/token or None
     """
-    from .oauth import get_anthropic_token
-    
-    # Try OAuth token first
+    # Try OAuth token from env first
     token = os.environ.get("ANTHROPIC_OAUTH_TOKEN")
-    if token:
-        return token
-    
-    # Try stored OAuth credentials
-    token = get_anthropic_token()
     if token:
         return token
     
@@ -562,23 +554,16 @@ def create_anthropic_lm(
         model: Model ID (e.g., "claude-sonnet-4-20250514")
         api_key: API key or OAuth token. If None, tries to get from:
                  1. ANTHROPIC_OAUTH_TOKEN env var
-                 2. Stored OAuth credentials
-                 3. ANTHROPIC_API_KEY env var
+                 2. ANTHROPIC_API_KEY env var
         **kwargs: Additional arguments for dspy.LM
         
     Returns:
         Configured DSPy LM (AnthropicOAuthLM for OAuth, dspy.LM for API keys)
     """
-    from .oauth import get_anthropic_token
-    
     # Resolve API key
     if api_key is None:
         # Try OAuth token first
         api_key = os.environ.get("ANTHROPIC_OAUTH_TOKEN")
-        
-        if not api_key:
-            # Try stored OAuth credentials
-            api_key = get_anthropic_token()
         
         if not api_key:
             # Fall back to regular API key
@@ -586,8 +571,7 @@ def create_anthropic_lm(
     
     if not api_key:
         raise ValueError(
-            "No Anthropic API key or OAuth token found. "
-            "Run 'rlm-dspy auth login anthropic' or set ANTHROPIC_API_KEY"
+            "No Anthropic API key found. Set ANTHROPIC_API_KEY environment variable."
         )
     
     # Use custom LM for both OAuth and API keys (more consistent)

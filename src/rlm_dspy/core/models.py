@@ -14,9 +14,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from .oauth import get_oauth_token, is_anthropic_authenticated
-from .google_oauth import is_google_authenticated
-from .antigravity_oauth import is_antigravity_authenticated
+from .oauth import is_google_authenticated, is_antigravity_authenticated, get_credentials
 
 
 @dataclass
@@ -460,10 +458,7 @@ PROVIDER_ENV_VARS: dict[str, list[str]] = {
 def has_provider_auth(provider: str) -> bool:
     """Check if a provider has authentication configured."""
     # Check OAuth first
-    if provider == "anthropic" and is_anthropic_authenticated():
-        return True
-    
-    if provider == "google" and is_google_authenticated():
+    if provider in ("google", "google-gemini") and is_google_authenticated():
         return True
     
     if provider == "antigravity" and is_antigravity_authenticated():
@@ -481,20 +476,15 @@ def has_provider_auth(provider: str) -> bool:
 def get_provider_api_key(provider: str) -> str | None:
     """Get API key for a provider."""
     # Check OAuth first
-    if provider == "anthropic":
-        token = get_oauth_token("anthropic")
-        if token:
-            return token
-    
-    if provider == "google":
-        token = get_oauth_token("google")
-        if token:
-            return token
+    if provider in ("google", "google-gemini"):
+        creds = get_credentials("google-gemini")
+        if creds and not creds.is_expired:
+            return creds.access_token
     
     if provider == "antigravity":
-        token = get_oauth_token("antigravity")
-        if token:
-            return token
+        creds = get_credentials("antigravity")
+        if creds and not creds.is_expired:
+            return creds.access_token
     
     # Check environment variables
     env_vars = PROVIDER_ENV_VARS.get(provider, [])

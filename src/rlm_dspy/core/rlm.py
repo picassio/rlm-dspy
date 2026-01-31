@@ -234,7 +234,7 @@ VERIFICATION RULES:
         # Check for Google models - may need OAuth
         # LiteLLM doesn't support OAuth tokens for Google, so we use our custom LM
         if self.config.model.startswith("google/"):
-            from .google_oauth import get_google_token
+            from .oauth import get_google_token
             from .google_oauth_lm import GoogleOAuthLM
             
             google_creds = get_google_token()
@@ -249,7 +249,7 @@ VERIFICATION RULES:
         
         # Check for Antigravity models - use custom LM
         if self.config.model.startswith("antigravity/"):
-            from .antigravity_oauth import get_antigravity_token
+            from .oauth import get_antigravity_token
             from .antigravity_lm import AntigravityLM
             
             ag_creds = get_antigravity_token()
@@ -343,7 +343,7 @@ VERIFICATION RULES:
         
         # Check for Google sub model - may need OAuth
         if self.config.sub_model.startswith("google/"):
-            from .google_oauth import get_google_token
+            from .oauth import get_google_token
             from .google_oauth_lm import GoogleOAuthLM
             
             google_creds = get_google_token()
@@ -357,7 +357,7 @@ VERIFICATION RULES:
         
         # Check for Antigravity sub model - may need OAuth
         if self.config.sub_model.startswith("antigravity/"):
-            from .antigravity_oauth import get_antigravity_token
+            from .oauth import get_antigravity_token
             from .antigravity_lm import AntigravityLM
             
             ag_creds = get_antigravity_token()

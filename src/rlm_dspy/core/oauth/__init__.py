@@ -3,20 +3,22 @@
 This module provides a consistent interface for OAuth flows across providers:
 - Google Gemini CLI
 - Google Antigravity
-- Generic OAuth (future providers)
 
 Example:
-    from rlm_dspy.core.oauth import get_provider, authenticate, get_credentials
+    from rlm_dspy.core.oauth import authenticate, get_credentials, is_authenticated
     
     # Authenticate with a provider
     creds = authenticate("google-gemini")
     
-    # Get existing credentials
+    # Get existing credentials (auto-refreshes if expired)
     creds = get_credentials("antigravity")
     
     # Check if authenticated
     if is_authenticated("google-gemini"):
         print("Ready to use Gemini")
+    
+    # Get token for API calls
+    token, project = get_google_token()
 """
 
 from .base import (
@@ -26,7 +28,6 @@ from .base import (
     OAuthError,
     AuthenticationError,
     TokenRefreshError,
-    # Utility functions for tests/backward compat
     generate_pkce,
     save_credentials,
     load_credentials,
@@ -45,72 +46,47 @@ from .manager import (
     list_authenticated,
 )
 
-# Backward compatibility aliases
-_generate_pkce = generate_pkce
-_save_credentials = save_credentials
-_load_credentials = load_credentials
-_delete_credentials = delete_credentials
 
+# =============================================================================
+# Provider-specific token helpers (used by LM classes)
+# =============================================================================
 
-def get_oauth_token(provider: str) -> str | None:
-    """Get OAuth access token for a provider (backward compatibility).
+def get_google_token() -> tuple[str, str] | None:
+    """Get valid Google Gemini CLI OAuth token and project ID.
     
-    Args:
-        provider: Provider name
-        
+    Auto-refreshes if expired.
+    
     Returns:
-        Access token if authenticated, None otherwise
+        Tuple of (access_token, project_id) or None if not authenticated
     """
-    creds = get_credentials(provider)
+    creds = get_credentials("google-gemini")
     if creds and not creds.is_expired:
-        return creds.access_token
+        return creds.access_token, creds.project_id
     return None
 
 
-def is_anthropic_authenticated() -> bool:
-    """Check if authenticated with Anthropic (backward compatibility).
+def get_antigravity_token() -> tuple[str, str] | None:
+    """Get valid Antigravity OAuth token and project ID.
     
-    Note: Anthropic OAuth is no longer supported. Always returns False.
-    """
-    return False
-
-
-def oauth_status(provider: str) -> dict:
-    """Get OAuth status for a provider (backward compatibility).
+    Auto-refreshes if expired.
     
     Returns:
-        Dict with authenticated, is_expired, expires_at keys
+        Tuple of (access_token, project_id) or None if not authenticated
     """
-    creds = get_credentials(provider)
-    if creds:
-        return {
-            "provider": provider,
-            "authenticated": True,
-            "is_expired": creds.is_expired,
-            "expires_at": creds.expires_at,
-            "email": creds.email,
-            "project_id": creds.project_id,
-        }
-    return {
-        "provider": provider,
-        "authenticated": False,
-        "is_expired": False,
-        "expires_at": 0,
-    }
+    creds = get_credentials("antigravity")
+    if creds and not creds.is_expired:
+        return creds.access_token, creds.project_id
+    return None
 
 
-def oauth_login(provider: str, open_browser: bool = True) -> OAuthCredentials:
-    """Login with OAuth (backward compatibility)."""
-    return authenticate(provider)
+def is_google_authenticated() -> bool:
+    """Check if authenticated with Google Gemini CLI OAuth."""
+    return is_authenticated("google-gemini")
 
 
-def oauth_logout(provider: str) -> bool:
-    """Logout from OAuth (backward compatibility)."""
-    return revoke_credentials(provider)
-
-
-# Providers list for backward compat
-OAUTH_PROVIDERS = ["google-gemini", "antigravity"]
+def is_antigravity_authenticated() -> bool:
+    """Check if authenticated with Antigravity OAuth."""
+    return is_authenticated("antigravity")
 
 
 __all__ = [
@@ -128,17 +104,6 @@ __all__ = [
     "delete_credentials",
     "OAUTH_DIR",
     "CREDENTIALS_FILE",
-    # Backward compat
-    "_generate_pkce",
-    "_save_credentials",
-    "_load_credentials",
-    "_delete_credentials",
-    "get_oauth_token",
-    "is_anthropic_authenticated",
-    "oauth_status",
-    "oauth_login",
-    "oauth_logout",
-    "OAUTH_PROVIDERS",
     # Manager functions
     "get_provider",
     "get_credentials",
@@ -148,4 +113,9 @@ __all__ = [
     "is_authenticated",
     "list_providers",
     "list_authenticated",
+    # Provider-specific helpers
+    "get_google_token",
+    "get_antigravity_token",
+    "is_google_authenticated",
+    "is_antigravity_authenticated",
 ]
