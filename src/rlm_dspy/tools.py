@@ -209,9 +209,13 @@ BUILTIN_TOOLS: dict[str, callable] = {
     "shell": shell,
 }
 
+# Safe tools (exclude shell)
+SAFE_TOOLS: dict[str, callable] = {k: v for k, v in BUILTIN_TOOLS.items() if k != "shell"}
+
 # Re-export for convenience
 __all__ = [
     "BUILTIN_TOOLS",
+    "SAFE_TOOLS",
     "get_tool_descriptions",
     "set_current_project",
     "get_current_project",
