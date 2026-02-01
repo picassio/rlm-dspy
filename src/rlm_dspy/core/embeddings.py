@@ -130,11 +130,19 @@ def _resolve_embedding_api_key(config: dict) -> str | None:
     return os.environ.get("RLM_API_KEY")
 
 
-# Cached embedder instance
+# Cached embedder instance (bounded to prevent memory leaks)
+# Max 10 different embedding configurations cached
+_MAX_EMBEDDER_CACHE_SIZE = 10
 _embedder_cache: dict[str, Any] = {}
 
 # Cached embedding dimensions (to avoid expensive probe calls)
+# Max 20 cached dimensions (small memory footprint)
+_MAX_DIMENSION_CACHE_SIZE = 20
 _dimension_cache: dict[str, int] = {}
+
+# Lock for thread-safe cache access
+import threading
+_cache_lock = threading.Lock()
 
 
 def get_embedder(config: EmbeddingConfig | None = None) -> Any:
@@ -159,11 +167,13 @@ def get_embedder(config: EmbeddingConfig | None = None) -> Any:
     # Check cache - batch_size excluded since model loading is the expensive part
     # and batch_size only affects execution, not the model itself
     cache_key = f"{config.model}:{config.local_model}"
-    if cache_key in _embedder_cache:
-        cached = _embedder_cache[cache_key]
-        # If batch_size changed, we can still use the cached embedder
-        # (DSPy Embedder's batch_size is set at call time, not construction)
-        return cached
+    
+    with _cache_lock:
+        if cache_key in _embedder_cache:
+            cached = _embedder_cache[cache_key]
+            # If batch_size changed, we can still use the cached embedder
+            # (DSPy Embedder's batch_size is set at call time, not construction)
+            return cached
 
     if config.model.lower() == "local":
         # Use local sentence-transformers model
@@ -175,7 +185,13 @@ def get_embedder(config: EmbeddingConfig | None = None) -> Any:
         # Use hosted model via litellm
         embedder = _create_hosted_embedder(config)
 
-    _embedder_cache[cache_key] = embedder
+    with _cache_lock:
+        # Evict oldest entries if cache is full
+        while len(_embedder_cache) >= _MAX_EMBEDDER_CACHE_SIZE:
+            oldest_key = next(iter(_embedder_cache))
+            del _embedder_cache[oldest_key]
+        _embedder_cache[cache_key] = embedder
+    
     return embedder
 
 
@@ -346,16 +362,22 @@ def get_embedding_dim(config: EmbeddingConfig | None = None) -> int:
 
     # Check dimension cache (persists across calls)
     cache_key = f"{config.model}:{config.local_model}"
-    if cache_key in _dimension_cache:
-        return _dimension_cache[cache_key]
+    with _cache_lock:
+        if cache_key in _dimension_cache:
+            return _dimension_cache[cache_key]
 
     # Default fallback - embed a sample to find out (expensive, cache result)
     logger.debug("Unknown embedding dim for %s, computing...", config.model)
     sample_embedding = embed_texts(["test"], config)
     dim = sample_embedding.shape[-1]
 
-    # Cache for future lookups
-    _dimension_cache[cache_key] = dim
+    # Cache for future lookups (with bounds)
+    with _cache_lock:
+        while len(_dimension_cache) >= _MAX_DIMENSION_CACHE_SIZE:
+            oldest_key = next(iter(_dimension_cache))
+            del _dimension_cache[oldest_key]
+        _dimension_cache[cache_key] = dim
+    
     return dim
 
 
