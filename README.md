@@ -1273,7 +1273,7 @@ All components are saved to `~/.rlm/optimization/` and auto-loaded on next query
 SIMBA (Stochastic Introspective Mini-Batch Ascent) optimizes demos (few-shot examples):
 
 ```bash
-# Use SIMBA explicitly
+# Fast proxy mode (recommended)
 rlm-dspy optimize simba --fast
 
 # Use specific model for optimization
@@ -1285,12 +1285,12 @@ rlm-dspy optimize simba --steps 2 --candidates 3 --threads 2
 
 | Option | Short | Default | Description |
 |--------|-------|---------|-------------|
+| `--fast` | `-f` | false | Fast proxy mode (50x faster, like GEPA) |
 | `--model` | `-m` | from config | Model to use for optimization |
-| `--steps` | | 4 (1 with --fast) | Optimization iterations |
-| `--candidates` | `-c` | 4 (2 with --fast) | Candidate programs per step |
-| `--batch-size` | `-b` | 16 (8 with --fast) | Examples evaluated per candidate |
+| `--steps` | | 1 (with --fast) | Optimization iterations |
+| `--candidates` | `-c` | 2 (with --fast) | Candidate programs per step |
+| `--batch-size` | `-b` | 8 (with --fast) | Examples evaluated per candidate |
 | `--threads` | `-t` | 2 | Parallel evaluation threads |
-| `--fast` | | false | Fast preset: 1 step, 2 candidates |
 
 **Model priority:**
 1. `--model` CLI option (highest)
@@ -1298,8 +1298,8 @@ rlm-dspy optimize simba --steps 2 --candidates 3 --threads 2
 3. `model` in `~/.rlm/config.yaml` (default)
 
 **Estimated time:**
-- `--fast`: ~5-15 minutes
-- Default: ~1-2 hours
+- `--fast` (proxy mode): ~3-7 minutes (1 LLM call per eval)
+- Default (full RLM): ~1-2 hours (10-50 LLM calls per eval)
 
 Requirements:
 - At least 4 traces with `grounded_score >= 0.7`
