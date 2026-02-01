@@ -224,18 +224,25 @@ env_file: {env_file}
 # Auto-Optimization Settings
 # ============================================================================
 # RLM can automatically optimize itself using collected traces.
-# When enough traces are collected, SIMBA runs in background to improve prompts.
+# GEPA (recommended) or SIMBA can run to improve prompts.
 
 optimization:
   # Enable/disable auto-optimization
   enabled: {opt_enabled}
 
-  # Optimizer type: simba (future: mipro, copro, gepa)
+  # Optimizer type: gepa (recommended), simba (legacy)
+  # GEPA evolves instruction text, SIMBA selects demos
   optimizer: {opt_optimizer}
 
   # Model for optimization (null = use default model above)
-  # Tip: Use same model for best results, or cheaper model to save costs
+  # This model is used to run the RLM during optimization evaluation
+  # Tip: Use same model as main for best results
   model: {opt_model}
+
+  # Teacher/reflection model for GEPA (null = use model above)
+  # GEPA uses this model for analyzing failures and proposing improvements
+  # Tip: Use a strong model like openai/gpt-4o or anthropic/claude-3-5-sonnet
+  teacher_model: {opt_teacher_model}
 
   # Minimum new traces before triggering optimization
   min_new_traces: {opt_min_new_traces}
@@ -332,6 +339,7 @@ def save_config(config: dict[str, Any], use_template: bool = True) -> None:
             opt_enabled=fmt(opt_config.get("enabled", True)),
             opt_optimizer=fmt(opt_config.get("optimizer", "gepa")),
             opt_model=fmt(opt_config.get("model")),
+            opt_teacher_model=fmt(opt_config.get("teacher_model")),
             opt_min_new_traces=fmt(opt_config.get("min_new_traces", 50)),
             opt_min_hours_between=fmt(opt_config.get("min_hours_between", 24)),
             opt_max_budget=fmt(opt_config.get("max_budget", 0.50)),

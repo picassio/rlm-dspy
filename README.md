@@ -1428,20 +1428,38 @@ generate_action.instructions = "# Task: Answer Questions About a Codebase
 
 GEPA does NOT change: tools, model, signature fields, or execution logic.
 
-**Teacher Model:**
-GEPA uses a teacher model for reflection (analyzing failures and proposing improvements).
-Set via:
-- `--teacher` CLI option (highest priority)
-- `optimization.teacher_model` in `~/.rlm/config.yaml`
-- Defaults to main model if not set
+**Model Configuration:**
 
-Recommended: Use a strong model like `openai/gpt-4o` or `anthropic/claude-3-5-sonnet`.
+Both GEPA and SIMBA can be configured via `~/.rlm/config.yaml`:
 
 ```yaml
 # ~/.rlm/config.yaml
+model: kimi/k2p5                    # Main model (used for RLM queries)
+
 optimization:
-  teacher_model: openai/gpt-4o  # Strong model for reflection
+  enabled: true
+  optimizer: gepa                   # gepa (recommended) or simba
+  
+  # Model for running RLM during optimization (null = use main model)
+  model: null
+  
+  # Teacher model for GEPA reflection (null = use optimization.model)
+  # Tip: Use a strong model for better prompt evolution
+  teacher_model: openai/gpt-4o
+  
+  min_new_traces: 50                # Traces before auto-optimization
+  min_hours_between: 24             # Cooldown between runs
+  max_budget: 0.50                  # Max cost per optimization
+  run_in_background: true           # Run in background thread
 ```
+
+**Model priority:**
+1. `--teacher` CLI option (GEPA only, highest priority)
+2. `optimization.teacher_model` in config (GEPA reflection)
+3. `optimization.model` in config (optimization evaluation)
+4. `model` in config (main model, default)
+
+Recommended: Use a strong model like `openai/gpt-4o` or `anthropic/claude-3-5-sonnet` for GEPA's teacher model.
 
 **How Optimized Instructions Are Applied:**
 
