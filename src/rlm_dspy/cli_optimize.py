@@ -190,7 +190,7 @@ def optimize_simba(
     candidates: Annotated[int | None, typer.Option("--candidates", "-c", help="Candidates per step (fewer=faster)")] = None,
     threads: Annotated[int | None, typer.Option("--threads", "-t", help="Parallel threads (default: 2 to avoid rate limits)")] = None,
     model: Annotated[str | None, typer.Option("--model", "-m", help="Model to use (overrides optimization.model in config)")] = None,
-    fast: Annotated[bool, typer.Option("--fast", help="Fast preset: 1 step, 2 candidates")] = False,
+    fast: Annotated[bool, typer.Option("--fast", "-f", help="Fast proxy mode (50x faster, like GEPA --fast)")] = False,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Show what would be optimized")] = False,
 ) -> None:
     """Run SIMBA self-improving optimization.
@@ -204,9 +204,9 @@ def optimize_simba(
       3. model in ~/.rlm/config.yaml (default)
 
     \b
-    Performance presets:
-      --fast:   1 step, 2 candidates, 2 threads  (~5-15 min)
-      Default:  4 steps, 4 candidates, 2 threads (~1-2 hours)
+    Performance:
+      --fast:   Proxy mode (1 LLM call per eval, ~1-3 min)
+      Default:  Full RLM mode (10-50 LLM calls per eval, ~1-2 hours)
 
     \b
     Or customize individually:
@@ -275,8 +275,12 @@ def optimize_simba(
     try:
         from .core.rlm import RLM
         from .core.simba_optimizer import save_optimized_program, save_optimization_state, OptimizationState, get_trace_count
-        from .core.user_config import OptimizationConfig, load_config
+        from .core.user_config import OptimizationConfig, load_config, load_env_file
+        from .core.optimization_state import OptimizationResult
         import dspy
+
+        # Load env file for API keys
+        load_env_file()
 
         # Get model from CLI, config, or default
         user_cfg = load_config()
@@ -285,38 +289,158 @@ def optimize_simba(
         
         # Priority: CLI --model > optimization.model > main model
         model_name = model or opt_cfg.get_model(default_model)
-        
-        console.print(f"[cyan]Running SIMBA optimization (steps={steps}, candidates={candidates}, threads={threads})...[/cyan]")
-        console.print(f"  [dim]Model: {model_name}[/dim]")
 
-        # Get the RLM program to optimize
-        rlm = RLM()
-        optimizer = get_simba_optimizer(
-            batch_size=batch_size,
-            num_candidates=candidates,
-            max_steps=steps,
-            num_threads=threads,
-        )
-
-        # Configure DSPy with the optimization model
-        lm = dspy.LM(model_name)
+        # Configure DSPy with the optimization model (handle custom providers)
+        if model_name.startswith("zai/"):
+            from .core.zai_lm import ZaiLM
+            lm = ZaiLM(model_name.replace("zai/", ""))
+        elif model_name.startswith("kimi/"):
+            from .core.kimi_lm import KimiLM
+            model_id = model_name.replace("kimi/", "")
+            if model_id == "k2p5":
+                model_id = "k2-0130-8k"
+            lm = KimiLM(model_id)
+        elif model_name.startswith("anthropic/"):
+            # Use OAuth for Anthropic models
+            from .core.anthropic_oauth_lm import get_anthropic_api_key, is_oauth_token, AnthropicOAuthLM
+            import os
+            api_key = os.environ.get("ANTHROPIC_API_KEY") or get_anthropic_api_key()
+            if api_key and is_oauth_token(api_key):
+                lm = AnthropicOAuthLM(
+                    model=model_name.replace("anthropic/", ""),
+                    api_key=api_key,
+                )
+            else:
+                lm = dspy.LM(model_name, api_key=api_key)
+        elif model_name.startswith("google/"):
+            # Use OAuth for Google models
+            from .core.oauth import get_google_token
+            from .core.google_oauth_lm import GoogleOAuthLM
+            token, project_id = get_google_token()
+            if token:
+                lm = GoogleOAuthLM(
+                    model=model_name.replace("google/", ""),
+                    access_token=token,
+                    project_id=project_id,
+                )
+            else:
+                lm = dspy.LM(model_name)
+        else:
+            lm = dspy.LM(model_name)
         dspy.configure(lm=lm)
 
-        optimized_program, result = optimizer.optimize(
-            program=rlm._rlm,
-            trainset=examples,
-            lm=None,  # Use dspy.settings.lm
-        )
+        if fast:
+            # FAST PROXY MODE: Use lightweight proxy instead of full RLM
+            from .core.gepa_proxy import RLMProxy, create_proxy_metric, extract_proxy_instructions
+            from dspy.teleprompt import SIMBA
+            
+            console.print(f"[cyan]Running SIMBA in FAST PROXY mode (steps={steps}, candidates={candidates})...[/cyan]")
+            console.print(f"  [dim]Model: {model_name}[/dim]")
+            console.print(f"  [dim]Proxy mode: 1 LLM call per eval instead of 10-50 (50x faster)[/dim]")
+            
+            # Get the RLM program and create proxy from it
+            rlm = RLM()
+            proxy = RLMProxy.from_rlm(rlm._rlm)
+            
+            # Adjust batch_size if trainset is smaller
+            effective_batch_size = min(batch_size, len(examples))
+            if effective_batch_size < batch_size:
+                console.print(f"  [dim]Adjusted batch_size: {batch_size} -> {effective_batch_size} (trainset size)[/dim]")
+            
+            # Create proxy metric that returns float (SIMBA expects float, not Prediction)
+            def simba_proxy_metric(example, pred):
+                result = create_proxy_metric()(example, pred)
+                return result.score if hasattr(result, 'score') else float(result)
+            
+            # Create SIMBA optimizer with proxy metric
+            optimizer = SIMBA(
+                metric=simba_proxy_metric,
+                bsize=effective_batch_size,
+                num_candidates=candidates,
+                max_steps=steps,
+                num_threads=threads,
+            )
+            
+            # Run SIMBA on proxy
+            optimized_proxy = optimizer.compile(proxy, trainset=examples)
+            
+            # Get scores from SIMBA
+            if hasattr(optimizer, "best_score"):
+                optimized_score = optimizer.best_score
+                baseline_score = getattr(optimizer, "baseline_score", 0.0)
+            else:
+                optimized_score = 0.0
+                baseline_score = 0.0
+            
+            improvement = ((optimized_score - baseline_score) / baseline_score * 100) if baseline_score > 0 else 0.0
+            
+            result = OptimizationResult(
+                improved=optimized_score > baseline_score,
+                baseline_score=baseline_score,
+                optimized_score=optimized_score,
+                improvement=improvement,
+                num_steps=steps,
+                num_candidates=candidates,
+                best_program_idx=0,
+            )
+            
+            console.print("\n[bold green]✓ SIMBA (fast proxy) optimization complete![/bold green]")
+            console.print(f"  Baseline score: {result.baseline_score:.2%}")
+            console.print(f"  Optimized score: {result.optimized_score:.2%}")
+            console.print(f"  Improvement: {result.improvement:.1f}%")
+            
+            # Extract and save instructions from proxy
+            instructions = extract_proxy_instructions(optimized_proxy)
+            
+            # Extract demos if available
+            demos = []
+            if hasattr(optimized_proxy, 'demos') and optimized_proxy.demos:
+                demos = optimized_proxy.demos
+            elif hasattr(optimized_proxy, 'predict') and hasattr(optimized_proxy.predict, 'demos'):
+                demos = optimized_proxy.predict.demos or []
+            
+            if result.improved or demos or instructions:
+                save_optimized_program(
+                    optimized_proxy,
+                    result,
+                    "simba",
+                    instructions=instructions,
+                )
+                console.print("\n[green]✓ Optimized program saved - will be auto-loaded on next query[/green]")
+                if demos:
+                    console.print(f"  [dim]Saved {len(demos)} demos[/dim]")
+                if instructions:
+                    console.print(f"  [dim]Saved {len(instructions)} instruction keys[/dim]")
+        else:
+            # FULL RLM MODE
+            console.print(f"[cyan]Running SIMBA optimization (steps={steps}, candidates={candidates}, threads={threads})...[/cyan]")
+            console.print(f"  [dim]Model: {model_name}[/dim]")
+            console.print(f"  [dim]Full RLM mode: 10-50 LLM calls per eval (use --fast for 50x speedup)[/dim]")
+            
+            # Get the RLM program to optimize
+            rlm = RLM()
+            optimizer = get_simba_optimizer(
+                batch_size=batch_size,
+                num_candidates=candidates,
+                max_steps=steps,
+                num_threads=threads,
+            )
 
-        console.print("\n[bold green]✓ Optimization complete![/bold green]")
-        console.print(f"  Baseline score: {result.baseline_score:.2%}")
-        console.print(f"  Optimized score: {result.optimized_score:.2%}")
-        console.print(f"  Improvement: {result.improvement:.1f}%")
+            optimized_program, result = optimizer.optimize(
+                program=rlm._rlm,
+                trainset=examples,
+                lm=None,  # Use dspy.settings.lm
+            )
 
-        if result.improved:
-            # Save the optimized program
-            save_optimized_program(optimized_program, result, "simba")
-            console.print("\n[green]✓ Optimized program saved - will be auto-loaded on next query[/green]")
+            console.print("\n[bold green]✓ Optimization complete![/bold green]")
+            console.print(f"  Baseline score: {result.baseline_score:.2%}")
+            console.print(f"  Optimized score: {result.optimized_score:.2%}")
+            console.print(f"  Improvement: {result.improvement:.1f}%")
+
+            if result.improved:
+                # Save the optimized program
+                save_optimized_program(optimized_program, result, "simba")
+                console.print("\n[green]✓ Optimized program saved - will be auto-loaded on next query[/green]")
 
         # Update optimization state
         from datetime import datetime, UTC
@@ -330,6 +454,8 @@ def optimize_simba(
 
     except Exception as e:
         console.print(f"[red]Optimization failed: {e}[/red]")
+        import traceback
+        traceback.print_exc()
         raise typer.Exit(1)
 
 
