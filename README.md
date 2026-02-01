@@ -1276,16 +1276,26 @@ SIMBA (Stochastic Introspective Mini-Batch Ascent) optimizes demos (few-shot exa
 # Use SIMBA explicitly
 rlm-dspy optimize simba --fast
 
+# Use specific model for optimization
+rlm-dspy optimize simba --fast --model openai/gpt-4o
+
 # Or customize individually
 rlm-dspy optimize simba --steps 2 --candidates 3 --threads 2
 ```
 
-| Option | Default | Fast Mode | Description |
-|--------|---------|-----------|-------------|
-| `--steps` | 4 | 1 | Optimization iterations |
-| `--candidates` | 4 | 2 | Candidate programs per step |
-| `--batch-size` | 16 | 8 | Examples evaluated per candidate |
-| `--threads` | 2 | 2 | Parallel evaluation threads |
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `--model` | `-m` | from config | Model to use for optimization |
+| `--steps` | | 4 (1 with --fast) | Optimization iterations |
+| `--candidates` | `-c` | 4 (2 with --fast) | Candidate programs per step |
+| `--batch-size` | `-b` | 16 (8 with --fast) | Examples evaluated per candidate |
+| `--threads` | `-t` | 2 | Parallel evaluation threads |
+| `--fast` | | false | Fast preset: 1 step, 2 candidates |
+
+**Model priority:**
+1. `--model` CLI option (highest)
+2. `optimization.model` in `~/.rlm/config.yaml`
+3. `model` in `~/.rlm/config.yaml` (default)
 
 **Estimated time:**
 - `--fast`: ~5-15 minutes

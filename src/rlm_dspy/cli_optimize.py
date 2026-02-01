@@ -189,12 +189,19 @@ def optimize_simba(
     steps: Annotated[int | None, typer.Option("--steps", help="Optimization steps (fewer=faster)")] = None,
     candidates: Annotated[int | None, typer.Option("--candidates", "-c", help="Candidates per step (fewer=faster)")] = None,
     threads: Annotated[int | None, typer.Option("--threads", "-t", help="Parallel threads (default: 2 to avoid rate limits)")] = None,
+    model: Annotated[str | None, typer.Option("--model", "-m", help="Model to use (overrides optimization.model in config)")] = None,
     fast: Annotated[bool, typer.Option("--fast", help="Fast preset: 1 step, 2 candidates")] = False,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Show what would be optimized")] = False,
 ) -> None:
     """Run SIMBA self-improving optimization.
 
     Uses collected traces to optimize the RLM program via DSPy's SIMBA optimizer.
+
+    \b
+    Model priority:
+      1. --model CLI option (highest)
+      2. optimization.model in ~/.rlm/config.yaml
+      3. model in ~/.rlm/config.yaml (default)
 
     \b
     Performance presets:
@@ -233,11 +240,19 @@ def optimize_simba(
     console.print(f"[cyan]Found {len(traces)} traces for training[/cyan]")
 
     if dry_run:
+        from .core.user_config import OptimizationConfig, load_config
+        user_cfg = load_config()
+        opt_cfg = OptimizationConfig.from_user_config()
+        default_model = user_cfg.get("model", "openai/gpt-4o-mini")
+        model_name = model or opt_cfg.get_model(default_model)
+        
         console.print("\n[bold]Would train on:[/bold]")
         for trace in traces[:10]:
             console.print(f"  - {trace.query[:50]}... (score: {trace.grounded_score:.2f})")
         if len(traces) > 10:
             console.print(f"  ... and {len(traces) - 10} more")
+        console.print(f"\n[dim]Model: {model_name}[/dim]")
+        console.print(f"[dim]Settings: steps={steps}, candidates={candidates}, batch_size={batch_size}[/dim]")
         return
 
     # Convert traces to training examples
@@ -256,12 +271,23 @@ def optimize_simba(
         raise typer.Exit(1)
 
     console.print(f"[cyan]Created {len(examples)} training examples[/cyan]")
-    console.print(f"[cyan]Running SIMBA optimization (steps={steps}, candidates={candidates}, threads={threads})...[/cyan]")
 
     try:
         from .core.rlm import RLM
         from .core.simba_optimizer import save_optimized_program, save_optimization_state, OptimizationState, get_trace_count
+        from .core.user_config import OptimizationConfig, load_config
         import dspy
+
+        # Get model from CLI, config, or default
+        user_cfg = load_config()
+        opt_cfg = OptimizationConfig.from_user_config()
+        default_model = user_cfg.get("model", "openai/gpt-4o-mini")
+        
+        # Priority: CLI --model > optimization.model > main model
+        model_name = model or opt_cfg.get_model(default_model)
+        
+        console.print(f"[cyan]Running SIMBA optimization (steps={steps}, candidates={candidates}, threads={threads})...[/cyan]")
+        console.print(f"  [dim]Model: {model_name}[/dim]")
 
         # Get the RLM program to optimize
         rlm = RLM()
@@ -272,9 +298,9 @@ def optimize_simba(
             num_threads=threads,
         )
 
-        # Configure DSPy with our LM before optimization
-        # The LM is already configured in RLM, just ensure dspy.settings has it
-        dspy.configure(lm=rlm._lm)
+        # Configure DSPy with the optimization model
+        lm = dspy.LM(model_name)
+        dspy.configure(lm=lm)
 
         optimized_program, result = optimizer.optimize(
             program=rlm._rlm,
