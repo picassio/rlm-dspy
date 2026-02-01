@@ -414,12 +414,12 @@ def load_config() -> dict[str, Any]:
             return _validate_config(config)
         except FileNotFoundError:
             return DEFAULT_CONFIG.copy()
-    except (yaml.YAMLError, PermissionError, UnicodeDecodeError) as e:
-        logger.warning("Failed to load config from %s: %s", CONFIG_FILE, e)
-        return DEFAULT_CONFIG.copy()
-    except Exception as e:
-        logger.warning("Unexpected error loading config from %s: %s", CONFIG_FILE, e)
-        return DEFAULT_CONFIG.copy()
+        except (yaml.YAMLError, PermissionError, UnicodeDecodeError) as e:
+            logger.warning("Failed to load config from %s: %s", CONFIG_FILE, e)
+            return DEFAULT_CONFIG.copy()
+        except Exception as e:
+            logger.warning("Unexpected error loading config from %s: %s", CONFIG_FILE, e)
+            return DEFAULT_CONFIG.copy()
 
 
 def save_config(config: dict[str, Any], use_template: bool = True) -> None:

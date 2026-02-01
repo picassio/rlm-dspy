@@ -172,9 +172,10 @@ class GroundedProposer:
         self.failures.append(record)
         self.queries_since_refresh += 1
         
-        # Enforce limit
+        # Enforce limit efficiently (remove oldest entries in place)
         if len(self.failures) > self.config.max_failures:
-            self.failures = self.failures[-self.config.max_failures:]
+            excess = len(self.failures) - self.config.max_failures
+            del self.failures[:excess]
         
         self._save_state()
         
@@ -207,9 +208,10 @@ class GroundedProposer:
         self.successes.append(record)
         self.queries_since_refresh += 1
         
-        # Enforce limit
+        # Enforce limit efficiently (remove oldest entries in place)
         if len(self.successes) > self.config.max_successes:
-            self.successes = self.successes[-self.config.max_successes:]
+            excess = len(self.successes) - self.config.max_successes
+            del self.successes[:excess]
         
         self._save_state()
     

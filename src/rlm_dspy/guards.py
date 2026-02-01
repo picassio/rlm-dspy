@@ -367,16 +367,17 @@ def validate_trajectory(
     
     if not hasattr(result, 'trajectory') or not result.trajectory:
         # No trajectory - can't validate grounding, but can check other dimensions
+        # Apply standardized penalties (consistent across all code paths)
         base_score = 1.0
         if is_generic:
-            base_score -= 0.3
+            base_score -= 0.2  # -20% for generic responses
         if echoes:
-            base_score -= 0.2
+            base_score -= 0.15  # -15% for echoing query
         if not entities_preserved:
-            base_score -= 0.2
+            base_score -= 0.15  # -15% for missing entities
         
         return TrajectoryValidationResult(
-            score=max(0.0, base_score),
+            score=max(0.0, min(1.0, base_score)),
             found_terms=[],
             missing_terms=[],
             is_grounded=base_score >= threshold,
@@ -401,16 +402,17 @@ def validate_trajectory(
     
     if not answer_terms:
         # No specific terms to validate - check other dimensions only
+        # Apply standardized penalties (consistent across all code paths)
         base_score = 1.0
         if is_generic:
-            base_score -= 0.3
+            base_score -= 0.2  # -20% for generic responses
         if echoes:
-            base_score -= 0.2
+            base_score -= 0.15  # -15% for echoing query
         if not entities_preserved:
-            base_score -= 0.2
+            base_score -= 0.15  # -15% for missing entities
         
         return TrajectoryValidationResult(
-            score=max(0.0, base_score),
+            score=max(0.0, min(1.0, base_score)),
             found_terms=[],
             missing_terms=[],
             is_grounded=base_score >= threshold,

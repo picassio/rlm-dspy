@@ -175,7 +175,8 @@ def _output_result(result, output_format, output_file, verbose, debug):
             table.add_row("Iterations", str(result.iterations))
             console.print(table)
     else:
-        console.print(f"[red]Error: {result.error or 'Unknown error'}[/red]")
+        error_msg = result.error or "Query failed (no error details available)"
+        console.print(f"[red]Error: {error_msg}[/red]")
         raise typer.Exit(1)
 
 
@@ -273,8 +274,10 @@ def register_commands(app: typer.Typer) -> None:
                     final_answer=result.answer,
                     grounded_score=grounded_score,
                 )
-            except Exception:
-                pass  # Don't fail on trace recording errors
+            except Exception as e:
+                # Log but don't fail on trace recording errors
+                import logging
+                logging.getLogger(__name__).debug("Trace recording failed: %s", e)
 
         resolved_format = output_format or ("json" if output_json else "text")
         _output_result(result, resolved_format, output_file, verbose, debug)
