@@ -380,6 +380,119 @@ class TraceCollector:
         path.write_text(json.dumps(data, indent=2))
         return len(self.traces)
     
+    def get_failures(self, max_score: float = 0.7) -> list[REPLTrace]:
+        """Get failed traces (low grounded score).
+        
+        Args:
+            max_score: Maximum score to consider as failure
+            
+        Returns:
+            List of traces with grounded_score <= max_score
+        """
+        return [t for t in self.traces if t.grounded_score <= max_score]
+    
+    def get_successes(self, min_score: float = 0.8) -> list[REPLTrace]:
+        """Get successful traces (high grounded score).
+        
+        Args:
+            min_score: Minimum score to consider as success
+            
+        Returns:
+            List of traces with grounded_score >= min_score
+        """
+        return [t for t in self.traces if t.grounded_score >= min_score]
+    
+    def to_failure_patterns(self, max_score: float = 0.7, max_patterns: int = 20) -> list[dict[str, Any]]:
+        """Convert failed traces to failure patterns for tip generation.
+        
+        Returns list of dicts with: query, score, tools_used, inferred_reason
+        """
+        failures = self.get_failures(max_score)
+        patterns = []
+        
+        for trace in failures[-max_patterns:]:  # Most recent failures
+            # Infer failure reason from trace
+            reason = self._infer_failure_reason(trace)
+            patterns.append({
+                "query": trace.query[:200],  # Truncate long queries
+                "query_type": trace.query_type,
+                "score": trace.grounded_score,
+                "tools_used": trace.tools_used,
+                "reason": reason,
+            })
+        
+        return patterns
+    
+    def to_success_patterns(self, min_score: float = 0.8, max_patterns: int = 20) -> list[dict[str, Any]]:
+        """Convert successful traces to success patterns.
+        
+        Returns list of dicts with: query, score, tools_used, key_patterns
+        """
+        successes = self.get_successes(min_score)
+        patterns = []
+        
+        for trace in successes[-max_patterns:]:  # Most recent successes
+            key_patterns = self._extract_success_patterns(trace)
+            patterns.append({
+                "query": trace.query[:200],
+                "query_type": trace.query_type,
+                "score": trace.grounded_score,
+                "tools_used": trace.tools_used,
+                "key_patterns": key_patterns,
+            })
+        
+        return patterns
+    
+    def _infer_failure_reason(self, trace: REPLTrace) -> str:
+        """Infer why a trace failed based on its content."""
+        reasons = []
+        
+        # Check if verification tools were used
+        verification_tools = {"read_file", "ripgrep", "find_functions", "find_classes"}
+        used_verification = bool(set(trace.tools_used) & verification_tools)
+        
+        if not used_verification:
+            reasons.append("No verification tools used")
+        
+        if "read_file" not in trace.tools_used:
+            reasons.append("Did not verify with read_file")
+        
+        if not trace.tools_used:
+            reasons.append("No tools used at all")
+        
+        # Check for common failure indicators in outputs
+        for output in trace.outputs:
+            output_lower = output.lower()
+            if "error" in output_lower or "exception" in output_lower:
+                reasons.append("Tool execution error")
+                break
+            if "not found" in output_lower or "no results" in output_lower:
+                reasons.append("Search returned no results")
+                break
+        
+        return "; ".join(reasons) if reasons else "Unknown failure reason"
+    
+    def _extract_success_patterns(self, trace: REPLTrace) -> list[str]:
+        """Extract patterns that contributed to success."""
+        patterns = []
+        
+        if "read_file" in trace.tools_used:
+            patterns.append("Verified with read_file")
+        
+        if any(t in trace.tools_used for t in ["ripgrep", "find_functions", "find_classes"]):
+            patterns.append("Used structural search")
+        
+        if "semantic_search" in trace.tools_used:
+            patterns.append("Used semantic search for discovery")
+        
+        if len(trace.tools_used) >= 3:
+            patterns.append("Used multiple tools")
+        
+        if trace.reasoning_steps and len(trace.reasoning_steps) >= 2:
+            patterns.append("Multi-step reasoning")
+        
+        return patterns
+
     def import_traces(self, path: Path) -> int:
         """Import traces from a file. Returns number of traces imported."""
         data = json.loads(path.read_text())

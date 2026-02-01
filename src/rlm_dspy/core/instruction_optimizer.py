@@ -446,6 +446,51 @@ class InstructionOptimizer:
         self.history = []
         self._save_state()
         return count
+    
+    def set_instruction(self, key: str, text: str) -> None:
+        """Set instruction text for a key.
+        
+        Args:
+            key: Instruction key (e.g., "tool_instructions")
+            text: New instruction text
+        """
+        self.current_instructions[key] = text
+        self._save_state()
+        logger.debug("Set instruction for key '%s' (%d chars)", key, len(text))
+    
+    def add_rules(self, rules: list[str]) -> None:
+        """Add SIMBA-generated rules to the tool_instructions.
+        
+        Rules are appended as a "LEARNED RULES" section.
+        
+        Args:
+            rules: List of rule strings to add
+        """
+        if not rules:
+            return
+        
+        # Get current tool_instructions
+        current = self.current_instructions.get("tool_instructions", DEFAULT_INSTRUCTIONS.get("tool_instructions", ""))
+        
+        # Remove any existing LEARNED RULES section
+        if "\n\nLEARNED RULES:" in current:
+            current = current.split("\n\nLEARNED RULES:")[0]
+        
+        # Add new rules section
+        rules_section = "\n\nLEARNED RULES (from optimization):\n" + "\n".join(f"- {rule}" for rule in rules)
+        
+        self.current_instructions["tool_instructions"] = current + rules_section
+        self._save_state()
+        
+        logger.info("Added %d rules to tool_instructions", len(rules))
+    
+    def get_all_instructions(self) -> dict[str, str]:
+        """Get all current instructions as a dictionary.
+        
+        Returns:
+            Dict mapping instruction key to instruction text
+        """
+        return self.current_instructions.copy()
 
 
 # Global optimizer instance

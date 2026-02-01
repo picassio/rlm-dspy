@@ -113,6 +113,7 @@ def _resolve_embedding_api_key(config: dict) -> str | None:
 
     # Provider-specific keys
     provider_keys = {
+        "openrouter/": "OPENROUTER_API_KEY",
         "openai/": "OPENAI_API_KEY",
         "cohere/": "COHERE_API_KEY",
         "voyage/": "VOYAGE_API_KEY",
@@ -167,6 +168,9 @@ def get_embedder(config: EmbeddingConfig | None = None) -> Any:
     if config.model.lower() == "local":
         # Use local sentence-transformers model
         embedder = _create_local_embedder(config)
+    elif config.model.startswith("openrouter/"):
+        # Use OpenRouter embeddings API
+        embedder = _create_openrouter_embedder(config)
     else:
         # Use hosted model via litellm
         embedder = _create_hosted_embedder(config)
@@ -192,6 +196,68 @@ def _create_local_embedder(config: EmbeddingConfig) -> Any:
     # Wrap in dspy.Embedder for consistent interface
     import dspy
     return dspy.Embedder(model.encode, batch_size=config.batch_size)
+
+
+def _create_openrouter_embedder(config: EmbeddingConfig) -> Any:
+    """Create embedder using OpenRouter embeddings API.
+    
+    OpenRouter provides embeddings via /api/v1/embeddings endpoint.
+    Model format: openrouter/openai/text-embedding-3-small
+    """
+    import httpx
+    import numpy as np
+    import dspy
+    
+    # Extract the actual model name (remove openrouter/ prefix)
+    model_name = config.model.replace("openrouter/", "", 1)
+    api_key = config.api_key
+    
+    if not api_key:
+        raise ValueError(
+            "OpenRouter embeddings require OPENROUTER_API_KEY.\n"
+            "Set it in your environment or ~/.rlm/.env"
+        )
+    
+    logger.info("Using OpenRouter embedding model: %s", model_name)
+    
+    def openrouter_embed(texts: list[str]) -> np.ndarray:
+        """Call OpenRouter embeddings API."""
+        url = "https://openrouter.ai/api/v1/embeddings"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        
+        all_embeddings = []
+        batch_size = config.batch_size
+        
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i:i + batch_size]
+            payload = {
+                "model": model_name,
+                "input": batch,
+            }
+            
+            try:
+                with httpx.Client(timeout=60.0) as client:
+                    response = client.post(url, headers=headers, json=payload)
+                    response.raise_for_status()
+                    data = response.json()
+                    
+                    # Extract embeddings from response
+                    batch_embeddings = [item["embedding"] for item in data["data"]]
+                    all_embeddings.extend(batch_embeddings)
+            except httpx.HTTPStatusError as e:
+                logger.error("OpenRouter embedding error: %s - %s", e.response.status_code, e.response.text)
+                raise ValueError(f"OpenRouter embedding failed: {e.response.text}")
+            except Exception as e:
+                logger.error("OpenRouter embedding error: %s", e)
+                raise
+        
+        return np.array(all_embeddings, dtype=np.float32)
+    
+    # Wrap in dspy.Embedder for consistent interface
+    return dspy.Embedder(openrouter_embed, batch_size=config.batch_size)
 
 
 def _create_hosted_embedder(config: EmbeddingConfig) -> Any:
@@ -255,6 +321,9 @@ def get_embedding_dim(config: EmbeddingConfig | None = None) -> int:
         "openai/text-embedding-3-small": 1536,
         "openai/text-embedding-3-large": 3072,
         "openai/text-embedding-ada-002": 1536,
+        "openrouter/openai/text-embedding-3-small": 1536,
+        "openrouter/openai/text-embedding-3-large": 3072,
+        "openrouter/openai/text-embedding-ada-002": 1536,
         "cohere/embed-english-v3.0": 1024,
         "cohere/embed-english-light-v3.0": 384,
         "voyage/voyage-3": 1024,

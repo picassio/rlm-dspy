@@ -69,7 +69,18 @@ ANTHROPIC_MODELS: list[ModelInfo] = [
         reasoning=True,
         input_types=["text", "image"],
         context_window=200000,
-        max_tokens=64000,
+        max_tokens=32000,  # API limit is 32000, not 64000
+        cost=ModelCost(input=15.0, output=75.0, cache_read=1.5, cache_write=18.75),
+    ),
+    ModelInfo(
+        id="anthropic/claude-opus-4-5-20251101",
+        name="Claude Opus 4.5",
+        provider="anthropic",
+        api="anthropic",
+        reasoning=True,
+        input_types=["text", "image"],
+        context_window=200000,
+        max_tokens=32000,
         cost=ModelCost(input=15.0, output=75.0, cache_read=1.5, cache_write=18.75),
     ),
     ModelInfo(

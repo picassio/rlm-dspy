@@ -1160,10 +1160,50 @@ rlm-dspy optimize tips --reset
 rlm-dspy optimize instructions
 rlm-dspy optimize instructions tool_instructions
 
-# Run SIMBA optimization (requires collected traces)
-rlm-dspy optimize simba --dry-run     # Preview
-rlm-dspy optimize simba --batch-size 8  # Run with smaller batch
+# Run GEPA optimization (recommended)
+rlm-dspy optimize gepa --fast           # Fast proxy mode (~2-15 min, recommended)
+rlm-dspy optimize gepa --fast --auto medium  # More budget (~5-30 min)
+rlm-dspy optimize gepa                  # Full RLM mode (slow, 1-6+ hours)
+
+# Run unified optimization (GEPA is default)
+rlm-dspy optimize run --dry-run         # Preview what would be optimized
+rlm-dspy optimize run --fast            # Fast mode
+rlm-dspy optimize run --target tips     # Only regenerate tips
+
+# Run SIMBA optimization (legacy, not recommended)
+rlm-dspy optimize simba --fast          # Fast mode
+rlm-dspy optimize run -o simba --fast   # Via unified command
+
+# Reset/clear optimization data
+rlm-dspy optimize reset                 # Clear all (interactive)
+rlm-dspy optimize reset -t traces -f    # Clear only traces (force)
+rlm-dspy optimize reset -t optimization # Clear SIMBA saved program
+rlm-dspy optimize reset -t all -f       # Clear everything (force)
+
+# Configure optimization settings
+rlm-dspy optimize config                # Show current config
+rlm-dspy optimize config --background   # Enable background mode
+rlm-dspy optimize config -B             # Disable background mode
+rlm-dspy optimize config --min-traces 20 --min-hours 12
+
+# Enable/disable auto-optimization
+rlm-dspy optimize enable                # Enable
+rlm-dspy optimize enable -B             # Enable without background
+rlm-dspy optimize disable               # Disable
 ```
+
+**Reset targets:**
+- `all` - Clear everything (traces + optimization + optimizer + proposer)
+- `traces` - Clear trace history (~/.rlm/traces/)
+- `optimization` - Clear SIMBA saved program (~/.rlm/optimization/)
+- `optimizer` - Clear instruction optimizer state (~/.rlm/optimizer/)
+- `proposer` - Clear grounded proposer state (~/.rlm/proposer/)
+
+**Config options:**
+- `--background/-b` / `--no-background/-B` - Enable/disable background optimization
+- `--min-traces N` - Minimum new traces before auto-optimization (default: 50)
+- `--min-hours N` - Minimum hours between auto-optimizations (default: 24)
+- `--max-budget N` - Maximum budget per optimization in dollars (default: 0.50)
 
 ### Trace Management
 
@@ -1196,26 +1236,269 @@ The Grounded Proposer analyzes failure patterns to generate actionable tips:
 
 These tips are automatically injected into the RLM signature, helping the model avoid past mistakes.
 
-### SIMBA Optimizer
+### Unified Optimization
 
-SIMBA (Stochastic Introspective Mini-Batch Ascent) uses collected traces to optimize prompts:
+The unified optimizer runs all optimization components in one command:
 
 ```bash
-# Check if you have enough traces
-rlm-dspy optimize simba --dry-run
+# Run full optimization (demos + tips + rules)
+rlm-dspy optimize run
 
-# Output:
-# SIMBA Optimization
-#   Traces found: 28
-#   Qualifying (score >= 0.7): 28
-#   Batch size: 16
-#   Steps: 4
-#   Candidates/step: 4
+# Fast mode (~5-15 min)
+rlm-dspy optimize run --fast
+
+# Preview what would be optimized
+rlm-dspy optimize run --dry-run
+
+# Only regenerate tips (no SIMBA)
+rlm-dspy optimize run --target tips
 ```
 
+**What gets optimized:**
+
+| Component | Description | Source |
+|-----------|-------------|--------|
+| **Demos** | Few-shot examples shown to LLM | SIMBA selects best from traces |
+| **Tips** | Actionable tips from failures | Generated from failure patterns |
+| **Rules** | SIMBA-generated improvement rules | Extracted from SIMBA optimization |
+
+All components are saved to `~/.rlm/optimization/` and auto-loaded on next query.
+
+### SIMBA Optimizer (Legacy)
+
+> **Note:** GEPA is recommended over SIMBA for RLM optimization. SIMBA only optimizes
+> demos (few-shot examples), while GEPA evolves instruction text which is more effective
+> for complex multi-step agents.
+
+SIMBA (Stochastic Introspective Mini-Batch Ascent) optimizes demos (few-shot examples):
+
+```bash
+# Use SIMBA explicitly
+rlm-dspy optimize simba --fast
+
+# Or customize individually
+rlm-dspy optimize simba --steps 2 --candidates 3 --threads 2
+```
+
+| Option | Default | Fast Mode | Description |
+|--------|---------|-----------|-------------|
+| `--steps` | 4 | 1 | Optimization iterations |
+| `--candidates` | 4 | 2 | Candidate programs per step |
+| `--batch-size` | 16 | 8 | Examples evaluated per candidate |
+| `--threads` | 2 | 2 | Parallel evaluation threads |
+
+**Estimated time:**
+- `--fast`: ~5-15 minutes
+- Default: ~1-2 hours
+
 Requirements:
-- At least `batch_size` traces (default: 16)
-- Traces must have `grounded_score >= min_score` (default: 0.7)
+- At least 4 traces with `grounded_score >= 0.7`
+
+### GEPA Optimizer (Recommended)
+
+GEPA (Reflective Prompt Evolution) is the **default and recommended optimizer** for RLM.
+It uses execution traces and textual feedback to evolve prompts - much better for complex
+multi-step agents like RLM compared to SIMBA.
+
+#### Fast Proxy Mode (Recommended)
+
+RLM is a complex agent with an interpreter loop (10-50 LLM calls per evaluation). Running
+GEPA on the full RLM would take hours. **Fast proxy mode** solves this by using a lightweight
+proxy that runs in 1 LLM call per evaluation - making GEPA **50x faster**.
+
+```bash
+# Fast proxy mode (recommended) - 2-15 minutes
+rlm-dspy optimize gepa --fast
+
+# Fast mode with more budget
+rlm-dspy optimize gepa --fast --auto medium
+
+# Full RLM mode (slow, 1-6+ hours) - only if you need to test tool usage
+rlm-dspy optimize gepa
+```
+
+| Mode | LLM Calls/Eval | Time (5 examples, 2 evals) | Best For |
+|------|----------------|---------------------------|----------|
+| `--fast` (proxy) | 1 | ~2-5 minutes | **Most use cases** |
+| Default (full RLM) | 10-50 | ~30-60 minutes | Testing tool behavior |
+
+**How Fast Proxy Mode Works:**
+
+1. Creates a lightweight `RLMProxy` using `dspy.Predict` (single LLM call)
+2. Shares the same signature/instructions as the real RLM
+3. GEPA optimizes the proxy's instructions efficiently
+4. Optimized instructions are transferred back to the real RLM
+
+The trade-off: proxy mode doesn't test actual tool execution, but since GEPA primarily
+optimizes instruction text (not tool behavior), this is usually fine.
+
+#### Command Line Options
+
+```bash
+rlm-dspy optimize gepa [OPTIONS]
+```
+
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `--fast` | `-f` | false | **Recommended.** Use fast proxy mode (50x faster). Uses lightweight `dspy.Predict` instead of full RLM interpreter loop. |
+| `--auto` | `-a` | `light` | Budget preset. One of: `light`, `medium`, `heavy`. Controls how many evaluations GEPA runs. |
+| `--max-evals` | `-e` | (from auto) | Explicit number of full evaluations. Overrides `--auto`. Lower = faster, higher = more thorough. |
+| `--max-examples` | `-n` | 50 | Maximum training examples to use from traces. More examples = better coverage but slower. |
+| `--min-score` | `-s` | 0.7 | Minimum `grounded_score` for traces to be included in training. Higher = stricter quality filter. |
+| `--threads` | `-t` | 2 | Parallel evaluation threads. Keep low (2-4) to avoid rate limits. |
+| `--teacher` | | (config) | Teacher model for GEPA reflection. Overrides `optimization.teacher_model` in config. |
+| `--tools` | | false | Enable tool optimization (experimental). For ReAct-style modules. |
+| `--dry-run` | | false | Preview what would be optimized without running. Shows trace count and settings. |
+
+#### Budget Control
+
+You can control GEPA's budget in two ways:
+
+**Option 1: Use presets (`--auto`)**
+```bash
+rlm-dspy optimize gepa --fast --auto light   # Quick (~2-5 min with --fast)
+rlm-dspy optimize gepa --fast --auto medium  # Balanced (~5-15 min with --fast)
+rlm-dspy optimize gepa --fast --auto heavy   # Thorough (~15-30 min with --fast)
+```
+
+**Option 2: Explicit control (`--max-evals`)**
+```bash
+rlm-dspy optimize gepa --fast --max-evals 1   # Minimal (1 full evaluation)
+rlm-dspy optimize gepa --fast --max-evals 5   # Moderate
+rlm-dspy optimize gepa --fast --max-evals 10  # Thorough
+```
+
+`--max-evals` overrides `--auto`. Each "full eval" evaluates all training examples once.
+
+**Estimated times (with `--fast`):**
+
+| Budget | Metric Calls | Time (5 examples) | Time (10 examples) |
+|--------|--------------|-------------------|-------------------|
+| `--max-evals 1` | ~5-10 | ~1-2 min | ~2-4 min |
+| `--max-evals 2` | ~10-20 | ~2-4 min | ~4-8 min |
+| `--auto light` | ~50-100 | ~5-10 min | ~10-20 min |
+| `--auto medium` | ~200-400 | ~15-30 min | ~30-60 min |
+| `--auto heavy` | ~500+ | ~30-60 min | ~1-2 hours |
+
+**Without `--fast` (full RLM mode), multiply times by ~50x.**
+
+#### Examples
+
+```bash
+# Recommended: Fast mode with light budget
+rlm-dspy optimize gepa --fast
+
+# Quick test with minimal budget
+rlm-dspy optimize gepa --fast --max-evals 1 --max-examples 4
+
+# More thorough optimization
+rlm-dspy optimize gepa --fast --auto medium --max-examples 20
+
+# Use specific teacher model
+rlm-dspy optimize gepa --fast --teacher openai/gpt-4o
+
+# Preview without running
+rlm-dspy optimize gepa --fast --dry-run
+
+# Full RLM mode (slow, only if needed)
+rlm-dspy optimize gepa --max-evals 2
+```
+
+**What GEPA Optimizes:**
+
+GEPA evolves the **instruction text** in RLM's internal predictors:
+
+| Predictor | Purpose | What GEPA Evolves |
+|-----------|---------|-------------------|
+| `generate_action` | Decides what Python code to run next | Instruction text for code generation strategy |
+| `extract` | Extracts final answer from execution history | Instruction text for answer extraction |
+
+Before GEPA:
+```
+generate_action.instructions = "Given the fields `query`, produce..."  (generic)
+```
+
+After GEPA:
+```
+generate_action.instructions = "# Task: Answer Questions About a Codebase
+                                You are an AI assistant...
+                                ## Exploration Strategy
+                                ### Phase 1: EXPLORE..." (task-specific!)
+```
+
+GEPA does NOT change: tools, model, signature fields, or execution logic.
+
+**Teacher Model:**
+GEPA uses a teacher model for reflection (analyzing failures and proposing improvements).
+Set via:
+- `--teacher` CLI option (highest priority)
+- `optimization.teacher_model` in `~/.rlm/config.yaml`
+- Defaults to main model if not set
+
+Recommended: Use a strong model like `openai/gpt-4o` or `anthropic/claude-3-5-sonnet`.
+
+```yaml
+# ~/.rlm/config.yaml
+optimization:
+  teacher_model: openai/gpt-4o  # Strong model for reflection
+```
+
+**How Optimized Instructions Are Applied:**
+
+1. After running GEPA, instructions are saved to `~/.rlm/optimization/optimized_program.json`
+2. On every RLM initialization, saved instructions are automatically loaded
+3. Instructions are applied to the RLM predictors via `apply_gepa_instructions()`
+
+```bash
+# Check saved optimization
+cat ~/.rlm/optimization/optimized_program.json
+
+# Reset if needed
+rlm-dspy optimize reset -t optimization
+```
+
+**Key advantages over SIMBA:**
+- Uses textual feedback for better guidance
+- Reflection-based instruction evolution
+- Pareto-efficient search
+- Learns task-specific exploration strategies
+- Optional joint tool optimization
+- **50x faster with `--fast` proxy mode**
+
+**Requirements:**
+- At least 4 traces with `grounded_score >= 0.7`
+- Requires DSPy >= 3.0
+- Deno runtime (for RLM code execution):
+  ```bash
+  curl -fsSL https://deno.land/install.sh | sh
+  export PATH="$HOME/.deno/bin:$PATH"
+  ```
+
+#### Why Fast Proxy Mode Exists
+
+GEPA evaluates the program hundreds of times during optimization. For simple `dspy.Predict`
+modules (1 LLM call), this takes seconds. But RLM runs a full interpreter loop with
+10-50 LLM calls per evaluation, making full GEPA take **6-20+ hours**.
+
+The fast proxy mode creates a lightweight `RLMProxy` that:
+- Uses `dspy.Predict` instead of the interpreter loop
+- Runs in 1 LLM call (vs 10-50 for full RLM)
+- Optimizes the same instruction text
+
+| Approach | Per-Eval Time | GEPA Light Budget |
+|----------|---------------|-------------------|
+| Full RLM | 30-120 seconds | 6-20+ hours |
+| Fast Proxy | 1-5 seconds | 5-30 minutes |
+
+**Trade-offs:**
+- ✅ 50x faster optimization
+- ✅ Same instruction quality (GEPA evolves text, not tool behavior)
+- ✅ Instructions transfer correctly to real RLM
+- ⚠️ Doesn't test actual tool execution during optimization
+- ⚠️ Metric scores may differ from real RLM performance
+
+For most use cases, **fast proxy mode is recommended**. Only use full RLM mode if you
+specifically need to test tool behavior during optimization.
 
 ## Index Compression
 

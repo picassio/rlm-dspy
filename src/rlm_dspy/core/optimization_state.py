@@ -116,10 +116,20 @@ class OptimizationState:
 
 @dataclass
 class SavedOptimization:
-    """A saved optimized program state."""
+    """A saved optimized program state.
+    
+    Stores all optimization outputs:
+    - demos: Few-shot examples selected by optimizer
+    - instructions: Optimized instruction text (keyed by instruction type)
+    - tips: Learned tips from failure analysis
+    - rules: SIMBA-generated rules for improvement
+    """
 
     demos: list[dict[str, Any]] = field(default_factory=list)
-    instructions: str = ""
+    # Changed from str to dict for keyed instructions
+    instructions: dict[str, str] = field(default_factory=dict)
+    tips: list[str] = field(default_factory=list)
+    rules: list[str] = field(default_factory=list)  # SIMBA-generated rules
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
     optimizer_type: str = "simba"
     result: OptimizationResult | None = None
@@ -129,6 +139,8 @@ class SavedOptimization:
         return {
             "demos": self.demos,
             "instructions": self.instructions,
+            "tips": self.tips,
+            "rules": self.rules,
             "timestamp": self.timestamp.isoformat(),
             "optimizer_type": self.optimizer_type,
             "result": self.result.to_dict() if self.result else None,
@@ -138,9 +150,18 @@ class SavedOptimization:
     def from_dict(cls, data: dict[str, Any]) -> "SavedOptimization":
         """Create from dictionary."""
         result_data = data.get("result")
+        
+        # Handle backwards compatibility: old format had instructions as str
+        instructions = data.get("instructions", {})
+        if isinstance(instructions, str):
+            # Convert old string format to new dict format
+            instructions = {"legacy": instructions} if instructions else {}
+        
         return cls(
             demos=data.get("demos", []),
-            instructions=data.get("instructions", ""),
+            instructions=instructions,
+            tips=data.get("tips", []),
+            rules=data.get("rules", []),
             timestamp=datetime.fromisoformat(data["timestamp"]) if data.get("timestamp") else datetime.now(UTC),
             optimizer_type=data.get("optimizer_type", "simba"),
             result=OptimizationResult.from_dict(result_data) if result_data else None,
@@ -200,13 +221,23 @@ def load_optimized_program() -> SavedOptimization | None:
         return None
 
 
-def save_optimized_program(program: Any, result: OptimizationResult, optimizer_type: str = "simba") -> None:
+def save_optimized_program(
+    program: Any,
+    result: OptimizationResult,
+    optimizer_type: str = "simba",
+    instructions: dict[str, str] | None = None,
+    tips: list[str] | None = None,
+    rules: list[str] | None = None,
+) -> None:
     """Save optimized program to disk.
     
     Args:
         program: The optimized DSPy program
         result: The optimization result
         optimizer_type: Type of optimizer used
+        instructions: Optimized instructions keyed by type (e.g., {"tool_instructions": "..."})
+        tips: Learned tips from failure analysis
+        rules: SIMBA-generated rules
     """
     OPTIMIZATION_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -215,14 +246,16 @@ def save_optimized_program(program: Any, result: OptimizationResult, optimizer_t
     if hasattr(program, "demos"):
         demos = program.demos if isinstance(program.demos, list) else []
 
-    # Extract instructions
-    instructions = ""
-    if hasattr(program, "signature") and hasattr(program.signature, "__doc__"):
-        instructions = program.signature.__doc__ or ""
+    # Extract rules from SIMBA if available
+    extracted_rules = rules or []
+    if not extracted_rules and hasattr(program, "rules"):
+        extracted_rules = program.rules if isinstance(program.rules, list) else []
 
     saved = SavedOptimization(
         demos=demos,
-        instructions=instructions,
+        instructions=instructions or {},
+        tips=tips or [],
+        rules=extracted_rules,
         optimizer_type=optimizer_type,
         result=result,
     )

@@ -56,8 +56,9 @@ DEFAULT_CONFIG = {
     # Optimization settings
     "optimization": {
         "enabled": True,                # Enable auto-optimization
-        "optimizer": "simba",           # Optimizer type: simba, mipro, copro (future: gepa)
+        "optimizer": "gepa",            # Optimizer type: gepa (recommended), simba (legacy)
         "model": None,                  # null = use default model
+        "teacher_model": None,          # Teacher/reflection model for GEPA (null = use model)
         "min_new_traces": 50,           # Traces needed before optimizing
         "min_hours_between": 24,        # Minimum hours between optimizations
         "max_budget": 0.50,             # Max cost per optimization run
@@ -75,8 +76,9 @@ class OptimizationConfig:
     """Configuration for auto-optimization."""
 
     enabled: bool = True
-    optimizer: str = "simba"  # "simba", "mipro", "copro" (future: "gepa")
+    optimizer: str = "gepa"  # "gepa" (recommended), "simba" (legacy)
     model: str | None = None  # None = use default model from config
+    teacher_model: str | None = None  # Teacher/reflection model for GEPA (None = use model)
     min_new_traces: int = 50
     min_hours_between: int = 24
     max_budget: float = 0.50
@@ -90,6 +92,7 @@ class OptimizationConfig:
             enabled=data.get("enabled", defaults["enabled"]),
             optimizer=data.get("optimizer", defaults["optimizer"]),
             model=data.get("model", defaults["model"]),
+            teacher_model=data.get("teacher_model", defaults.get("teacher_model")),
             min_new_traces=data.get("min_new_traces", defaults["min_new_traces"]),
             min_hours_between=data.get("min_hours_between", defaults["min_hours_between"]),
             max_budget=data.get("max_budget", defaults["max_budget"]),
@@ -113,6 +116,19 @@ class OptimizationConfig:
             The optimization model (self.model if set, else default_model)
         """
         return self.model if self.model else default_model
+
+    def get_teacher_model(self, default_model: str) -> str:
+        """Get the teacher/reflection model for GEPA.
+        
+        Args:
+            default_model: The default model from main config
+            
+        Returns:
+            The teacher model (self.teacher_model if set, else model, else default_model)
+        """
+        if self.teacher_model:
+            return self.teacher_model
+        return self.get_model(default_model)
 
 
 # Template for config file with comments
@@ -314,7 +330,7 @@ def save_config(config: dict[str, Any], use_template: bool = True) -> None:
             env_file=fmt(full_config.get("env_file")),
             # Optimization settings
             opt_enabled=fmt(opt_config.get("enabled", True)),
-            opt_optimizer=fmt(opt_config.get("optimizer", "simba")),
+            opt_optimizer=fmt(opt_config.get("optimizer", "gepa")),
             opt_model=fmt(opt_config.get("model")),
             opt_min_new_traces=fmt(opt_config.get("min_new_traces", 50)),
             opt_min_hours_between=fmt(opt_config.get("min_hours_between", 24)),

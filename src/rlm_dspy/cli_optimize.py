@@ -185,16 +185,38 @@ def optimize_patterns() -> None:
 def optimize_simba(
     min_score: Annotated[float, typer.Option("--min-score", "-s", help="Minimum trace score")] = 0.7,
     max_examples: Annotated[int, typer.Option("--max-examples", "-n", help="Maximum training examples")] = 100,
-    batch_size: Annotated[int, typer.Option("--batch-size", "-b", help="Mini-batch size")] = 16,
-    steps: Annotated[int, typer.Option("--steps", help="Optimization steps")] = 4,
-    candidates: Annotated[int, typer.Option("--candidates", "-c", help="Candidates per step")] = 4,
-    threads: Annotated[int, typer.Option("--threads", "-t", help="Parallel threads for evaluation")] = 4,
+    batch_size: Annotated[int | None, typer.Option("--batch-size", "-b", help="Mini-batch size (smaller=faster)")] = None,
+    steps: Annotated[int | None, typer.Option("--steps", help="Optimization steps (fewer=faster)")] = None,
+    candidates: Annotated[int | None, typer.Option("--candidates", "-c", help="Candidates per step (fewer=faster)")] = None,
+    threads: Annotated[int | None, typer.Option("--threads", "-t", help="Parallel threads (default: 2 to avoid rate limits)")] = None,
+    fast: Annotated[bool, typer.Option("--fast", help="Fast preset: 1 step, 2 candidates")] = False,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Show what would be optimized")] = False,
 ) -> None:
     """Run SIMBA self-improving optimization.
 
     Uses collected traces to optimize the RLM program via DSPy's SIMBA optimizer.
+
+    \b
+    Performance presets:
+      --fast:   1 step, 2 candidates, 2 threads  (~5-15 min)
+      Default:  4 steps, 4 candidates, 2 threads (~1-2 hours)
+
+    \b
+    Or customize individually:
+      --steps 2 --candidates 3 --threads 4
     """
+    # Apply presets
+    # Note: threads default to 2 to avoid rate limiting on most APIs
+    if fast:
+        steps = steps or 1
+        candidates = candidates or 2
+        threads = threads or 2
+        batch_size = batch_size or 8
+    else:
+        steps = steps or 4
+        candidates = candidates or 4
+        threads = threads or 2
+        batch_size = batch_size or 16
     from .core.trace_collector import get_trace_collector
     from .core.simba_optimizer import get_simba_optimizer, create_training_example
 
@@ -285,6 +307,535 @@ def optimize_simba(
         raise typer.Exit(1)
 
 
+@optimize_app.command("gepa")
+def optimize_gepa(
+    min_score: Annotated[float, typer.Option("--min-score", "-s", help="Min trace score for training")] = 0.7,
+    max_examples: Annotated[int, typer.Option("--max-examples", "-n", help="Max training examples")] = 50,
+    auto: Annotated[str | None, typer.Option("--auto", "-a", help="Budget preset: light, medium, heavy")] = "light",
+    max_evals: Annotated[int | None, typer.Option("--max-evals", "-e", help="Max full evaluations (overrides --auto)")] = None,
+    threads: Annotated[int, typer.Option("--threads", "-t", help="Number of parallel threads")] = 2,
+    teacher: Annotated[str | None, typer.Option("--teacher", help="Teacher/reflection model (overrides config)")] = None,
+    tool_optimization: Annotated[bool, typer.Option("--tools", help="Enable tool optimization")] = False,
+    fast_proxy: Annotated[bool, typer.Option("--fast", "-f", help="Use fast proxy mode (50x faster, instructions only)")] = False,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Show what would be optimized")] = False,
+) -> None:
+    """Run GEPA reflective prompt evolution.
+    
+    GEPA uses execution traces and textual feedback to evolve prompts.
+    Better for complex multi-step agents like RLM.
+    
+    Modes:
+      Default    - Full RLM evaluation (slow but accurate, 30-120s per eval)
+      --fast     - Proxy mode (50x faster, 1-2s per eval, instructions only)
+    
+    Budget options (use ONE):
+      --auto light   - Quick experimentation (default)
+      --auto medium  - Balanced optimization  
+      --auto heavy   - Thorough optimization
+      --max-evals N  - Exactly N full evaluations (faster, explicit control)
+    
+    Teacher Model:
+      GEPA uses a teacher model for reflection. Set via:
+      - --teacher CLI option
+      - optimization.teacher_model in ~/.rlm/config.yaml
+      - Defaults to the main model if not set
+    
+    Examples:
+        rlm-dspy optimize gepa --fast                       # Fast proxy mode (recommended)
+        rlm-dspy optimize gepa --fast --auto medium         # Fast + medium budget
+        rlm-dspy optimize gepa --fast --max-evals 2         # Explicit budget control
+        rlm-dspy optimize gepa --fast -n 10 -e 3            # 10 examples, 3 evals
+        rlm-dspy optimize gepa --teacher openai/gpt-4o     # Use GPT-4o as teacher
+        rlm-dspy optimize gepa --dry-run                    # Preview only
+        rlm-dspy optimize gepa                              # Full RLM mode (slow, 1-6h)
+    """
+    from .core.trace_collector import get_trace_collector
+    from .core.simba_optimizer import create_training_example
+    from .core.gepa_optimizer import GEPAOptimizer, GEPAConfig
+
+    console.print("[bold cyan]GEPA Reflective Prompt Evolution[/bold cyan]\n")
+
+    collector = get_trace_collector()
+    traces = [t for t in collector.traces if t.grounded_score >= min_score][:max_examples]
+
+    console.print(f"Total traces: {len(collector.traces)}")
+    console.print(f"High quality (>= {min_score}): {len(traces)}")
+
+    if len(traces) < 4:
+        console.print(f"\n[yellow]Not enough traces ({len(traces)} < 4)[/yellow]")
+        console.print("Run some queries first to collect training data.")
+        raise typer.Exit(1)
+
+    console.print(f"\n[cyan]Found {len(traces)} traces for training[/cyan]")
+
+    if dry_run:
+        console.print("\n[bold]Would train on:[/bold]")
+        for trace in traces[:10]:
+            console.print(f"  - {trace.query[:50]}... (score: {trace.grounded_score:.2f})")
+        if len(traces) > 10:
+            console.print(f"  ... and {len(traces) - 10} more")
+        
+        # Show teacher model info
+        from .core.user_config import OptimizationConfig, load_config
+        opt_cfg = OptimizationConfig.from_user_config()
+        user_cfg = load_config()
+        teacher_model_name = teacher or opt_cfg.get_teacher_model(user_cfg.get("model", "openai/gpt-4o-mini"))
+        
+        console.print(f"\n[dim]Budget: {auto}, Threads: {threads}, Tools: {tool_optimization}[/dim]")
+        console.print(f"[dim]Teacher model: {teacher_model_name}[/dim]")
+        return
+
+    # Convert traces to training examples
+    examples = []
+    for trace in traces:
+        example = create_training_example(
+            query=trace.query,
+            answer=trace.final_answer,
+            context="",
+        )
+        if example:
+            examples.append(example)
+
+    if not examples:
+        console.print("[red]No valid training examples could be created[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[cyan]Created {len(examples)} training examples[/cyan]")
+    
+    # Show mode info
+    if fast_proxy:
+        console.print(f"[cyan]Running GEPA in FAST PROXY mode (auto={auto}, threads={threads})...[/cyan]")
+        console.print(f"  [dim]Proxy mode: 1 LLM call per eval instead of 10-50 (50x faster)[/dim]")
+    else:
+        console.print(f"[cyan]Running GEPA optimization (auto={auto}, threads={threads})...[/cyan]")
+        console.print(f"  [dim]Full RLM mode: 10-50 LLM calls per eval (use --fast for 50x speedup)[/dim]")
+
+    try:
+        from .core.rlm import RLM
+        from .core.user_config import OptimizationConfig, load_config
+        from .core.simba_optimizer import save_optimized_program, save_optimization_state, OptimizationState, get_trace_count
+        import dspy
+
+        # Get the RLM program to optimize
+        rlm = RLM()
+        
+        # Get teacher model from CLI or config
+        opt_cfg = OptimizationConfig.from_user_config()
+        user_cfg = load_config()
+        default_model = user_cfg.get("model", "openai/gpt-4o-mini")
+        teacher_model_name = teacher or opt_cfg.get_teacher_model(default_model)
+        
+        # Create teacher LM for reflection
+        # Use the same LM creation logic as RLM (supporting OAuth for Anthropic/Google)
+        reflection_lm = None
+        if teacher_model_name:
+            if teacher_model_name.startswith("zai/"):
+                from .core.zai_lm import ZaiLM
+                reflection_lm = ZaiLM(teacher_model_name.replace("zai/", ""))
+            elif teacher_model_name.startswith("kimi/"):
+                from .core.kimi_lm import KimiLM
+                model_id = teacher_model_name.replace("kimi/", "")
+                if model_id == "k2p5":
+                    model_id = "k2-0130-8k"
+                reflection_lm = KimiLM(model_id)
+            elif teacher_model_name.startswith("anthropic/"):
+                # Use OAuth for Anthropic models
+                from .core.anthropic_oauth_lm import get_anthropic_api_key, is_oauth_token, AnthropicOAuthLM
+                import os
+                api_key = os.environ.get("ANTHROPIC_API_KEY") or get_anthropic_api_key()
+                if api_key and is_oauth_token(api_key):
+                    reflection_lm = AnthropicOAuthLM(
+                        model=teacher_model_name.replace("anthropic/", ""),
+                        api_key=api_key,
+                    )
+                else:
+                    reflection_lm = dspy.LM(teacher_model_name, api_key=api_key)
+            elif teacher_model_name.startswith("google/"):
+                # Use OAuth for Google models
+                from .core.oauth import get_google_token
+                from .core.google_oauth_lm import GoogleOAuthLM
+                token, project_id = get_google_token()
+                if token:
+                    reflection_lm = GoogleOAuthLM(
+                        model=teacher_model_name.replace("google/", ""),
+                        access_token=token,
+                        project_id=project_id,
+                    )
+                else:
+                    reflection_lm = dspy.LM(teacher_model_name)
+            else:
+                reflection_lm = dspy.LM(teacher_model_name)
+            console.print(f"  [dim]Teacher model: {teacher_model_name}[/dim]")
+        
+        # Configure GEPA budget - max_evals overrides auto
+        if max_evals:
+            config = GEPAConfig(
+                auto=None,
+                max_full_evals=max_evals,
+                num_threads=threads,
+                enable_tool_optimization=tool_optimization,
+            )
+            console.print(f"  [dim]Budget: {max_evals} full evaluations[/dim]")
+        else:
+            config = GEPAConfig(
+                auto=auto,
+                num_threads=threads,
+                enable_tool_optimization=tool_optimization,
+            )
+            console.print(f"  [dim]Budget: auto={auto}[/dim]")
+
+        # Configure DSPy with our LM
+        dspy.configure(lm=rlm._lm)
+
+        if fast_proxy:
+            # FAST MODE: Use lightweight proxy instead of full RLM
+            from .core.gepa_proxy import run_fast_gepa
+            
+            gepa_instructions, result = run_fast_gepa(
+                rlm=rlm,
+                trainset=examples,
+                config=config,
+                reflection_lm=reflection_lm,
+            )
+            
+            console.print("\n[bold green]✓ GEPA (fast proxy) optimization complete![/bold green]")
+            console.print(f"  Baseline score: {result.baseline_score:.2%}")
+            console.print(f"  Optimized score: {result.optimized_score:.2%}")
+            console.print(f"  Improvement: {result.improvement:.1f}%")
+            
+            if gepa_instructions:
+                # Save instructions (no full program in proxy mode)
+                save_optimized_program(
+                    None,  # No optimized program in proxy mode
+                    result, 
+                    optimizer_type="gepa",
+                    instructions=gepa_instructions,
+                )
+                console.print("\n[green]✓ Optimized instructions saved - will be auto-loaded on next query[/green]")
+                console.print(f"  [dim]Saved {len(gepa_instructions)} evolved instructions[/dim]")
+        else:
+            # FULL MODE: Run GEPA on actual RLM (slow but accurate)
+            optimizer = GEPAOptimizer(config=config, reflection_lm=reflection_lm)
+
+            optimized_program, result = optimizer.optimize(
+                program=rlm._rlm,
+                trainset=examples,
+                lm=rlm._lm,
+            )
+
+            console.print("\n[bold green]✓ GEPA optimization complete![/bold green]")
+            console.print(f"  Baseline score: {result.baseline_score:.2%}")
+            console.print(f"  Optimized score: {result.optimized_score:.2%}")
+            console.print(f"  Improvement: {result.improvement:.1f}%")
+
+            if result.improved:
+                # Extract GEPA instructions from optimized program
+                from .core.gepa_optimizer import extract_gepa_instructions
+                gepa_instructions = extract_gepa_instructions(optimized_program)
+                
+                # Save the optimized program with instructions
+                save_optimized_program(
+                    optimized_program, 
+                    result, 
+                    optimizer_type="gepa",
+                    instructions=gepa_instructions,
+                )
+                console.print("\n[green]✓ Optimized program saved - will be auto-loaded on next query[/green]")
+                if gepa_instructions:
+                    console.print(f"  [dim]Saved {len(gepa_instructions)} evolved instructions[/dim]")
+
+        # Update optimization state
+        from datetime import datetime, UTC
+        state = OptimizationState(
+            last_optimization=datetime.now(UTC),
+            traces_at_last_optimization=get_trace_count(),
+            last_result=result,
+            optimizer_type="gepa",
+        )
+        save_optimization_state(state)
+
+    except Exception as e:
+        console.print(f"[red]GEPA optimization failed: {e}[/red]")
+        import traceback
+        traceback.print_exc()
+        raise typer.Exit(1)
+
+
+@optimize_app.command("run")
+def optimize_run(
+    min_score: Annotated[float, typer.Option("--min-score", "-s", help="Minimum trace score")] = 0.7,
+    max_examples: Annotated[int, typer.Option("--max-examples", "-n", help="Maximum training examples")] = 100,
+    fast: Annotated[bool, typer.Option("--fast", help="Fast preset: 1 step, 2 candidates")] = False,
+    target: Annotated[str | None, typer.Option("--target", "-t", help="Target: all, demos, tips (default: all)")] = None,
+    optimizer: Annotated[str, typer.Option("--optimizer", "-o", help="Optimizer: gepa (recommended) or simba")] = "gepa",
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Show what would be optimized")] = False,
+) -> None:
+    """Run unified optimization (demos + tips + rules).
+
+    Runs full optimization pipeline:
+    1. GEPA/SIMBA optimizer for instruction/demo optimization
+    2. Generates tips from failure patterns
+    3. Extracts rules for instructions
+
+    Optimizers:
+      gepa  - Reflective Prompt Evolution (default, recommended for RLM)
+      simba - Stochastic Mini-Batch Ascent (legacy, demos only)
+
+    All components are saved and auto-loaded on next query.
+
+    \b
+    Examples:
+      rlm-dspy optimize run            # Full optimization with GEPA (default)
+      rlm-dspy optimize run --fast     # Fast mode (~5-15 min)
+      rlm-dspy optimize run -o simba   # Use SIMBA optimizer (legacy)
+      rlm-dspy optimize run --target tips  # Only regenerate tips
+    """
+    from .core.trace_collector import get_trace_collector
+    from .core.simba_optimizer import (
+        get_simba_optimizer, create_training_example,
+        save_optimized_program, save_optimization_state,
+        OptimizationState, get_trace_count,
+        _generate_optimized_tips, _extract_simba_rules,
+    )
+    from .core.grounded_proposer import get_grounded_proposer
+    from .core.instruction_optimizer import get_instruction_optimizer
+
+    target = target or "all"
+    if target not in ("all", "demos", "tips"):
+        console.print(f"[red]Invalid target: {target}. Use: all, demos, tips[/red]")
+        raise typer.Exit(1)
+
+    collector = get_trace_collector()
+    all_traces = list(collector.traces)
+
+    # Show stats
+    console.print(f"[cyan]Total traces: {len(all_traces)}[/cyan]")
+    console.print(f"[cyan]High quality (>= {min_score}): {len([t for t in all_traces if t.grounded_score >= min_score])}[/cyan]")
+    console.print(f"[cyan]Failures (<= 0.6): {len([t for t in all_traces if t.grounded_score <= 0.6])}[/cyan]")
+
+    if dry_run:
+        console.print("\n[bold]Would optimize:[/bold]")
+        if target in ("all", "demos"):
+            traces = [t for t in all_traces if t.grounded_score >= min_score][:max_examples]
+            console.print(f"  - Demos: {len(traces)} training examples")
+        if target in ("all", "tips"):
+            failures = collector.to_failure_patterns(max_score=0.6)
+            console.print(f"  - Tips: from {len(failures)} failure patterns")
+        return
+
+    results = {"demos": 0, "tips": 0, "rules": 0}
+    optimized_program = None
+    optimization_result = None
+
+    # Step 1: Optimization for demos (if target includes demos)
+    if target in ("all", "demos"):
+        # Limit traces - each takes 20-60s to evaluate
+        # For fast mode, use fewer traces for quicker optimization
+        max_opt_traces = 8 if fast else 16
+        traces = [t for t in all_traces if t.grounded_score >= min_score][:min(max_examples, max_opt_traces)]
+        
+        if len(traces) < 4:
+            console.print(f"[yellow]Not enough traces ({len(traces)} < 4). Skipping demos.[/yellow]")
+        else:
+            opt_name = optimizer.upper()
+            console.print(f"\n[bold cyan]Step 1: {opt_name} optimization ({len(traces)} traces)...[/bold cyan]")
+            
+            examples = []
+            for trace in traces:
+                example = create_training_example(
+                    query=trace.query,
+                    answer=trace.final_answer,
+                    context="",
+                )
+                if example:
+                    examples.append(example)
+            
+            if examples:
+                try:
+                    from .core.rlm import RLM
+                    from .core.rlm_types import RLMConfig
+                    import dspy
+                    
+                    # Create RLM with higher iteration limits for optimization
+                    # Use model from user config (~/.rlm/config.yaml)
+                    from .core.user_config import load_config
+                    user_cfg = load_config()
+                    opt_config = RLMConfig(
+                        model=user_cfg.get("model", "openai/gpt-4o-mini"),
+                        sub_model=user_cfg.get("sub_model", user_cfg.get("model", "openai/gpt-4o-mini")),
+                        max_iterations=50,   # Higher than default 30
+                        max_llm_calls=150,   # Higher than default 100
+                    )
+                    rlm = RLM(config=opt_config)
+                    console.print(f"  [dim]Using model: {opt_config.model}, sub: {opt_config.sub_model}[/dim]")
+                    
+                    dspy.configure(lm=rlm._lm)
+                    
+                    if optimizer == "gepa":
+                        # Use GEPA optimizer
+                        from .core.gepa_optimizer import GEPAOptimizer, GEPAConfig
+                        from .core.user_config import OptimizationConfig
+                        
+                        # Get teacher model from config
+                        opt_cfg = OptimizationConfig.from_user_config()
+                        teacher_model_name = opt_cfg.get_teacher_model(user_cfg.get("model", "openai/gpt-4o-mini"))
+                        
+                        # Create teacher LM for reflection
+                        reflection_lm = None
+                        if teacher_model_name:
+                            if teacher_model_name.startswith("zai/"):
+                                from .core.zai_lm import ZaiLM
+                                reflection_lm = ZaiLM(teacher_model_name.replace("zai/", ""))
+                            elif teacher_model_name.startswith("kimi/"):
+                                from .core.kimi_lm import KimiLM
+                                model_id = teacher_model_name.replace("kimi/", "")
+                                if model_id == "k2p5":
+                                    model_id = "k2-0130-8k"
+                                reflection_lm = KimiLM(model_id)
+                            else:
+                                reflection_lm = dspy.LM(teacher_model_name)
+                            console.print(f"  [dim]Teacher model: {teacher_model_name}[/dim]")
+                        
+                        auto_budget = "light" if fast else "medium"
+                        gepa_config = GEPAConfig(
+                            auto=auto_budget,
+                            num_threads=2,
+                        )
+                        opt = GEPAOptimizer(config=gepa_config, reflection_lm=reflection_lm)
+                        console.print(f"  [dim]auto={auto_budget}, threads=2[/dim]")
+                        
+                        optimized_program, optimization_result = opt.optimize(
+                            program=rlm._rlm,
+                            trainset=examples,
+                            lm=rlm._lm,
+                        )
+                    else:
+                        # Use SIMBA optimizer (default)
+                        # Apply presets
+                        # Each example takes 30-60s with RLM due to interpreter loop
+                        if fast:
+                            steps, candidates, threads, batch_size = 1, 2, 2, 2
+                        else:
+                            steps, candidates, threads, batch_size = 1, 2, 2, min(4, len(examples))
+                        
+                        opt = get_simba_optimizer(
+                            batch_size=batch_size,
+                            num_candidates=candidates,
+                            max_steps=steps,
+                            num_threads=threads,
+                        )
+                        console.print(f"  [dim]steps={steps}, candidates={candidates}, threads={threads}[/dim]")
+                        
+                        optimized_program, optimization_result = opt.optimize(
+                            program=rlm._rlm,
+                            trainset=examples,
+                            lm=rlm._lm,
+                        )
+                    
+                    if optimized_program and hasattr(optimized_program, "demos"):
+                        results["demos"] = len(optimized_program.demos) if optimized_program.demos else 0
+                    
+                    console.print(f"  [green]✓ {opt_name} complete: {results['demos']} demos, {optimization_result.improvement:.1f}% improvement[/green]")
+                    
+                except Exception as e:
+                    console.print(f"  [red]✗ {opt_name} failed: {e}[/red]")
+
+    # Step 2: Generate tips from failures
+    if target in ("all", "tips"):
+        console.print("\n[bold cyan]Step 2: Generating tips from failures...[/bold cyan]")
+        
+        try:
+            tips = _generate_optimized_tips()
+            if tips:
+                results["tips"] = len(tips)
+                # Apply tips immediately
+                proposer = get_grounded_proposer()
+                proposer.set_optimized_tips(tips)
+                console.print(f"  [green]✓ Generated {len(tips)} tips[/green]")
+                for tip in tips[:3]:
+                    console.print(f"    - {tip[:60]}{'...' if len(tip) > 60 else ''}")
+                if len(tips) > 3:
+                    console.print(f"    ... and {len(tips) - 3} more")
+            else:
+                console.print("  [dim]No tips generated (need more failure data)[/dim]")
+        except Exception as e:
+            console.print(f"  [red]✗ Tip generation failed: {e}[/red]")
+
+    # Step 3: Extract rules (if we ran optimization)
+    if target in ("all", "demos") and optimized_program:
+        console.print("\n[bold cyan]Step 3: Extracting rules...[/bold cyan]")
+        
+        try:
+            rules = _extract_simba_rules(optimized_program)
+            if rules:
+                results["rules"] = len(rules)
+                # Apply rules to instruction optimizer
+                inst_optimizer = get_instruction_optimizer()
+                inst_optimizer.add_rules(rules)
+                console.print(f"  [green]✓ Extracted {len(rules)} rules[/green]")
+                for rule in rules[:3]:
+                    console.print(f"    - {rule[:60]}{'...' if len(rule) > 60 else ''}")
+            else:
+                console.print("  [dim]No rules extracted[/dim]")
+        except Exception as e:
+            console.print(f"  [red]✗ Rule extraction failed: {e}[/red]")
+
+    # Save everything
+    if results["demos"] > 0 or results["tips"] > 0 or results["rules"] > 0:
+        console.print("\n[bold cyan]Saving optimization...[/bold cyan]")
+        
+        try:
+            # Get current tips and instructions
+            proposer = get_grounded_proposer()
+            inst_optimizer = get_instruction_optimizer()
+            
+            tips = proposer.get_tips()
+            instructions = inst_optimizer.get_all_instructions()
+            
+            # If GEPA, also extract evolved instructions
+            if optimizer == "gepa" and optimized_program:
+                from .core.gepa_optimizer import extract_gepa_instructions
+                gepa_instructions = extract_gepa_instructions(optimized_program)
+                if gepa_instructions:
+                    instructions.update(gepa_instructions)
+                    console.print(f"  [dim]Extracted {len(gepa_instructions)} GEPA-evolved instructions[/dim]")
+            
+            # Save with all components
+            if optimized_program and optimization_result:
+                save_optimized_program(
+                    optimized_program,
+                    optimization_result,
+                    optimizer,  # Use the selected optimizer type
+                    instructions=instructions,
+                    tips=tips,
+                )
+            
+            # Update state
+            from datetime import datetime, UTC
+            state = OptimizationState(
+                last_optimization=datetime.now(UTC),
+                traces_at_last_optimization=get_trace_count(),
+                last_result=optimization_result,
+                optimizer_type=optimizer,  # Use the selected optimizer type
+            )
+            save_optimization_state(state)
+            
+            console.print("[green]✓ Saved to ~/.rlm/optimization/[/green]")
+        except Exception as e:
+            console.print(f"[red]✗ Failed to save: {e}[/red]")
+
+    # Summary
+    console.print("\n[bold]Optimization Summary:[/bold]")
+    console.print(f"  Demos: {results['demos']}")
+    console.print(f"  Tips: {results['tips']}")
+    console.print(f"  Rules: {results['rules']}")
+    
+    if optimization_result and optimization_result.improved:
+        console.print(f"\n[green]✓ Score improvement: +{optimization_result.improvement:.1f}%[/green]")
+    
+    console.print("\n[dim]Changes will be auto-loaded on next query.[/dim]")
+
+
 @optimize_app.command("status")
 def optimize_status() -> None:
     """Show auto-optimization status."""
@@ -337,6 +888,10 @@ def optimize_status() -> None:
     if saved:
         table.add_row("Saved Program", "[green]Yes[/green]")
         table.add_row("Demos", str(len(saved.demos)))
+        table.add_row("Tips", str(len(saved.tips)))
+        table.add_row("Rules", str(len(saved.rules)))
+        if saved.instructions:
+            table.add_row("Instructions", f"{len(saved.instructions)} keys")
         if saved.result:
             table.add_row("Improvement", f"+{saved.result.improvement:.1f}%")
         table.add_row("File", str(OPTIMIZED_PROGRAM_FILE))
@@ -363,8 +918,16 @@ def optimize_status() -> None:
 
 
 @optimize_app.command("enable")
-def optimize_enable() -> None:
-    """Enable auto-optimization."""
+def optimize_enable(
+    background: Annotated[bool | None, typer.Option("--background/--no-background", "-b/-B", help="Enable/disable background mode")] = None,
+) -> None:
+    """Enable auto-optimization.
+    
+    Examples:
+        rlm-dspy optimize enable              # Enable auto-optimization
+        rlm-dspy optimize enable --background # Enable with background mode
+        rlm-dspy optimize enable -B           # Enable without background mode
+    """
     from pathlib import Path
     import yaml
 
@@ -378,16 +941,21 @@ def optimize_enable() -> None:
         except Exception:
             pass
 
-    # Update optimization.enabled
+    # Update optimization settings
     if "optimization" not in config:
         config["optimization"] = {}
     config["optimization"]["enabled"] = True
+    
+    if background is not None:
+        config["optimization"]["background"] = background
 
     # Save back
     config_file.parent.mkdir(parents=True, exist_ok=True)
     config_file.write_text(yaml.dump(config, default_flow_style=False, sort_keys=False))
 
+    bg_status = config["optimization"].get("background", True)
     console.print("[green]✓ Auto-optimization enabled[/green]")
+    console.print(f"  Background mode: {'Yes' if bg_status else 'No'}")
 
 
 @optimize_app.command("disable")
@@ -418,20 +986,129 @@ def optimize_disable() -> None:
     console.print("[yellow]✓ Auto-optimization disabled[/yellow]")
 
 
+@optimize_app.command("config")
+def optimize_config(
+    background: Annotated[bool | None, typer.Option("--background/--no-background", "-b/-B", help="Enable/disable background mode")] = None,
+    min_traces: Annotated[int | None, typer.Option("--min-traces", help="Min new traces before optimization")] = None,
+    min_hours: Annotated[int | None, typer.Option("--min-hours", help="Min hours between optimizations")] = None,
+    max_budget: Annotated[float | None, typer.Option("--max-budget", help="Max budget per optimization ($)")] = None,
+) -> None:
+    """Configure optimization settings.
+    
+    Examples:
+        rlm-dspy optimize config                    # Show current config
+        rlm-dspy optimize config --background       # Enable background mode
+        rlm-dspy optimize config -B                 # Disable background mode
+        rlm-dspy optimize config --min-traces 20    # Set min traces to 20
+        rlm-dspy optimize config --min-hours 12     # Set min hours to 12
+    """
+    from pathlib import Path
+    import yaml
+
+    config_file = Path.home() / ".rlm" / "config.yaml"
+
+    # Load existing config
+    config = {}
+    if config_file.exists():
+        try:
+            config = yaml.safe_load(config_file.read_text()) or {}
+        except Exception:
+            pass
+
+    if "optimization" not in config:
+        config["optimization"] = {}
+    
+    # Check if any updates requested
+    has_updates = any(v is not None for v in [background, min_traces, min_hours, max_budget])
+    
+    if has_updates:
+        # Apply updates
+        if background is not None:
+            config["optimization"]["background"] = background
+        if min_traces is not None:
+            config["optimization"]["min_new_traces"] = min_traces
+        if min_hours is not None:
+            config["optimization"]["min_hours_between"] = min_hours
+        if max_budget is not None:
+            config["optimization"]["max_budget"] = max_budget
+        
+        # Save back
+        config_file.parent.mkdir(parents=True, exist_ok=True)
+        config_file.write_text(yaml.dump(config, default_flow_style=False, sort_keys=False))
+        console.print("[green]✓ Configuration updated[/green]")
+    
+    # Show current config
+    opt_config = config.get("optimization", {})
+    console.print("\n[bold]Optimization Settings:[/bold]")
+    console.print(f"  Enabled:         {opt_config.get('enabled', True)}")
+    console.print(f"  Background:      {opt_config.get('background', True)}")
+    console.print(f"  Min New Traces:  {opt_config.get('min_new_traces', 50)}")
+    console.print(f"  Min Hours:       {opt_config.get('min_hours_between', 24)}")
+    console.print(f"  Max Budget:      ${opt_config.get('max_budget', 0.50):.2f}")
+
+
 @optimize_app.command("reset")
 def optimize_reset(
     force: Annotated[bool, typer.Option("--force", "-f", help="Skip confirmation")] = False,
+    target: Annotated[str, typer.Option("--target", "-t", help="What to reset: all, traces, optimization, optimizer, proposer")] = "all",
 ) -> None:
-    """Reset optimization - clear saved program and state."""
-    from .core.simba_optimizer import clear_optimization
-
-    if not force:
-        if not typer.confirm("Clear all saved optimization data?"):
-            raise typer.Abort()
-
-    cleared = clear_optimization()
-
-    if cleared:
-        console.print("[green]✓ Cleared saved optimization data[/green]")
+    """Reset optimization - clear saved data.
+    
+    Targets:
+      all          - Clear everything (traces + optimization + optimizer + proposer)
+      traces       - Clear trace history (~/.rlm/traces/)
+      optimization - Clear SIMBA saved program (~/.rlm/optimization/)
+      optimizer    - Clear instruction optimizer state (~/.rlm/optimizer/)
+      proposer     - Clear grounded proposer state (~/.rlm/proposer/)
+    """
+    import shutil
+    from pathlib import Path
+    
+    rlm_dir = Path.home() / ".rlm"
+    
+    targets_map = {
+        "traces": rlm_dir / "traces",
+        "optimization": rlm_dir / "optimization", 
+        "optimizer": rlm_dir / "optimizer",
+        "proposer": rlm_dir / "proposer",
+    }
+    
+    if target == "all":
+        targets = list(targets_map.keys())
+    elif target in targets_map:
+        targets = [target]
     else:
-        console.print("[dim]No optimization data to clear[/dim]")
+        console.print(f"[red]Unknown target: {target}[/red]")
+        console.print(f"[dim]Valid targets: all, {', '.join(targets_map.keys())}[/dim]")
+        raise typer.Abort()
+    
+    # Show what will be cleared
+    console.print(f"[bold]Will clear:[/bold]")
+    for t in targets:
+        path = targets_map[t]
+        if path.exists():
+            files = list(path.glob("*"))
+            size = sum(f.stat().st_size for f in files if f.is_file())
+            console.print(f"  • {t}: {len(files)} files ({size / 1024:.1f} KB)")
+        else:
+            console.print(f"  • {t}: [dim]not found[/dim]")
+    
+    if not force:
+        if not typer.confirm(f"\nClear {target} data?"):
+            raise typer.Abort()
+    
+    cleared = []
+    for t in targets:
+        path = targets_map[t]
+        if path.exists():
+            try:
+                shutil.rmtree(path)
+                path.mkdir(parents=True, exist_ok=True)
+                cleared.append(t)
+            except Exception as e:
+                console.print(f"[red]Failed to clear {t}: {e}[/red]")
+    
+    if cleared:
+        console.print(f"[green]✓ Cleared: {', '.join(cleared)}[/green]")
+    else:
+        console.print("[dim]Nothing to clear[/dim]")

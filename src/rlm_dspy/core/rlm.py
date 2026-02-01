@@ -109,7 +109,14 @@ class RLM:
             manager.add(self._metrics_callback)
 
     def _load_and_apply_optimization(self) -> None:
-        """Load and apply saved SIMBA optimization if available."""
+        """Load and apply saved optimization (demos, tips, rules).
+        
+        Applies all saved optimization components:
+        - Demos: Few-shot examples for the RLM module
+        - Tips: Learned tips merged into the grounded proposer
+        - Rules: SIMBA-generated rules merged into instruction optimizer
+        - Instructions: Optimized instruction text (if any)
+        """
         try:
             from .simba_optimizer import load_optimized_program
 
@@ -117,19 +124,62 @@ class RLM:
             if saved is None:
                 return
 
+            applied = []
+
             # Apply demos to the RLM module
             if saved.demos and hasattr(self._rlm, "demos"):
                 self._rlm.demos = saved.demos
-                _logger.debug("Applied %d saved demos from optimization", len(saved.demos))
+                applied.append(f"{len(saved.demos)} demos")
 
-            # Note: instructions are already handled by _get_optimized_instructions()
-            # which loads from InstructionOptimizer
+            # Apply tips to grounded proposer
+            if saved.tips:
+                try:
+                    from .grounded_proposer import get_grounded_proposer
+                    proposer = get_grounded_proposer()
+                    proposer.set_optimized_tips(saved.tips)
+                    applied.append(f"{len(saved.tips)} tips")
+                except Exception as e:
+                    _logger.debug("Failed to apply tips: %s", e)
 
-            if saved.result and saved.result.improved:
+            # Apply rules to instruction optimizer (merge with existing instructions)
+            if saved.rules:
+                try:
+                    from .instruction_optimizer import get_instruction_optimizer
+                    optimizer = get_instruction_optimizer()
+                    optimizer.add_rules(saved.rules)
+                    applied.append(f"{len(saved.rules)} rules")
+                except Exception as e:
+                    _logger.debug("Failed to apply rules: %s", e)
+
+            # Apply optimized instructions if present
+            if saved.instructions:
+                try:
+                    from .instruction_optimizer import get_instruction_optimizer
+                    optimizer = get_instruction_optimizer()
+                    for key, text in saved.instructions.items():
+                        if text:  # Only apply non-empty instructions
+                            optimizer.set_instruction(key, text)
+                    applied.append(f"{len(saved.instructions)} instruction keys")
+                except Exception as e:
+                    _logger.debug("Failed to apply instructions: %s", e)
+                
+                # If GEPA optimizer, also apply instructions to RLM predictors
+                if saved.optimizer_type == "gepa":
+                    try:
+                        from .gepa_optimizer import apply_gepa_instructions
+                        apply_gepa_instructions(self._rlm, saved.instructions)
+                        _logger.debug("Applied GEPA instructions to RLM predictors")
+                    except Exception as e:
+                        _logger.debug("Failed to apply GEPA instructions to predictors: %s", e)
+
+            if applied:
+                improvement_str = ""
+                if saved.result and saved.result.improved:
+                    improvement_str = f" (+{saved.result.improvement:.1f}%)"
                 _logger.info(
-                    "Loaded saved optimization: +%.1f%% improvement (%s)",
-                    saved.result.improvement,
-                    saved.optimizer_type,
+                    "Loaded saved optimization%s: %s",
+                    improvement_str,
+                    ", ".join(applied),
                 )
 
         except Exception as e:

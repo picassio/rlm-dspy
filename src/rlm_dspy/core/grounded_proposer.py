@@ -481,6 +481,37 @@ class GroundedProposer:
         """Reset tips to defaults."""
         self.current_tips = DEFAULT_TIPS.copy()
         self._save_state()
+    
+    def set_optimized_tips(self, tips: list[str]) -> None:
+        """Set tips from optimization (merges with existing, prioritizes optimized).
+        
+        Args:
+            tips: List of optimized tips to apply
+        """
+        if not tips:
+            return
+        
+        # Merge: optimized tips first, then existing non-duplicate tips
+        merged = list(tips)  # Start with optimized tips
+        
+        for existing_tip in self.current_tips:
+            # Add existing tips that aren't duplicates
+            if existing_tip not in merged and len(merged) < self.config.max_tips:
+                merged.append(existing_tip)
+        
+        self.current_tips = merged[:self.config.max_tips]
+        self._save_state()
+        
+        logger.info("Applied %d optimized tips (total: %d)", len(tips), len(self.current_tips))
+    
+    def set_tips(self, tips: list[str]) -> None:
+        """Replace current tips with the given list.
+        
+        Args:
+            tips: List of tips to set
+        """
+        self.current_tips = tips[:self.config.max_tips] if tips else DEFAULT_TIPS.copy()
+        self._save_state()
 
 
 # Global proposer instance
