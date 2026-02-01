@@ -117,7 +117,12 @@ class RLMBuilder:
         
         Args:
             max_iterations: Max iterations (20-100)
+            
+        Raises:
+            ValueError: If max_iterations is out of range
         """
+        if not isinstance(max_iterations, int) or not 20 <= max_iterations <= 100:
+            raise ValueError("max_iterations must be an integer between 20 and 100")
         self._max_iterations = max_iterations
         return self
     
@@ -126,7 +131,12 @@ class RLMBuilder:
         
         Args:
             max_calls: Max llm_query() calls (1-500)
+            
+        Raises:
+            ValueError: If max_calls is out of range
         """
+        if not isinstance(max_calls, int) or not 1 <= max_calls <= 500:
+            raise ValueError("max_calls must be an integer between 1 and 500")
         self._max_llm_calls = max_calls
         return self
     
@@ -134,8 +144,13 @@ class RLMBuilder:
         """Set maximum output characters per iteration.
         
         Args:
-            max_chars: Max characters in REPL output
+            max_chars: Max characters in REPL output (1000-1000000)
+            
+        Raises:
+            ValueError: If max_chars is out of range
         """
+        if not isinstance(max_chars, int) or not 1000 <= max_chars <= 1_000_000:
+            raise ValueError("max_chars must be an integer between 1000 and 1000000")
         self._max_output_chars = max_chars
         return self
     
@@ -143,18 +158,28 @@ class RLMBuilder:
         """Set maximum execution timeout.
         
         Args:
-            seconds: Timeout in seconds (0-3600)
+            seconds: Timeout in seconds (1-3600)
+            
+        Raises:
+            ValueError: If seconds is out of range
         """
-        self._max_timeout = seconds
+        if not isinstance(seconds, (int, float)) or not 1 <= seconds <= 3600:
+            raise ValueError("timeout must be a number between 1 and 3600")
+        self._max_timeout = float(seconds)
         return self
     
     def budget(self, usd: float) -> "RLMBuilder":
         """Set maximum cost budget.
         
         Args:
-            usd: Maximum cost in USD (0-100)
+            usd: Maximum cost in USD (0.01-100)
+            
+        Raises:
+            ValueError: If usd is out of range
         """
-        self._max_budget = usd
+        if not isinstance(usd, (int, float)) or not 0.01 <= usd <= 100:
+            raise ValueError("budget must be a number between 0.01 and 100")
+        self._max_budget = float(usd)
         return self
     
     def workers(self, num_workers: int) -> "RLMBuilder":
@@ -162,7 +187,12 @@ class RLMBuilder:
         
         Args:
             num_workers: Number of workers (1-32)
+            
+        Raises:
+            ValueError: If num_workers is out of range
         """
+        if not isinstance(num_workers, int) or not 1 <= num_workers <= 32:
+            raise ValueError("num_workers must be an integer between 1 and 32")
         self._max_workers = num_workers
         return self
     

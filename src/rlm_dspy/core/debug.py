@@ -84,7 +84,11 @@ def configure_debug(
     global _config
 
     if verbosity is not None:
-        _config.verbosity = Verbosity(verbosity)
+        try:
+            _config.verbosity = Verbosity(verbosity)
+        except ValueError:
+            valid = [v.value for v in Verbosity]
+            raise ValueError(f"verbosity must be one of {valid}, got {verbosity}")
     if log_inputs is not None:
         _config.log_inputs = log_inputs
     if log_outputs is not None:
