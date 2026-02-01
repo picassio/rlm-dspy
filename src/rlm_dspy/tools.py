@@ -120,12 +120,14 @@ def shell(command: str, timeout: int = 30) -> str:
         'git', 'python', 'python3', 'pip', 'node', 'npm', 'cargo', 'go',
     }
 
+    # Case-insensitive dangerous pattern check
     DANGEROUS = ['rm ', 'mv ', 'cp ', 'chmod ', 'chown ', 'sudo ', 'su ', 'dd ',
                  '>', '>>', '|', ';', '&&', '||', '`', '$(',
-                 'curl ', 'wget ', 'nc ', 'netcat ']
+                 'curl ', 'wget ', 'nc ', 'netcat ', 'bash ', 'sh ', 'perl ', 'ruby ']
 
+    command_lower = command.lower()
     for pattern in DANGEROUS:
-        if pattern in command:
+        if pattern in command_lower:
             return f"(blocked: dangerous pattern '{pattern}')"
 
     try:
@@ -133,14 +135,17 @@ def shell(command: str, timeout: int = 30) -> str:
         if not parts:
             return "(empty command)"
         base_cmd = parts[0]
-        if base_cmd not in ALLOWED_COMMANDS:
+        # Also check base command case-insensitively
+        if base_cmd.lower() not in {cmd.lower() for cmd in ALLOWED_COMMANDS}:
             return f"(blocked: '{base_cmd}' not in allowed commands)"
     except ValueError as e:
         return f"(invalid command: {e})"
 
     try:
+        # Use shell=False with parsed arguments for security
+        # This prevents shell metacharacter injection
         result = subprocess.run(
-            command, shell=True, capture_output=True, text=True,
+            parts, shell=False, capture_output=True, text=True,
             timeout=timeout, cwd=_current_project_path
         )
         output = result.stdout + result.stderr
