@@ -254,7 +254,7 @@ class IndexDaemon:
             os.write(self._pid_fd, f"{os.getpid()}\n".encode())
 
     def _cleanup_pid(self) -> None:
-        """Clean up PID file."""
+        """Clean up PID file and file descriptors."""
         import fcntl
         if self._pid_fd is not None:
             try:
@@ -267,6 +267,19 @@ class IndexDaemon:
             self.config.pid_file.unlink(missing_ok=True)
         except OSError:
             pass
+        # Close redirected file descriptors
+        if hasattr(self, '_devnull') and self._devnull:
+            try:
+                self._devnull.close()
+            except OSError:
+                pass
+            self._devnull = None
+        if hasattr(self, '_log_file') and self._log_file:
+            try:
+                self._log_file.close()
+            except OSError:
+                pass
+            self._log_file = None
 
     def _setup_signal_handlers(self) -> None:
         """Set up signal handlers for graceful shutdown."""
