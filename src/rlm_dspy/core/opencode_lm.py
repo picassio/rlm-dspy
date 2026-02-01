@@ -127,9 +127,16 @@ class OpenCodeLM(BaseLM):
             for chunk in stream:
                 if chunk.choices and chunk.choices[0].delta.content:
                     text += chunk.choices[0].delta.content
+        except (ConnectionError, TimeoutError) as e:
+            logger.error("OpenCode network error: %s", e)
+            raise ValueError(f"OpenCode network error: {e}")
+        except ValueError as e:
+            logger.error("OpenCode value error: %s", e)
+            raise
         except Exception as e:
+            # Log but re-raise with context for unexpected errors
             logger.error("OpenCode API error: %s", e)
-            raise ValueError(f"OpenCode API error: {e}")
+            raise ValueError(f"OpenCode API error: {type(e).__name__}: {e}")
         
         # Update history for BaseLM
         self.history.append({

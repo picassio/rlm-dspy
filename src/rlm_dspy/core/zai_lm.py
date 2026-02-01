@@ -145,9 +145,16 @@ class ZaiLM(BaseLM):
             for chunk in stream:
                 if chunk.choices and chunk.choices[0].delta.content:
                     text += chunk.choices[0].delta.content
+        except (ConnectionError, TimeoutError) as e:
+            logger.error("Z.AI network error: %s", e)
+            raise ValueError(f"Z.AI network error: {e}")
+        except ValueError as e:
+            logger.error("Z.AI value error: %s", e)
+            raise
         except Exception as e:
+            # Log but re-raise with context for unexpected errors
             logger.error("Z.AI API error: %s", e)
-            raise ValueError(f"Z.AI API error: {e}")
+            raise ValueError(f"Z.AI API error: {type(e).__name__}: {e}")
         
         # Update history for BaseLM
         self.history.append({
