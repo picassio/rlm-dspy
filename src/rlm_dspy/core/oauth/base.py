@@ -125,12 +125,26 @@ def generate_state() -> str:
 
 
 class CallbackHandler(http.server.BaseHTTPRequestHandler):
-    """Generic OAuth callback handler."""
+    """Generic OAuth callback handler.
+    
+    Note: Class-level variables are used here because the HTTP server
+    creates new handler instances for each request, so we need shared
+    state to communicate the OAuth result back to the waiting code.
+    This is acceptable because OAuth flows are typically user-initiated
+    and single-threaded per user session.
+    """
     
     code: str | None = None
     state: str | None = None
     error: str | None = None
     callback_path: str = "/oauth2callback"
+    
+    @classmethod
+    def reset(cls) -> None:
+        """Reset callback state before starting a new OAuth flow."""
+        cls.code = None
+        cls.state = None
+        cls.error = None
     
     def do_GET(self):
         """Handle OAuth callback GET request."""
@@ -277,8 +291,9 @@ def save_credentials(credentials: OAuthCredentials) -> None:
     # Update with new credentials
     all_creds[credentials.provider] = credentials.to_dict()
     
-    # Atomic write
+    # Atomic write with secure permissions
     import tempfile
+    import os
     temp_path = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -286,7 +301,11 @@ def save_credentials(credentials: OAuthCredentials) -> None:
         ) as f:
             json.dump(all_creds, f, indent=2)
             temp_path = Path(f.name)
+        # Set secure permissions before moving to final location (owner read/write only)
+        os.chmod(temp_path, 0o600)
         temp_path.replace(CREDENTIALS_FILE)
+        # Ensure final file also has secure permissions
+        os.chmod(CREDENTIALS_FILE, 0o600)
     except Exception:
         if temp_path and temp_path.exists():
             temp_path.unlink(missing_ok=True)
