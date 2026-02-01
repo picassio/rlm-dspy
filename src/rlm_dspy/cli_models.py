@@ -71,27 +71,36 @@ def models_list(
             console.print("\nRun [cyan]rlm-dspy models --all[/cyan] to see all models")
         return
     
-    # Apply filters
+    # Apply filters (order matters: search first, then other filters)
+    if search:
+        # Search across all models first
+        models = registry.search(search)
+        if not all_models:
+            # Filter to just available models
+            available_ids = {m.id for m in registry.get_available()}
+            models = [m for m in models if m.id in available_ids]
+    
+    # Then apply additional filters on top of search results
     if provider:
         models = [m for m in models if m.provider.lower() == provider.lower()]
     
     if reasoning is not None:
         models = [m for m in models if m.reasoning == reasoning]
     
-    if search:
-        models = registry.search(search)
-        if all_models:
-            # search() returns all matching, filter to just available if not --all
-            pass
-        else:
-            available_ids = {m.id for m in registry.get_available()}
-            models = [m for m in models if m.id in available_ids]
-    
     if not models:
+        # Build informative error message
+        filters_used = []
         if search:
-            console.print(f"[yellow]No models matching '{search}'[/yellow]")
+            filters_used.append(f"search='{search}'")
+        if provider:
+            filters_used.append(f"provider='{provider}'")
+        if reasoning is not None:
+            filters_used.append(f"reasoning={reasoning}")
+        
+        if filters_used:
+            console.print(f"[yellow]No models match filters: {', '.join(filters_used)}[/yellow]")
         else:
-            console.print("[yellow]No models match the filters[/yellow]")
+            console.print("[yellow]No models available[/yellow]")
         return
     
     # Sort by provider, then ID
