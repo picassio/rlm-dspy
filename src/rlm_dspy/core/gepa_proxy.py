@@ -71,11 +71,21 @@ class RLMProxy(dspy.Module):
         
         Extracts the signature and instructions from the RLM to create
         a lightweight equivalent for optimization.
+        
+        Args:
+            rlm: An RLM instance (can be None, will use defaults)
+            
+        Returns:
+            RLMProxy instance with extracted or default configuration
         """
         # Get signature from RLM - prefer the outer signature which has correct instructions
         # DSPy's RLM has signature at module level, not in internal predictors
         signature = "context, query -> answer"  # Default
         instructions = None
+        
+        # Handle None or invalid input
+        if rlm is None:
+            return cls(signature=signature, instructions=instructions)
         
         # Try to get signature from RLM module
         if hasattr(rlm, "signature"):

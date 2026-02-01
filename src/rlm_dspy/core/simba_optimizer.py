@@ -121,8 +121,7 @@ def run_background_optimization(config: Any = None, model: str | None = None) ->
                     
                     if len(traces) < 4:
                         logger.info("Not enough traces for GEPA optimization: %d < 4", len(traces))
-                        set_optimization_running(False)
-                        return
+                        return  # finally block handles cleanup
                     
                     examples = [
                         dspy.Example(query=t.query, answer=t.final_answer).with_inputs("query")
@@ -162,8 +161,7 @@ def run_background_optimization(config: Any = None, model: str | None = None) ->
                     # Full RLM mode (slow)
                     logger.warning("Background GEPA without fast mode is very slow, consider enabling fast mode")
                     # Skip for now - too slow for background
-                    set_optimization_running(False)
-                    return
+                    return  # finally block handles cleanup
 
             elif config.optimizer == "simba":
                 # Run SIMBA optimization
@@ -181,8 +179,7 @@ def run_background_optimization(config: Any = None, model: str | None = None) ->
                     
                     if len(traces) < 4:
                         logger.info("Not enough traces for SIMBA optimization: %d < 4", len(traces))
-                        set_optimization_running(False)
-                        return
+                        return  # finally block handles cleanup
                     
                     examples = [
                         create_training_example(t.query, t.final_answer, "")
@@ -191,8 +188,7 @@ def run_background_optimization(config: Any = None, model: str | None = None) ->
                     
                     if not examples:
                         logger.info("No valid training examples for SIMBA")
-                        set_optimization_running(False)
-                        return
+                        return  # finally block handles cleanup
                     
                     # Adjust batch size using SIMBA-specific config
                     batch_size = min(config.simba.batch_size, len(examples))

@@ -144,8 +144,12 @@ def parse_json_safe(text: str, default: Any = None) -> Any:
     try:
         repaired = repair_json(extracted)
         return json.loads(repaired)
-    except (json.JSONDecodeError, Exception) as e:
+    except (json.JSONDecodeError, TypeError, ValueError) as e:
         logger.debug("JSON parsing failed after repair: %s", e)
+        return default
+    except ImportError as e:
+        # json_repair may not be installed
+        logger.debug("json_repair not available: %s", e)
         return default
 
 
@@ -209,8 +213,8 @@ def parse_list_safe(text: str, separator: str = "\n") -> list[str]:
             result = parse_json_safe(text, None)
             if isinstance(result, list):
                 return [str(item) for item in result]
-        except Exception:
-            pass
+        except (json.JSONDecodeError, TypeError, ValueError):
+            pass  # Fall through to other parsing methods
     
     # Try bullet points
     bullet_pattern = r'^[\s]*[-*•]\s*(.+)$'

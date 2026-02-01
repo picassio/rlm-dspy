@@ -210,17 +210,30 @@ class IndexDaemon:
         self._last_activity = time.time()
 
     def _daemonize(self) -> None:
-        """Fork into background."""
-        if os.fork() > 0:
-            sys.exit(0)
+        """Fork into background with proper error handling."""
+        try:
+            pid = os.fork()
+            if pid > 0:
+                sys.exit(0)
+        except OSError as e:
+            raise RuntimeError(f"First fork failed: {e}") from e
+        
         os.setsid()
-        if os.fork() > 0:
-            sys.exit(0)
+        
+        try:
+            pid = os.fork()
+            if pid > 0:
+                sys.exit(0)
+        except OSError as e:
+            raise RuntimeError(f"Second fork failed: {e}") from e
 
-        sys.stdin = open(os.devnull, 'r')
-        log_file = open(self.config.log_file, 'a')
-        sys.stdout = log_file
-        sys.stderr = log_file
+        # Redirect standard file descriptors
+        # Store references to prevent garbage collection
+        self._devnull = open(os.devnull, 'r')
+        self._log_file = open(self.config.log_file, 'a')
+        sys.stdin = self._devnull
+        sys.stdout = self._log_file
+        sys.stderr = self._log_file
 
     def _acquire_pid_lock(self) -> None:
         """Acquire exclusive lock on PID file."""

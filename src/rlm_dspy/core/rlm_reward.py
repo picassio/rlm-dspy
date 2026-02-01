@@ -70,6 +70,8 @@ GENERIC_PHRASES = [
 
 def extract_key_terms(text: str) -> set[str]:
     """Extract meaningful terms from text, removing stopwords."""
+    if not text or not isinstance(text, str):
+        return set()
     words = set(re.findall(r'\b\w+\b', text.lower()))
     return words - STOPWORDS
 
