@@ -159,9 +159,16 @@ def create_proxy_metric(base_metric=None):
     """
     Create a GEPA-compatible metric for proxy optimization.
     
-    Since proxy doesn't run tools, we score based on answer quality only.
-    The metric compares predicted answer to expected answer from traces.
+    Uses multi-dimensional scoring inspired by QMD:
+    - Completeness (30): Does the answer address the query?
+    - Accuracy (30): Does it match expected answer?
+    - Specificity (20): Does it reference specific code/files?
+    - Format (20): Is it well-structured?
+    
+    Returns dspy.Prediction with score and feedback.
     """
+    from .rlm_reward import score_answer_detailed
+    
     def proxy_metric(
         gold: dspy.Example,
         pred: dspy.Prediction | None,
@@ -169,64 +176,33 @@ def create_proxy_metric(base_metric=None):
         pred_name=None, 
         pred_trace=None,
     ) -> dspy.Prediction:
-        """Score proxy prediction against expected answer."""
+        """Score proxy prediction using multi-dimensional reward."""
         if pred is None:
             return dspy.Prediction(score=0.0, feedback="No prediction generated")
         
         answer = getattr(pred, 'answer', '') or ''
+        query = getattr(gold, 'query', '') or ''
         expected = getattr(gold, 'answer', '') or getattr(gold, 'expected_answer', '') or ''
         
         if not answer:
             return dspy.Prediction(score=0.0, feedback="Empty answer")
         
-        if not expected:
-            # No expected answer - use heuristics
-            # Penalize very short answers
-            if len(answer) < 50:
-                return dspy.Prediction(score=0.3, feedback="Answer too short")
-            return dspy.Prediction(score=0.5, feedback="No expected answer to compare")
+        # Use multi-dimensional scoring
+        result = score_answer_detailed(query, answer, expected)
         
-        # Score based on overlap
-        answer_lower = answer.lower()
-        expected_lower = expected.lower()
+        # Build feedback from dimensions and deductions
+        feedback_parts = [
+            f"comp={result['completeness']}/30",
+            f"acc={result['accuracy']}/30",
+            f"spec={result['specificity']}/20",
+            f"fmt={result['format']}/20",
+        ]
+        if result['deductions']:
+            feedback_parts.append(f"issues: {', '.join(result['deductions'][:2])}")
         
-        # Check for key term overlap
-        expected_words = set(expected_lower.split())
-        answer_words = set(answer_lower.split())
+        feedback = f"{result['rating']} ({result['percentage']:.0f}%): {' '.join(feedback_parts)}"
         
-        # Remove stopwords
-        stopwords = {'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 
-                     'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will',
-                     'would', 'could', 'should', 'may', 'might', 'must', 'shall',
-                     'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by', 'from',
-                     'as', 'into', 'through', 'during', 'before', 'after', 'above',
-                     'below', 'between', 'under', 'again', 'further', 'then', 'once',
-                     'and', 'but', 'or', 'nor', 'so', 'yet', 'both', 'either',
-                     'neither', 'not', 'only', 'own', 'same', 'than', 'too', 'very',
-                     'just', 'also', 'now', 'here', 'there', 'when', 'where', 'why',
-                     'how', 'all', 'each', 'every', 'any', 'some', 'no', 'none'}
-        
-        expected_key = expected_words - stopwords
-        answer_key = answer_words - stopwords
-        
-        if not expected_key:
-            # All stopwords - check substring
-            if expected_lower in answer_lower:
-                return dspy.Prediction(score=1.0, feedback="Exact match")
-            return dspy.Prediction(score=0.5, feedback="Could not extract key terms")
-        
-        overlap = expected_key & answer_key
-        coverage = len(overlap) / len(expected_key) if expected_key else 0
-        
-        # Bonus for exact substring match
-        if expected_lower in answer_lower:
-            score = min(1.0, coverage + 0.3)
-            feedback = f"Exact match + {coverage:.0%} term overlap"
-        else:
-            score = coverage * 0.8  # Cap at 80% without exact match
-            feedback = f"{coverage:.0%} term overlap, missing: {expected_key - overlap}"
-        
-        return dspy.Prediction(score=score, feedback=feedback[:200])
+        return dspy.Prediction(score=result['score'], feedback=feedback[:200])
     
     return proxy_metric
 
