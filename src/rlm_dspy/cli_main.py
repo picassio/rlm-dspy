@@ -387,16 +387,87 @@ def register_commands(app: typer.Typer) -> None:
 
     @app.command()
     def setup(
-        env_file: Annotated[Optional[Path], typer.Option("--env-file", "-e")] = None,
-        model: Annotated[Optional[str], typer.Option("--model", "-m")] = None,
-        budget: Annotated[Optional[float], typer.Option("--budget", "-b")] = None,
+        # Basic settings
+        env_file: Annotated[Optional[Path], typer.Option("--env-file", "-e", help="Path to .env file with API keys")] = None,
+        model: Annotated[Optional[str], typer.Option("--model", "-m", help="Main model (e.g., openai/gpt-4o)")] = None,
+        sub_model: Annotated[Optional[str], typer.Option("--sub-model", help="Sub-model for llm_query()")] = None,
+        budget: Annotated[Optional[float], typer.Option("--budget", "-b", help="Max cost per query in USD")] = None,
+        timeout: Annotated[Optional[int], typer.Option("--timeout", help="Max execution time in seconds")] = None,
+        max_iterations: Annotated[Optional[int], typer.Option("--max-iterations", help="Max REPL iterations")] = None,
+        # Optimization settings
+        opt_enabled: Annotated[Optional[bool], typer.Option("--opt-enabled/--opt-disabled", help="Enable/disable auto-optimization")] = None,
+        opt_optimizer: Annotated[Optional[str], typer.Option("--opt-optimizer", help="Optimizer: gepa or simba")] = None,
+        opt_model: Annotated[Optional[str], typer.Option("--opt-model", help="Model for optimization")] = None,
+        opt_fast: Annotated[Optional[bool], typer.Option("--opt-fast/--opt-no-fast", help="Fast proxy mode (50x faster)")] = None,
+        opt_threads: Annotated[Optional[int], typer.Option("--opt-threads", help="Parallel threads")] = None,
+        opt_min_traces: Annotated[Optional[int], typer.Option("--opt-min-traces", help="Min traces before auto-optimization")] = None,
+        # GEPA settings
+        gepa_teacher: Annotated[Optional[str], typer.Option("--gepa-teacher", help="GEPA teacher/reflection model")] = None,
+        gepa_auto: Annotated[Optional[str], typer.Option("--gepa-auto", help="GEPA budget preset: light, medium, heavy")] = None,
+        gepa_max_evals: Annotated[Optional[int], typer.Option("--gepa-max-evals", help="GEPA max evaluations")] = None,
+        # SIMBA settings
+        simba_steps: Annotated[Optional[int], typer.Option("--simba-steps", help="SIMBA optimization steps")] = None,
+        simba_candidates: Annotated[Optional[int], typer.Option("--simba-candidates", help="SIMBA candidates per step")] = None,
+        simba_batch_size: Annotated[Optional[int], typer.Option("--simba-batch-size", help="SIMBA batch size")] = None,
+        # Show current config
+        show: Annotated[bool, typer.Option("--show", "-s", help="Show current configuration")] = False,
     ) -> None:
-        """Configure RLM-DSPy settings."""
+        """Configure RLM-DSPy settings.
+        
+        \b
+        Examples:
+          rlm-dspy setup --show                        # Show current config
+          rlm-dspy setup --model openai/gpt-4o         # Set main model
+          rlm-dspy setup --opt-optimizer gepa          # Use GEPA optimizer
+          rlm-dspy setup --opt-fast                    # Enable fast proxy mode
+          rlm-dspy setup --gepa-teacher openai/gpt-4o  # Set GEPA teacher model
+          rlm-dspy setup --simba-steps 2               # Set SIMBA steps
+        """
         from .core.user_config import CONFIG_FILE, load_config, save_config
 
         config = load_config()
+        
+        # Show current config
+        if show:
+            console.print(f"[bold]Configuration ({CONFIG_FILE}):[/bold]\n")
+            
+            # Basic settings
+            console.print("[cyan]Basic Settings:[/cyan]")
+            console.print(f"  model: {config.get('model', 'openai/gpt-4o-mini')}")
+            console.print(f"  sub_model: {config.get('sub_model', 'null')}")
+            console.print(f"  max_budget: {config.get('max_budget', 1.0)}")
+            console.print(f"  max_timeout: {config.get('max_timeout', 300)}")
+            console.print(f"  max_iterations: {config.get('max_iterations', 20)}")
+            console.print(f"  env_file: {config.get('env_file', 'null')}")
+            
+            # Optimization settings
+            opt = config.get("optimization", {})
+            console.print("\n[cyan]Optimization Settings:[/cyan]")
+            console.print(f"  enabled: {opt.get('enabled', True)}")
+            console.print(f"  optimizer: {opt.get('optimizer', 'gepa')}")
+            console.print(f"  model: {opt.get('model', 'null')}")
+            console.print(f"  fast: {opt.get('fast', True)}")
+            console.print(f"  threads: {opt.get('threads', 2)}")
+            console.print(f"  min_new_traces: {opt.get('min_new_traces', 50)}")
+            
+            # GEPA settings
+            gepa = opt.get("gepa", {})
+            console.print("\n[cyan]GEPA Settings:[/cyan]")
+            console.print(f"  teacher_model: {gepa.get('teacher_model', 'null')}")
+            console.print(f"  auto: {gepa.get('auto', 'light')}")
+            console.print(f"  max_evals: {gepa.get('max_evals', 'null')}")
+            
+            # SIMBA settings
+            simba = opt.get("simba", {})
+            console.print("\n[cyan]SIMBA Settings:[/cyan]")
+            console.print(f"  steps: {simba.get('steps', 1)}")
+            console.print(f"  candidates: {simba.get('candidates', 2)}")
+            console.print(f"  batch_size: {simba.get('batch_size', 8)}")
+            return
+        
         changed = False
 
+        # Basic settings
         if env_file:
             if env_file.exists():
                 config["env_file"] = str(env_file)
@@ -407,15 +478,83 @@ def register_commands(app: typer.Typer) -> None:
         if model:
             config["model"] = model
             changed = True
+        if sub_model:
+            config["sub_model"] = sub_model
+            changed = True
         if budget is not None:
             config["max_budget"] = budget
             changed = True
+        if timeout is not None:
+            config["max_timeout"] = timeout
+            changed = True
+        if max_iterations is not None:
+            config["max_iterations"] = max_iterations
+            changed = True
+        
+        # Optimization settings
+        if "optimization" not in config:
+            config["optimization"] = {}
+        opt = config["optimization"]
+        
+        if opt_enabled is not None:
+            opt["enabled"] = opt_enabled
+            changed = True
+        if opt_optimizer:
+            if opt_optimizer not in ("gepa", "simba"):
+                console.print(f"[red]Invalid optimizer: {opt_optimizer}. Use: gepa, simba[/red]")
+                raise typer.Exit(1)
+            opt["optimizer"] = opt_optimizer
+            changed = True
+        if opt_model:
+            opt["model"] = opt_model
+            changed = True
+        if opt_fast is not None:
+            opt["fast"] = opt_fast
+            changed = True
+        if opt_threads is not None:
+            opt["threads"] = opt_threads
+            changed = True
+        if opt_min_traces is not None:
+            opt["min_new_traces"] = opt_min_traces
+            changed = True
+        
+        # GEPA settings
+        if gepa_teacher or gepa_auto or gepa_max_evals is not None:
+            if "gepa" not in opt:
+                opt["gepa"] = {}
+            if gepa_teacher:
+                opt["gepa"]["teacher_model"] = gepa_teacher
+                changed = True
+            if gepa_auto:
+                if gepa_auto not in ("light", "medium", "heavy"):
+                    console.print(f"[red]Invalid GEPA auto: {gepa_auto}. Use: light, medium, heavy[/red]")
+                    raise typer.Exit(1)
+                opt["gepa"]["auto"] = gepa_auto
+                changed = True
+            if gepa_max_evals is not None:
+                opt["gepa"]["max_evals"] = gepa_max_evals
+                changed = True
+        
+        # SIMBA settings
+        if simba_steps is not None or simba_candidates is not None or simba_batch_size is not None:
+            if "simba" not in opt:
+                opt["simba"] = {}
+            if simba_steps is not None:
+                opt["simba"]["steps"] = simba_steps
+                changed = True
+            if simba_candidates is not None:
+                opt["simba"]["candidates"] = simba_candidates
+                changed = True
+            if simba_batch_size is not None:
+                opt["simba"]["batch_size"] = simba_batch_size
+                changed = True
 
         if changed:
             save_config(config)
             console.print(f"[green]✓ Saved to {CONFIG_FILE}[/green]")
+            console.print("[dim]Use --show to see current configuration[/dim]")
         else:
-            console.print("[dim]No changes made[/dim]")
+            console.print("[dim]No changes made. Use --show to see current config.[/dim]")
 
     @app.command()
     def example(
