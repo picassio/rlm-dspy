@@ -29,8 +29,8 @@ def _env_get(key: str, default: T, cast: type[T] | None = None) -> T:
 
     try:
         return target_type(val)  # type: ignore
-    except ValueError:
-        _logger.warning("Invalid %s for %s, using default", target_type.__name__, key)
+    except (ValueError, TypeError) as e:
+        _logger.warning("Invalid %s for %s (%s), using default", target_type.__name__, key, e)
         return default
 
 

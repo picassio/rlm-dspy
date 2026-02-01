@@ -34,7 +34,7 @@ class ToolCall:
     """A tool call from the model."""
     id: str
     type: str = "function"
-    function: ToolCallFunction = None
+    function: ToolCallFunction | None = None
 
 
 @dataclass
@@ -49,7 +49,7 @@ class Message:
 class Choice:
     """A choice in a completion response."""
     index: int = 0
-    message: Message = None
+    message: Message | None = None
     finish_reason: str = "stop"
     text: str = ""  # For text completion compatibility
 
