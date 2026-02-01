@@ -719,7 +719,7 @@ def optimize_run(
     max_examples: Annotated[int, typer.Option("--max-examples", "-n", help="Maximum training examples")] = 100,
     fast: Annotated[bool, typer.Option("--fast", help="Fast preset: 1 step, 2 candidates")] = False,
     target: Annotated[str | None, typer.Option("--target", "-t", help="Target: all, demos, tips (default: all)")] = None,
-    optimizer: Annotated[str, typer.Option("--optimizer", "-o", help="Optimizer: gepa (recommended) or simba")] = "gepa",
+    optimizer: Annotated[str | None, typer.Option("--optimizer", "-o", help="Optimizer: gepa or simba (default: from config)")] = None,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Show what would be optimized")] = False,
 ) -> None:
     """Run unified optimization (demos + tips + rules).
@@ -730,16 +730,19 @@ def optimize_run(
     3. Extracts rules for instructions
 
     Optimizers:
-      gepa  - Reflective Prompt Evolution (default, recommended for RLM)
+      gepa  - Reflective Prompt Evolution (recommended for RLM)
       simba - Stochastic Mini-Batch Ascent (legacy, demos only)
+
+    Default optimizer is read from ~/.rlm/config.yaml (optimization.optimizer).
 
     All components are saved and auto-loaded on next query.
 
     \b
     Examples:
-      rlm-dspy optimize run            # Full optimization with GEPA (default)
+      rlm-dspy optimize run            # Use optimizer from config
       rlm-dspy optimize run --fast     # Fast mode (~5-15 min)
-      rlm-dspy optimize run -o simba   # Use SIMBA optimizer (legacy)
+      rlm-dspy optimize run -o simba   # Use SIMBA optimizer
+      rlm-dspy optimize run -o gepa    # Use GEPA optimizer
       rlm-dspy optimize run --target tips  # Only regenerate tips
     """
     from .core.trace_collector import get_trace_collector
@@ -751,6 +754,20 @@ def optimize_run(
     )
     from .core.grounded_proposer import get_grounded_proposer
     from .core.instruction_optimizer import get_instruction_optimizer
+    from .core.user_config import OptimizationConfig
+
+    # Get optimizer from config if not specified
+    optimizer_source = "CLI"
+    if optimizer is None:
+        opt_cfg = OptimizationConfig.from_user_config()
+        optimizer = opt_cfg.optimizer or "gepa"
+        optimizer_source = "config"
+    
+    if optimizer not in ("gepa", "simba"):
+        console.print(f"[red]Invalid optimizer: {optimizer}. Use: gepa, simba[/red]")
+        raise typer.Exit(1)
+    
+    console.print(f"[cyan]Optimizer: {optimizer} (from {optimizer_source})[/cyan]")
 
     target = target or "all"
     if target not in ("all", "demos", "tips"):
