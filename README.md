@@ -1438,9 +1438,9 @@ generate_action.instructions = "# Task: Answer Questions About a Codebase
 
 GEPA does NOT change: tools, model, signature fields, or execution logic.
 
-**Model Configuration:**
+**Configuration:**
 
-Both GEPA and SIMBA can be configured via `~/.rlm/config.yaml`:
+Both GEPA and SIMBA can be fully configured via `~/.rlm/config.yaml`:
 
 ```yaml
 # ~/.rlm/config.yaml
@@ -1457,11 +1457,24 @@ optimization:
   # Tip: Use a strong model for better prompt evolution
   teacher_model: openai/gpt-4o
   
+  # Fast proxy mode (50x faster, recommended)
+  fast: true                        # Use lightweight proxy instead of full RLM
+  
+  # Optimization parameters
+  steps: 1                          # Optimization iterations (1 for fast)
+  candidates: 2                     # Candidates per step (2 for fast)
+  batch_size: 8                     # Batch size (8 for fast)
+  threads: 2                        # Parallel threads
+  max_evals: null                   # Max evaluations for GEPA (null = auto)
+  
+  # Auto-optimization triggers
   min_new_traces: 50                # Traces before auto-optimization
   min_hours_between: 24             # Cooldown between runs
   max_budget: 0.50                  # Max cost per optimization
   run_in_background: true           # Run in background thread
 ```
+
+The background daemon and `optimize run` command both read these settings.
 
 **Model priority:**
 1. `--teacher` CLI option (GEPA only, highest priority)
