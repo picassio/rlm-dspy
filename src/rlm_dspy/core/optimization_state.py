@@ -28,11 +28,17 @@ _optimization_running = False
 # Without this, RLM will run all iterations instead of stopping early
 EARLY_TERMINATION_GUIDANCE = """
 
-EARLY TERMINATION - call SUBMIT(answer=...) immediately when:
-- Simple calculations or facts that don't need code exploration
-- You have enough evidence to answer (don't keep confirming)
-- The query is answered and no further exploration needed
-- DON'T waste iterations repeating the same findings"""
+EARLY TERMINATION - Use SUBMIT() to end immediately when done:
+```python
+# When you have your answer, call SUBMIT to stop:
+SUBMIT(answer="Your final answer here")
+```
+
+Call SUBMIT() immediately when:
+- Simple calculations: SUBMIT(answer="4") for "2+2"
+- Enough evidence gathered - don't keep confirming the same thing
+- Query is fully answered
+- DON'T waste iterations repeating findings - use SUBMIT()"""
 
 
 @dataclass

@@ -158,13 +158,18 @@ Iteration 3-5: LOCATE (find specific code)
 Iteration 6+: VERIFY (read and confirm)
   - read_file() with specific line ranges
   - Quote actual code in your findings
-  - SUBMIT(answer=...) when you have your answer
+  - Then call SUBMIT(answer="your answer") to finish
 
-EARLY TERMINATION - call SUBMIT() immediately when:
-- Simple calculations or facts that don't need code exploration
-- You have enough evidence to answer (don't keep confirming)
-- The query is answered and no further exploration needed
-- DON'T waste iterations repeating the same findings
+EARLY TERMINATION - Use SUBMIT() to end immediately:
+```python
+# When you have your answer, call SUBMIT to stop:
+SUBMIT(answer="Your final answer here")
+```
+
+Call SUBMIT() immediately when:
+- Simple calculations: SUBMIT(answer="4") for "2+2"
+- Enough evidence gathered - don't repeat findings
+- Query fully answered - use SUBMIT() to stop
 
 REMEMBER: You're exploring a codebase that may have 100+ files.
 Use search tools to find relevant code, don't try to read everything.""",
