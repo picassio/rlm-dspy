@@ -21,13 +21,33 @@ class PathTraversalError(Exception):
 
 
 def validate_path_safety(path: Path, base_dir: Path | None = None) -> Path:
-    """Validate that a path is safe (no traversal attacks)."""
+    """Validate that a path is safe (no traversal attacks).
+    
+    Checks for:
+    - Literal ".." in path
+    - URL-encoded traversal sequences (%2e%2e, %252e)
+    - Null bytes that could truncate paths
+    """
     resolved = path.resolve()
     path_str = str(path)
     
+    # Check for null bytes (can truncate path in some systems)
+    if "\x00" in path_str:
+        logger.warning("Null byte in path detected: %s", repr(path_str))
+        raise PathTraversalError(f"Path contains null byte")
+    
+    # Check for literal traversal
     if ".." in path_str:
         logger.warning("Path traversal attempt detected: %s", path_str)
         raise PathTraversalError(f"Path contains traversal sequence: {path_str}")
+    
+    # Check for URL-encoded traversal attempts
+    path_lower = path_str.lower()
+    encoded_patterns = ["%2e%2e", "%252e", "%c0%ae", "%c1%9c"]  # Common encodings
+    for pattern in encoded_patterns:
+        if pattern in path_lower:
+            logger.warning("Encoded path traversal attempt: %s", path_str)
+            raise PathTraversalError(f"Path contains encoded traversal sequence")
 
     if base_dir is not None:
         base_resolved = base_dir.resolve()
@@ -125,7 +145,8 @@ def smart_rmtree(path: Path, aggressive: bool = False) -> bool:
 
     def onerror(func, path_str, exc_info):
         try:
-            Path(path_str).chmod(0o777)
+            # Use owner-only permissions instead of world-writable for security
+            Path(path_str).chmod(0o700)
             func(path_str)
         except Exception:
             logger.warning("Cannot remove: %s", path_str)
