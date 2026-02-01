@@ -163,14 +163,13 @@ class RLM:
                 except Exception as e:
                     _logger.debug("Failed to apply instructions: %s", e)
                 
-                # If GEPA optimizer, also apply instructions to RLM predictors
-                if saved.optimizer_type == "gepa":
-                    try:
-                        from .gepa_optimizer import apply_gepa_instructions
-                        apply_gepa_instructions(self._rlm, saved.instructions)
-                        _logger.debug("Applied GEPA instructions to RLM predictors")
-                    except Exception as e:
-                        _logger.debug("Failed to apply GEPA instructions to predictors: %s", e)
+                # Apply instructions to RLM predictors (works for both GEPA and SIMBA)
+                try:
+                    from .gepa_optimizer import apply_gepa_instructions
+                    apply_gepa_instructions(self._rlm, saved.instructions)
+                    _logger.debug("Applied %s instructions to RLM predictors", saved.optimizer_type)
+                except Exception as e:
+                    _logger.debug("Failed to apply instructions to predictors: %s", e)
 
             if applied:
                 improvement_str = ""
