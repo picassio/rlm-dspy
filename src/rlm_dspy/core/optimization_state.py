@@ -24,6 +24,16 @@ OPTIMIZATION_STATE_FILE = OPTIMIZATION_DIR / "state.json"
 _optimization_lock = threading.Lock()
 _optimization_running = False
 
+# Critical instruction that must be present in all optimized instructions
+# Without this, RLM will run all iterations instead of stopping early
+EARLY_TERMINATION_GUIDANCE = """
+
+EARLY TERMINATION - call SUBMIT(answer=...) immediately when:
+- Simple calculations or facts that don't need code exploration
+- You have enough evidence to answer (don't keep confirming)
+- The query is answered and no further exploration needed
+- DON'T waste iterations repeating the same findings"""
+
 
 @dataclass
 class OptimizationResult:
@@ -251,9 +261,18 @@ def save_optimized_program(
     if not extracted_rules and hasattr(program, "rules"):
         extracted_rules = program.rules if isinstance(program.rules, list) else []
 
+    # Ensure early termination guidance is present in all instructions
+    # Without this, RLM will waste iterations even on simple queries
+    processed_instructions = {}
+    for key, text in (instructions or {}).items():
+        if text and EARLY_TERMINATION_GUIDANCE.strip() not in text:
+            processed_instructions[key] = text + EARLY_TERMINATION_GUIDANCE
+        else:
+            processed_instructions[key] = text
+
     saved = SavedOptimization(
         demos=demos,
-        instructions=instructions or {},
+        instructions=processed_instructions,
         tips=tips or [],
         rules=extracted_rules,
         optimizer_type=optimizer_type,

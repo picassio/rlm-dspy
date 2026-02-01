@@ -158,7 +158,13 @@ Iteration 3-5: LOCATE (find specific code)
 Iteration 6+: VERIFY (read and confirm)
   - read_file() with specific line ranges
   - Quote actual code in your findings
-  - Only SUBMIT when you have verified evidence
+  - SUBMIT(answer=...) when you have your answer
+
+EARLY TERMINATION - call SUBMIT() immediately when:
+- Simple calculations or facts that don't need code exploration
+- You have enough evidence to answer (don't keep confirming)
+- The query is answered and no further exploration needed
+- DON'T waste iterations repeating the same findings
 
 REMEMBER: You're exploring a codebase that may have 100+ files.
 Use search tools to find relevant code, don't try to read everything.""",
