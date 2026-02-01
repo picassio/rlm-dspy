@@ -102,7 +102,11 @@ class LoggingCallback(Callback):
 
 
 class MetricsCallback(Callback):
-    """Callback that collects metrics."""
+    """Callback that collects metrics with bounded memory usage."""
+    
+    # Maximum entries to keep per metric type to prevent memory exhaustion
+    MAX_TIMING_ENTRIES = 1000
+    MAX_ERRORS = 100
     
     def __init__(self):
         self.metrics: dict[str, list[float]] = {}
@@ -113,19 +117,25 @@ class MetricsCallback(Callback):
         # Count events
         self.counts[ctx.event] = self.counts.get(ctx.event, 0) + 1
         
-        # Track timing
+        # Track timing with bounded list
         if ctx.elapsed is not None:
             if ctx.event not in self.metrics:
                 self.metrics[ctx.event] = []
             self.metrics[ctx.event].append(ctx.elapsed)
+            # Evict oldest entries if over limit
+            if len(self.metrics[ctx.event]) > self.MAX_TIMING_ENTRIES:
+                self.metrics[ctx.event] = self.metrics[ctx.event][-self.MAX_TIMING_ENTRIES:]
         
-        # Track errors
+        # Track errors with bounded list
         if ctx.event == "error":
             self.errors.append({
                 "timestamp": ctx.timestamp.isoformat(),
                 "error": ctx.data.get("error"),
                 "traceback": ctx.data.get("traceback"),
             })
+            # Evict oldest errors if over limit
+            if len(self.errors) > self.MAX_ERRORS:
+                self.errors = self.errors[-self.MAX_ERRORS:]
     
     def get_summary(self) -> dict[str, Any]:
         """Get metrics summary."""

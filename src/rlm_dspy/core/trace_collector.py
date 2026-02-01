@@ -7,7 +7,8 @@ following DSPy's BootstrapFewShot pattern.
 
 import json
 import logging
-from dataclasses import dataclass, field, asdict
+import secrets
+from dataclasses import dataclass, field, asdict, fields
 from datetime import datetime, UTC
 from pathlib import Path
 from typing import Any
@@ -30,7 +31,7 @@ class REPLTrace:
     final_answer: str = ""
     grounded_score: float = 0.0
     timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
-    trace_id: str = field(default_factory=lambda: datetime.now(UTC).strftime("%Y%m%d_%H%M%S_%f"))
+    trace_id: str = field(default_factory=lambda: f"{datetime.now(UTC).strftime('%Y%m%d_%H%M%S_%f')}_{secrets.token_hex(4)}")
     
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -38,8 +39,17 @@ class REPLTrace:
     
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "REPLTrace":
-        """Create from dictionary."""
-        return cls(**data)
+        """Create from dictionary with validation."""
+        # Validate required fields
+        required = {"query", "query_type"}
+        if not all(k in data for k in required):
+            raise ValueError(f"Missing required fields: {required - set(data.keys())}")
+        
+        # Filter to only known fields to prevent injection
+        known_fields = {f.name for f in fields(cls)}
+        filtered = {k: v for k, v in data.items() if k in known_fields}
+        
+        return cls(**filtered)
     
     def format_as_demo(self) -> str:
         """Format this trace as a few-shot demonstration."""
