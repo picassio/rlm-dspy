@@ -640,7 +640,8 @@ VERIFICATION RULES:
                     try:
                         prediction = future.result(timeout=self.config.max_timeout)
                     except concurrent.futures.TimeoutError:
-                        raise TimeoutExceededError(self.config.max_timeout, self.config.max_timeout)
+                        elapsed = time.time() - self._start_time if self._start_time else self.config.max_timeout
+                        raise TimeoutExceededError(self.config.max_timeout, elapsed)
             else:
                 prediction = _execute_rlm()
 
