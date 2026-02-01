@@ -101,7 +101,8 @@ class GEPAConfig:
     """Configuration for GEPA optimizer."""
     
     # Budget (exactly one must be set)
-    auto: str | None = "light"  # "light", "medium", "heavy"
+    # auto presets: "test" (quick ~50 evals), "light" (~100-200), "medium" (~300-500), "heavy" (~800+)
+    auto: str | None = "light"
     max_full_evals: int | None = None
     max_metric_calls: int | None = None
     
@@ -395,7 +396,12 @@ class GEPAOptimizer:
         
         # Add budget
         if self.config.auto:
-            gepa_kwargs["auto"] = self.config.auto
+            if self.config.auto == "test":
+                # Special "test" preset for quick testing (~30-50 metric calls)
+                gepa_kwargs["max_metric_calls"] = 50
+            else:
+                # Use DSPy's built-in presets: light, medium, heavy
+                gepa_kwargs["auto"] = self.config.auto
         elif self.config.max_full_evals:
             gepa_kwargs["max_full_evals"] = self.config.max_full_evals
         elif self.config.max_metric_calls:

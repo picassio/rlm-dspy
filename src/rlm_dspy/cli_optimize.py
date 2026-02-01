@@ -463,7 +463,7 @@ def optimize_simba(
 def optimize_gepa(
     min_score: Annotated[float, typer.Option("--min-score", "-s", help="Min trace score for training")] = 0.7,
     max_examples: Annotated[int, typer.Option("--max-examples", "-n", help="Max training examples")] = 50,
-    auto: Annotated[str | None, typer.Option("--auto", "-a", help="Budget preset: light, medium, heavy (default: from config)")] = None,
+    auto: Annotated[str | None, typer.Option("--auto", "-a", help="Budget preset: test, light, medium, heavy (default: from config)")] = None,
     max_evals: Annotated[int | None, typer.Option("--max-evals", "-e", help="Max full evaluations (overrides --auto)")] = None,
     threads: Annotated[int | None, typer.Option("--threads", "-t", help="Number of parallel threads (default: from config)")] = None,
     teacher: Annotated[str | None, typer.Option("--teacher", help="Teacher/reflection model (overrides config)")] = None,
@@ -481,9 +481,10 @@ def optimize_gepa(
       --fast     - Proxy mode (50x faster, 1-2s per eval, instructions only)
     
     Budget options (use ONE):
-      --auto light   - Quick experimentation (default)
-      --auto medium  - Balanced optimization  
-      --auto heavy   - Thorough optimization
+      --auto test    - Quick testing (~50 evals)
+      --auto light   - Quick experimentation (~100-200 evals, default)
+      --auto medium  - Balanced optimization (~300-500 evals)
+      --auto heavy   - Thorough optimization (~800+ evals)
       --max-evals N  - Exactly N full evaluations (faster, explicit control)
     
     Teacher Model:
