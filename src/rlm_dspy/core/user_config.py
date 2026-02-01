@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import os
 import tempfile
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,9 @@ from typing import Any
 import yaml
 
 logger = logging.getLogger(__name__)
+
+# Thread lock for config file operations
+_config_lock = threading.Lock()
 
 # Default config directory
 CONFIG_DIR = Path.home() / ".rlm"
@@ -337,25 +341,84 @@ def ensure_config_dir() -> Path:
     return CONFIG_DIR
 
 
+def _validate_config(config: dict[str, Any]) -> dict[str, Any]:
+    """Validate and sanitize configuration values.
+    
+    Args:
+        config: Raw configuration dictionary
+        
+    Returns:
+        Validated configuration with safe defaults for invalid values
+    """
+    validated = config.copy()
+    
+    # Validate numeric bounds
+    if "max_iterations" in validated:
+        val = validated["max_iterations"]
+        if not isinstance(val, int) or val < 1 or val > 1000:
+            logger.warning("Invalid max_iterations %s, using default", val)
+            validated["max_iterations"] = DEFAULT_CONFIG.get("max_iterations", 30)
+    
+    if "max_budget" in validated:
+        val = validated["max_budget"]
+        if not isinstance(val, (int, float)) or val < 0 or val > 1000:
+            logger.warning("Invalid max_budget %s, using default", val)
+            validated["max_budget"] = DEFAULT_CONFIG.get("max_budget", 1.0)
+    
+    if "max_timeout" in validated:
+        val = validated["max_timeout"]
+        if not isinstance(val, (int, float)) or val < 1 or val > 86400:  # Max 24 hours
+            logger.warning("Invalid max_timeout %s, using default", val)
+            validated["max_timeout"] = DEFAULT_CONFIG.get("max_timeout", 300)
+    
+    if "max_workers" in validated:
+        val = validated["max_workers"]
+        if not isinstance(val, int) or val < 1 or val > 64:
+            logger.warning("Invalid max_workers %s, using default", val)
+            validated["max_workers"] = DEFAULT_CONFIG.get("max_workers", 8)
+    
+    # Validate optimization sub-config
+    if "optimization" in validated and isinstance(validated["optimization"], dict):
+        opt = validated["optimization"]
+        if "threads" in opt:
+            val = opt["threads"]
+            if not isinstance(val, int) or val < 1 or val > 32:
+                logger.warning("Invalid optimization.threads %s, using default", val)
+                opt["threads"] = 2
+        if "max_budget" in opt:
+            val = opt["max_budget"]
+            if not isinstance(val, (int, float)) or val < 0 or val > 100:
+                logger.warning("Invalid optimization.max_budget %s, using default", val)
+                opt["max_budget"] = 0.5
+    
+    return validated
+
+
 def load_config() -> dict[str, Any]:
     """Load user configuration from file.
 
     Returns default config if file doesn't exist.
+    Thread-safe via _config_lock.
     """
-    if not CONFIG_FILE.exists():
-        return DEFAULT_CONFIG.copy()
+    with _config_lock:
+        if not CONFIG_FILE.exists():
+            return DEFAULT_CONFIG.copy()
 
-    try:
-        with open(CONFIG_FILE) as f:
-            user_config = yaml.safe_load(f) or {}
-        # Merge with defaults
-        config = DEFAULT_CONFIG.copy()
-        config.update(user_config)
-        return config
-    except FileNotFoundError:
+        try:
+            with open(CONFIG_FILE) as f:
+                user_config = yaml.safe_load(f) or {}
+            # Merge with defaults
+            config = DEFAULT_CONFIG.copy()
+            config.update(user_config)
+            # Validate loaded config
+            return _validate_config(config)
+        except FileNotFoundError:
+            return DEFAULT_CONFIG.copy()
+    except (yaml.YAMLError, PermissionError, UnicodeDecodeError) as e:
+        logger.warning("Failed to load config from %s: %s", CONFIG_FILE, e)
         return DEFAULT_CONFIG.copy()
     except Exception as e:
-        logger.warning("Failed to load config from %s: %s", CONFIG_FILE, e)
+        logger.warning("Unexpected error loading config from %s: %s", CONFIG_FILE, e)
         return DEFAULT_CONFIG.copy()
 
 
@@ -482,14 +545,21 @@ def load_env_file(env_path: str | Path | None = None) -> dict[str, str]:
     if not env_path:
         return {}
 
-    env_path = Path(env_path).expanduser()
+    env_path = Path(env_path).expanduser().resolve()
+    
+    # Basic path safety check - must be under home or /etc
+    home = Path.home().resolve()
+    if not (str(env_path).startswith(str(home)) or str(env_path).startswith("/etc/")):
+        logger.warning("Refusing to load env file outside home directory: %s", env_path)
+        return {}
+    
     if not env_path.exists():
         return {}
 
     loaded = {}
     try:
-        with open(env_path) as f:
-            for line in f:
+        with open(env_path, encoding='utf-8') as f:
+            for line_num, line in enumerate(f, 1):
                 line = line.strip()
                 if not line or line.startswith("#"):
                     continue
@@ -497,11 +567,18 @@ def load_env_file(env_path: str | Path | None = None) -> dict[str, str]:
                     key, _, value = line.partition("=")
                     key = key.strip()
                     value = value.strip().strip('"').strip("'")
-                    if key and value:
+                    # Validate key is a valid env var name
+                    if key and value and key.replace("_", "").isalnum():
                         os.environ.setdefault(key, value)
                         loaded[key] = value
+                    elif key:
+                        logger.debug("Skipping invalid env var name at line %d: %s", line_num, key)
     except FileNotFoundError:
         logger.debug("Env file not found: %s", env_path)
+    except PermissionError:
+        logger.warning("Permission denied reading env file: %s", env_path)
+    except UnicodeDecodeError as e:
+        logger.warning("Encoding error in env file %s: %s", env_path, e)
     except Exception as e:
         logger.warning("Failed to load env file %s: %s", env_path, e)
 
@@ -509,16 +586,17 @@ def load_env_file(env_path: str | Path | None = None) -> dict[str, str]:
 
 
 def get_config_value(key: str, default: Any = None) -> Any:
-    """Get a single config value."""
+    """Get a single config value. Thread-safe."""
     config = load_config()
     return config.get(key, default)
 
 
 def set_config_value(key: str, value: Any) -> None:
-    """Set a single config value."""
-    config = load_config()
-    config[key] = value
-    save_config(config)
+    """Set a single config value. Thread-safe via _config_lock."""
+    with _config_lock:
+        config = load_config()
+        config[key] = value
+        save_config(config)
 
 
 def get_api_key_for_model(model: str) -> str | None:
