@@ -463,12 +463,12 @@ def optimize_simba(
 def optimize_gepa(
     min_score: Annotated[float, typer.Option("--min-score", "-s", help="Min trace score for training")] = 0.7,
     max_examples: Annotated[int, typer.Option("--max-examples", "-n", help="Max training examples")] = 50,
-    auto: Annotated[str | None, typer.Option("--auto", "-a", help="Budget preset: light, medium, heavy")] = "light",
+    auto: Annotated[str | None, typer.Option("--auto", "-a", help="Budget preset: light, medium, heavy (default: from config)")] = None,
     max_evals: Annotated[int | None, typer.Option("--max-evals", "-e", help="Max full evaluations (overrides --auto)")] = None,
-    threads: Annotated[int, typer.Option("--threads", "-t", help="Number of parallel threads")] = 2,
+    threads: Annotated[int | None, typer.Option("--threads", "-t", help="Number of parallel threads (default: from config)")] = None,
     teacher: Annotated[str | None, typer.Option("--teacher", help="Teacher/reflection model (overrides config)")] = None,
     tool_optimization: Annotated[bool, typer.Option("--tools", help="Enable tool optimization")] = False,
-    fast_proxy: Annotated[bool, typer.Option("--fast", "-f", help="Use fast proxy mode (50x faster, instructions only)")] = False,
+    fast_proxy: Annotated[bool | None, typer.Option("--fast", "-f", help="Use fast proxy mode (default: from config)")] = None,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Show what would be optimized")] = False,
 ) -> None:
     """Run GEPA reflective prompt evolution.
@@ -504,6 +504,20 @@ def optimize_gepa(
     from .core.trace_collector import get_trace_collector
     from .core.simba_optimizer import create_training_example
     from .core.gepa_optimizer import GEPAOptimizer, GEPAConfig
+    from .core.user_config import OptimizationConfig
+
+    # Load defaults from config
+    opt_cfg = OptimizationConfig.from_user_config()
+    
+    # Apply config defaults if not specified on CLI
+    if auto is None:
+        auto = opt_cfg.gepa.auto if (max_evals is None and opt_cfg.gepa.max_evals is None) else None
+    if max_evals is None and opt_cfg.gepa.max_evals is not None:
+        max_evals = opt_cfg.gepa.max_evals
+    if threads is None:
+        threads = opt_cfg.threads
+    if fast_proxy is None:
+        fast_proxy = opt_cfg.fast
 
     console.print("[bold cyan]GEPA Reflective Prompt Evolution[/bold cyan]\n")
 
@@ -527,13 +541,14 @@ def optimize_gepa(
         if len(traces) > 10:
             console.print(f"  ... and {len(traces) - 10} more")
         
-        # Show teacher model info
-        from .core.user_config import OptimizationConfig, load_config
-        opt_cfg = OptimizationConfig.from_user_config()
+        # Show settings
+        from .core.user_config import load_config
         user_cfg = load_config()
         teacher_model_name = teacher or opt_cfg.get_teacher_model(user_cfg.get("model", "openai/gpt-4o-mini"))
         
-        console.print(f"\n[dim]Budget: {auto}, Threads: {threads}, Tools: {tool_optimization}[/dim]")
+        budget_str = f"max_evals={max_evals}" if max_evals else f"auto={auto}"
+        console.print(f"\n[dim]Mode: {'fast proxy' if fast_proxy else 'full RLM'}[/dim]")
+        console.print(f"[dim]Budget: {budget_str}, Threads: {threads}, Tools: {tool_optimization}[/dim]")
         console.print(f"[dim]Teacher model: {teacher_model_name}[/dim]")
         return
 
