@@ -58,17 +58,26 @@ DEFAULT_CONFIG = {
         "enabled": True,                # Enable auto-optimization
         "optimizer": "gepa",            # Optimizer type: gepa (recommended), simba (legacy)
         "model": None,                  # null = use default model
-        "teacher_model": None,          # Teacher/reflection model for GEPA (null = use model)
         "fast": True,                   # Use fast proxy mode (50x faster, recommended)
-        "steps": 1,                     # Optimization steps (1 for fast mode)
-        "candidates": 2,                # Candidates per step (2 for fast mode)
-        "batch_size": 8,                # Batch size (8 for fast mode)
         "threads": 2,                   # Parallel threads
-        "max_evals": None,              # Max evaluations for GEPA (None = auto)
         "min_new_traces": 50,           # Traces needed before optimizing
         "min_hours_between": 24,        # Minimum hours between optimizations
         "max_budget": 0.50,             # Max cost per optimization run
         "run_in_background": True,      # Run optimization in background thread
+        
+        # GEPA-specific settings
+        "gepa": {
+            "teacher_model": None,      # Teacher/reflection model (null = use optimization.model)
+            "max_evals": None,          # Max evaluations (None = auto based on 'auto' preset)
+            "auto": "light",            # Budget preset: light, medium, heavy
+        },
+        
+        # SIMBA-specific settings
+        "simba": {
+            "steps": 1,                 # Optimization steps
+            "candidates": 2,            # Candidates per step
+            "batch_size": 8,            # Batch size
+        },
     },
 }
 
@@ -78,43 +87,75 @@ DEFAULT_OPTIMIZATION_CONFIG = DEFAULT_CONFIG["optimization"]
 
 
 @dataclass
-class OptimizationConfig:
-    """Configuration for auto-optimization."""
+class GEPASettings:
+    """GEPA-specific settings."""
+    teacher_model: str | None = None  # Teacher/reflection model (None = use optimization.model)
+    max_evals: int | None = None  # Max evaluations (None = auto)
+    auto: str = "light"  # Budget preset: light, medium, heavy
 
-    enabled: bool = True
-    optimizer: str = "gepa"  # "gepa" (recommended), "simba" (legacy)
-    model: str | None = None  # None = use default model from config
-    teacher_model: str | None = None  # Teacher/reflection model for GEPA (None = use model)
-    fast: bool = True  # Use fast proxy mode (50x faster)
+
+@dataclass
+class SIMBASettings:
+    """SIMBA-specific settings."""
     steps: int = 1  # Optimization steps
     candidates: int = 2  # Candidates per step
     batch_size: int = 8  # Batch size
+
+
+@dataclass
+class OptimizationConfig:
+    """Configuration for auto-optimization."""
+
+    # General settings
+    enabled: bool = True
+    optimizer: str = "gepa"  # "gepa" (recommended), "simba" (legacy)
+    model: str | None = None  # None = use default model from config
+    fast: bool = True  # Use fast proxy mode (50x faster)
     threads: int = 2  # Parallel threads
-    max_evals: int | None = None  # Max evaluations for GEPA (None = auto)
     min_new_traces: int = 50
     min_hours_between: int = 24
     max_budget: float = 0.50
     run_in_background: bool = True
+    
+    # Optimizer-specific settings
+    gepa: GEPASettings = None
+    simba: SIMBASettings = None
+    
+    def __post_init__(self):
+        if self.gepa is None:
+            self.gepa = GEPASettings()
+        if self.simba is None:
+            self.simba = SIMBASettings()
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "OptimizationConfig":
         """Create from dictionary."""
         defaults = DEFAULT_OPTIMIZATION_CONFIG
+        gepa_defaults = defaults.get("gepa", {})
+        simba_defaults = defaults.get("simba", {})
+        gepa_data = data.get("gepa", {})
+        simba_data = data.get("simba", {})
+        
         return cls(
             enabled=data.get("enabled", defaults["enabled"]),
             optimizer=data.get("optimizer", defaults["optimizer"]),
             model=data.get("model", defaults["model"]),
-            teacher_model=data.get("teacher_model", defaults.get("teacher_model")),
             fast=data.get("fast", defaults.get("fast", True)),
-            steps=data.get("steps", defaults.get("steps", 1)),
-            candidates=data.get("candidates", defaults.get("candidates", 2)),
-            batch_size=data.get("batch_size", defaults.get("batch_size", 8)),
             threads=data.get("threads", defaults.get("threads", 2)),
-            max_evals=data.get("max_evals", defaults.get("max_evals")),
             min_new_traces=data.get("min_new_traces", defaults["min_new_traces"]),
             min_hours_between=data.get("min_hours_between", defaults["min_hours_between"]),
             max_budget=data.get("max_budget", defaults["max_budget"]),
             run_in_background=data.get("run_in_background", defaults["run_in_background"]),
+            gepa=GEPASettings(
+                teacher_model=gepa_data.get("teacher_model", gepa_defaults.get("teacher_model")),
+                max_evals=gepa_data.get("max_evals", gepa_defaults.get("max_evals")),
+                auto=gepa_data.get("auto", gepa_defaults.get("auto", "light")),
+            ),
+            simba=SIMBASettings(
+                steps=simba_data.get("steps", simba_defaults.get("steps", 1)),
+                candidates=simba_data.get("candidates", simba_defaults.get("candidates", 2)),
+                batch_size=simba_data.get("batch_size", simba_defaults.get("batch_size", 8)),
+            ),
         )
 
     @classmethod
@@ -142,10 +183,10 @@ class OptimizationConfig:
             default_model: The default model from main config
             
         Returns:
-            The teacher model (self.teacher_model if set, else model, else default_model)
+            The teacher model (gepa.teacher_model if set, else model, else default_model)
         """
-        if self.teacher_model:
-            return self.teacher_model
+        if self.gepa and self.gepa.teacher_model:
+            return self.gepa.teacher_model
         return self.get_model(default_model)
 
 
@@ -253,36 +294,39 @@ optimization:
   optimizer: {opt_optimizer}
 
   # Model for optimization (null = use default model above)
-  # This model is used to run the RLM during optimization evaluation
   # Tip: Use same model as main for best results
   model: {opt_model}
 
-  # Teacher/reflection model for GEPA (null = use model above)
-  # GEPA uses this model for analyzing failures and proposing improvements
-  # Tip: Use a strong model like openai/gpt-4o or anthropic/claude-3-5-sonnet
-  teacher_model: {opt_teacher_model}
-
-  # Fast proxy mode (recommended): 1 LLM call per eval instead of 10-50
-  # Makes optimization 50x faster
+  # Fast proxy mode (50x faster, recommended)
+  # Uses lightweight proxy instead of full RLM for evaluation
   fast: {opt_fast}
 
-  # Optimization parameters
-  steps: {opt_steps}              # Optimization iterations (1 for fast mode)
-  candidates: {opt_candidates}    # Candidates per step (2 for fast mode)
-  batch_size: {opt_batch_size}    # Batch size (8 for fast mode)
-  threads: {opt_threads}          # Parallel threads
-  max_evals: {opt_max_evals}      # Max evaluations for GEPA (null = auto)
+  # Parallel threads for optimization
+  threads: {opt_threads}
 
-  # Minimum new traces before triggering optimization
+  # Auto-optimization triggers
   min_new_traces: {opt_min_new_traces}
-
-  # Minimum hours between optimization runs
   min_hours_between: {opt_min_hours_between}
-
-  # Maximum budget per optimization run in USD
   max_budget: {opt_max_budget}
 
   # Run optimization in background (recommended)
+  run_in_background: {opt_run_in_background}
+
+  # GEPA-specific settings
+  gepa:
+    # Teacher/reflection model for analyzing failures and proposing improvements
+    # Tip: Use a strong model like openai/gpt-4o or anthropic/claude-3-5-sonnet
+    teacher_model: {opt_gepa_teacher_model}
+    # Max evaluations (null = use 'auto' preset)
+    max_evals: {opt_gepa_max_evals}
+    # Budget preset: light (~50-100 evals), medium (~200-400), heavy (~500+)
+    auto: {opt_gepa_auto}
+
+  # SIMBA-specific settings
+  simba:
+    steps: {opt_simba_steps}           # Optimization iterations
+    candidates: {opt_simba_candidates} # Candidates per step
+    batch_size: {opt_simba_batch_size} # Batch size
   run_in_background: {opt_run_in_background}
 """
 
@@ -368,17 +412,20 @@ def save_config(config: dict[str, Any], use_template: bool = True) -> None:
             opt_enabled=fmt(opt_config.get("enabled", True)),
             opt_optimizer=fmt(opt_config.get("optimizer", "gepa")),
             opt_model=fmt(opt_config.get("model")),
-            opt_teacher_model=fmt(opt_config.get("teacher_model")),
             opt_fast=fmt(opt_config.get("fast", True)),
-            opt_steps=fmt(opt_config.get("steps", 1)),
-            opt_candidates=fmt(opt_config.get("candidates", 2)),
-            opt_batch_size=fmt(opt_config.get("batch_size", 8)),
             opt_threads=fmt(opt_config.get("threads", 2)),
-            opt_max_evals=fmt(opt_config.get("max_evals")),
             opt_min_new_traces=fmt(opt_config.get("min_new_traces", 50)),
             opt_min_hours_between=fmt(opt_config.get("min_hours_between", 24)),
             opt_max_budget=fmt(opt_config.get("max_budget", 0.50)),
             opt_run_in_background=fmt(opt_config.get("run_in_background", True)),
+            # GEPA settings
+            opt_gepa_teacher_model=fmt(opt_config.get("gepa", {}).get("teacher_model")),
+            opt_gepa_max_evals=fmt(opt_config.get("gepa", {}).get("max_evals")),
+            opt_gepa_auto=fmt(opt_config.get("gepa", {}).get("auto", "light")),
+            # SIMBA settings
+            opt_simba_steps=fmt(opt_config.get("simba", {}).get("steps", 1)),
+            opt_simba_candidates=fmt(opt_config.get("simba", {}).get("candidates", 2)),
+            opt_simba_batch_size=fmt(opt_config.get("simba", {}).get("batch_size", 8)),
         )
 
         _atomic_write(CONFIG_FILE, content)

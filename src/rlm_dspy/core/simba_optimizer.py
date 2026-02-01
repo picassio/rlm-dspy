@@ -61,10 +61,16 @@ def run_background_optimization(config: Any = None, model: str | None = None) ->
 
     def _optimize():
         try:
-            logger.info(
-                "Starting background %s optimization (fast=%s, steps=%d, candidates=%d)...",
-                config.optimizer, config.fast, config.steps, config.candidates
-            )
+            if config.optimizer == "simba":
+                logger.info(
+                    "Starting background SIMBA optimization (fast=%s, steps=%d, candidates=%d)...",
+                    config.fast, config.simba.steps, config.simba.candidates
+                )
+            else:
+                logger.info(
+                    "Starting background GEPA optimization (fast=%s, auto=%s)...",
+                    config.fast, config.gepa.auto
+                )
 
             # Load env file for API keys
             from .user_config import load_env_file, load_config
@@ -101,10 +107,10 @@ def run_background_optimization(config: Any = None, model: str | None = None) ->
                     teacher_model_name = config.get_teacher_model(default_model)
                     teacher_lm = _create_lm(teacher_model_name)
                     
-                    # Configure GEPA
+                    # Configure GEPA from nested config
                     gepa_config = GEPAConfig(
-                        auto="light" if config.max_evals is None else None,
-                        max_full_evals=config.max_evals,
+                        auto=config.gepa.auto if config.gepa.max_evals is None else None,
+                        max_full_evals=config.gepa.max_evals,
                         num_threads=config.threads,
                     )
                     
@@ -148,8 +154,8 @@ def run_background_optimization(config: Any = None, model: str | None = None) ->
                         baseline_score=0.0,
                         optimized_score=0.0,
                         improvement=0.0,
-                        num_steps=config.steps,
-                        num_candidates=config.candidates,
+                        num_steps=1,
+                        num_candidates=1,
                         best_program_idx=0,
                     )
                 else:
@@ -188,8 +194,8 @@ def run_background_optimization(config: Any = None, model: str | None = None) ->
                         set_optimization_running(False)
                         return
                     
-                    # Adjust batch size
-                    batch_size = min(config.batch_size, len(examples))
+                    # Adjust batch size using SIMBA-specific config
+                    batch_size = min(config.simba.batch_size, len(examples))
                     
                     # Create metric
                     def simba_proxy_metric(example, pred):
@@ -199,8 +205,8 @@ def run_background_optimization(config: Any = None, model: str | None = None) ->
                     optimizer = SIMBA(
                         metric=simba_proxy_metric,
                         bsize=batch_size,
-                        num_candidates=config.candidates,
-                        max_steps=config.steps,
+                        num_candidates=config.simba.candidates,
+                        max_steps=config.simba.steps,
                         num_threads=config.threads,
                     )
                     
@@ -217,16 +223,16 @@ def run_background_optimization(config: Any = None, model: str | None = None) ->
                         baseline_score=0.0,
                         optimized_score=0.0,
                         improvement=0.0,
-                        num_steps=config.steps,
-                        num_candidates=config.candidates,
+                        num_steps=config.simba.steps,
+                        num_candidates=config.simba.candidates,
                         best_program_idx=0,
                     )
                 else:
                     # Full RLM mode
                     optimizer = get_simba_optimizer(
-                        batch_size=config.batch_size,
-                        num_candidates=config.candidates,
-                        max_steps=config.steps,
+                        batch_size=config.simba.batch_size,
+                        num_candidates=config.simba.candidates,
+                        max_steps=config.simba.steps,
                         num_threads=config.threads,
                     )
                     
