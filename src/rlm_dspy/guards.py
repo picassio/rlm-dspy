@@ -1,10 +1,12 @@
 """Hallucination guards for RLM outputs.
 
-Provides multiple validation strategies:
+Provides multiple validation strategies (inspired by QMD's multi-dimensional scoring):
 
 1. **Trajectory-based validation** (fast, deterministic):
    - Checks if answer terms appear in code execution outputs
    - Validates that the answer is grounded in what the code found
+   - Checks for named entity preservation
+   - Detects generic/echoed responses
    - No LLM call required
 
 2. **LLM-as-judge validation** (slower, semantic):
@@ -28,12 +30,29 @@ Example:
 """
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
 # Threshold for when to use snippet-based validation (in characters)
 LARGE_CONTEXT_THRESHOLD = 50_000
+
+# Generic phrases that indicate a non-grounded response (inspired by QMD)
+GENERIC_PHRASES = frozenset({
+    'let me explore',
+    'let me search',
+    'let me find',
+    'i will analyze',
+    'i would need to',
+    'i can help you',
+    'would you like me to',
+    'shall i',
+    "i'll start by",
+    "first, i'll",
+    'let me start',
+    'let me look',
+    'i need to',
+})
 
 
 def _extract_keywords(text: str, min_length: int = 3) -> set[str]:
@@ -77,6 +96,102 @@ def _extract_specific_terms(text: str) -> set[str]:
     terms.update(numbers)
     
     return terms
+
+
+def _extract_named_entities(text: str) -> set[str]:
+    """Extract named entities using heuristics (inspired by QMD).
+    
+    Detects:
+    - ALL-CAPS acronyms (TDS, API, RLM)
+    - Capitalized proper nouns (React, Python)
+    - Technical terms with special chars (node.js, C++)
+    - CamelCase words (JavaScript, TypeScript)
+    - Compound names
+    """
+    entities = set()
+    words = text.split()
+    prev_was_entity = False
+    
+    key_term_stopwords = {
+        'what', 'is', 'how', 'to', 'the', 'a', 'an', 'in', 'on', 'for', 'of',
+        'and', 'or', 'with', 'my', 'your', 'do', 'does', 'can', 'i', 'me', 'we',
+        'who', 'where', 'when', 'why', 'which', 'find', 'get', 'show', 'tell',
+        'this', 'that', 'these', 'those', 'if', 'then', 'else', 'are', 'was',
+    }
+    
+    for i, word in enumerate(words):
+        clean = word.strip('.,!?:;()[]"\'-')
+        if not clean:
+            prev_was_entity = False
+            continue
+        
+        is_entity = False
+        
+        # ALL-CAPS acronyms (e.g., TDS, API)
+        if clean.isupper() and len(clean) >= 2:
+            entities.add(clean.lower())
+            is_entity = True
+        # Capitalized proper nouns (not at start of sentence for simplicity)
+        elif i > 0 and clean[0].isupper() and clean.lower() not in key_term_stopwords:
+            entities.add(clean.lower())
+            is_entity = True
+        # Technical terms with special chars (node.js, C++)
+        elif any(c in clean for c in '.+-#@') and len(clean) >= 2:
+            entities.add(clean.lower())
+            is_entity = True
+        # CamelCase (JavaScript, TypeScript)
+        elif len(clean) > 1 and any(c.isupper() for c in clean[1:]) and clean[0].isupper():
+            entities.add(clean.lower())
+            is_entity = True
+        # Compound names (previous word was entity)
+        elif prev_was_entity and clean.lower() not in key_term_stopwords:
+            entities.add(clean.lower())
+            is_entity = True
+        
+        prev_was_entity = is_entity
+    
+    return entities
+
+
+def _is_generic_response(text: str) -> bool:
+    """Check if response is generic without specific findings."""
+    lower = text.lower()
+    for phrase in GENERIC_PHRASES:
+        if phrase in lower:
+            # Check if there's substance after the generic phrase
+            idx = lower.find(phrase)
+            after = lower[idx + len(phrase):]
+            # If nothing substantial follows (< 100 chars), it's generic
+            if len(after.strip()) < 100:
+                return True
+    return False
+
+
+def _echoes_query(answer: str, query: str, threshold: float = 0.8) -> bool:
+    """Check if answer mostly just repeats the query (inspired by QMD)."""
+    answer_lower = answer[:300].lower().strip()  # Check first 300 chars
+    query_lower = query.lower().strip()
+    
+    # Direct echo check - query is contained in answer start
+    if query_lower in answer_lower:
+        # If query takes up most of the answer, it's an echo
+        if len(query_lower) > len(answer_lower) * 0.4:
+            return True
+    
+    # Check if answer starts with query (common pattern)
+    if answer_lower.startswith(query_lower[:min(50, len(query_lower))]):
+        return True
+    
+    # Term overlap check - high overlap means echoing
+    answer_terms = _extract_keywords(answer[:200])
+    query_terms = _extract_keywords(query)
+    
+    if not query_terms or len(query_terms) < 3:
+        return False
+    
+    overlap = len(answer_terms & query_terms) / len(query_terms)
+    # Only flag as echo if very high overlap AND answer is short
+    return overlap >= threshold and len(answer) < 300
 
 
 def _find_relevant_snippets(
@@ -160,10 +275,10 @@ def _find_relevant_snippets(
 
 @dataclass
 class TrajectoryValidationResult:
-    """Result of trajectory-based validation."""
+    """Result of trajectory-based validation (inspired by QMD multi-dimensional scoring)."""
     
     score: float
-    """Groundedness score (0-1), fraction of answer terms found in outputs."""
+    """Groundedness score (0-1), weighted combination of dimensions."""
     
     found_terms: list[str]
     """Terms from answer that were found in trajectory outputs."""
@@ -176,35 +291,101 @@ class TrajectoryValidationResult:
     
     threshold: float = 0.5
     """Threshold used for is_grounded determination."""
+    
+    # Additional validation dimensions (inspired by QMD)
+    is_generic: bool = False
+    """Whether the response is generic (e.g., 'let me explore...')."""
+    
+    echoes_query: bool = False
+    """Whether the response mostly echoes the original query."""
+    
+    entities_preserved: bool = True
+    """Whether named entities from query are preserved in answer."""
+    
+    missing_entities: list[str] = field(default_factory=list)
+    """Named entities from query not found in answer."""
+    
+    deductions: list[str] = field(default_factory=list)
+    """List of issues found during validation."""
 
 
 def validate_trajectory(
     result: Any,  # RLMResult
     threshold: float = 0.5,
+    query: str | None = None,
 ) -> TrajectoryValidationResult:
     """Validate RLM output against its execution trajectory.
     
-    This is a fast, deterministic validation that checks if the answer
-    contains terms that appeared in the code execution outputs.
-    
-    The intuition: if RLM's answer mentions something, that something
-    should have appeared in the output of the code it executed.
+    Multi-dimensional validation inspired by QMD:
+    1. Term grounding: Answer terms should appear in trajectory outputs
+    2. Entity preservation: Named entities from query should be in answer
+    3. Generic detection: Penalize "let me explore..." responses
+    4. Echo detection: Penalize responses that just repeat the query
     
     Args:
         result: RLMResult with trajectory
         threshold: Minimum fraction of terms found (default: 0.5)
+        query: Original query for entity/echo checking (optional)
         
     Returns:
         TrajectoryValidationResult with score and details
     """
+    deductions = []
+    
+    # Get answer text
+    answer = result.answer if hasattr(result, 'answer') else str(result)
+    
+    # Get query if available
+    if query is None and hasattr(result, 'query'):
+        query = result.query
+    
+    # Check for generic response
+    is_generic = _is_generic_response(answer)
+    if is_generic:
+        deductions.append("generic response without findings")
+    
+    # Check for query echo
+    echoes = False
+    if query:
+        echoes = _echoes_query(answer, query)
+        if echoes:
+            deductions.append("echoes query")
+    
+    # Check entity preservation
+    entities_preserved = True
+    missing_entities = []
+    if query:
+        query_entities = _extract_named_entities(query)
+        if query_entities:
+            answer_lower = answer.lower()
+            for entity in query_entities:
+                if entity not in answer_lower:
+                    missing_entities.append(entity)
+            if missing_entities:
+                entities_preserved = False
+                deductions.append(f"missing entities: {', '.join(missing_entities[:3])}")
+    
     if not hasattr(result, 'trajectory') or not result.trajectory:
-        # No trajectory - can't validate
+        # No trajectory - can't validate grounding, but can check other dimensions
+        base_score = 1.0
+        if is_generic:
+            base_score -= 0.3
+        if echoes:
+            base_score -= 0.2
+        if not entities_preserved:
+            base_score -= 0.2
+        
         return TrajectoryValidationResult(
-            score=1.0,
+            score=max(0.0, base_score),
             found_terms=[],
             missing_terms=[],
-            is_grounded=True,
+            is_grounded=base_score >= threshold,
             threshold=threshold,
+            is_generic=is_generic,
+            echoes_query=echoes,
+            entities_preserved=entities_preserved,
+            missing_entities=missing_entities,
+            deductions=deductions,
         )
     
     # Collect all outputs from trajectory
@@ -216,17 +397,29 @@ def validate_trajectory(
     combined_output = "\n".join(all_outputs).lower()
     
     # Extract specific terms from the answer
-    answer = result.answer if hasattr(result, 'answer') else str(result)
     answer_terms = _extract_specific_terms(answer)
     
     if not answer_terms:
-        # No specific terms to validate
+        # No specific terms to validate - check other dimensions only
+        base_score = 1.0
+        if is_generic:
+            base_score -= 0.3
+        if echoes:
+            base_score -= 0.2
+        if not entities_preserved:
+            base_score -= 0.2
+        
         return TrajectoryValidationResult(
-            score=1.0,
+            score=max(0.0, base_score),
             found_terms=[],
             missing_terms=[],
-            is_grounded=True,
+            is_grounded=base_score >= threshold,
             threshold=threshold,
+            is_generic=is_generic,
+            echoes_query=echoes,
+            entities_preserved=entities_preserved,
+            missing_entities=missing_entities,
+            deductions=deductions,
         )
     
     # Check which terms appear in outputs
@@ -237,15 +430,34 @@ def validate_trajectory(
             found.append(term)
         else:
             missing.append(term)
+    # Calculate base grounding score
+    grounding_score = len(found) / len(answer_terms) if answer_terms else 1.0
     
-    score = len(found) / len(answer_terms) if answer_terms else 1.0
+    if missing:
+        deductions.append(f"terms not in trajectory: {', '.join(missing[:3])}")
+    
+    # Apply penalties for other dimensions (like QMD's multi-dimensional scoring)
+    final_score = grounding_score
+    if is_generic:
+        final_score -= 0.2  # -20% for generic responses
+    if echoes:
+        final_score -= 0.15  # -15% for echoing query
+    if not entities_preserved:
+        final_score -= 0.15  # -15% for missing entities
+    
+    final_score = max(0.0, min(1.0, final_score))
     
     return TrajectoryValidationResult(
-        score=score,
+        score=final_score,
         found_terms=found,
         missing_terms=missing,
-        is_grounded=score >= threshold,
+        is_grounded=final_score >= threshold,
         threshold=threshold,
+        is_generic=is_generic,
+        echoes_query=echoes,
+        entities_preserved=entities_preserved,
+        missing_entities=missing_entities,
+        deductions=deductions,
     )
 
 
