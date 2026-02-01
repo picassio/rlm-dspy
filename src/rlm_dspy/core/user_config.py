@@ -59,6 +59,12 @@ DEFAULT_CONFIG = {
         "optimizer": "gepa",            # Optimizer type: gepa (recommended), simba (legacy)
         "model": None,                  # null = use default model
         "teacher_model": None,          # Teacher/reflection model for GEPA (null = use model)
+        "fast": True,                   # Use fast proxy mode (50x faster, recommended)
+        "steps": 1,                     # Optimization steps (1 for fast mode)
+        "candidates": 2,                # Candidates per step (2 for fast mode)
+        "batch_size": 8,                # Batch size (8 for fast mode)
+        "threads": 2,                   # Parallel threads
+        "max_evals": None,              # Max evaluations for GEPA (None = auto)
         "min_new_traces": 50,           # Traces needed before optimizing
         "min_hours_between": 24,        # Minimum hours between optimizations
         "max_budget": 0.50,             # Max cost per optimization run
@@ -79,6 +85,12 @@ class OptimizationConfig:
     optimizer: str = "gepa"  # "gepa" (recommended), "simba" (legacy)
     model: str | None = None  # None = use default model from config
     teacher_model: str | None = None  # Teacher/reflection model for GEPA (None = use model)
+    fast: bool = True  # Use fast proxy mode (50x faster)
+    steps: int = 1  # Optimization steps
+    candidates: int = 2  # Candidates per step
+    batch_size: int = 8  # Batch size
+    threads: int = 2  # Parallel threads
+    max_evals: int | None = None  # Max evaluations for GEPA (None = auto)
     min_new_traces: int = 50
     min_hours_between: int = 24
     max_budget: float = 0.50
@@ -93,6 +105,12 @@ class OptimizationConfig:
             optimizer=data.get("optimizer", defaults["optimizer"]),
             model=data.get("model", defaults["model"]),
             teacher_model=data.get("teacher_model", defaults.get("teacher_model")),
+            fast=data.get("fast", defaults.get("fast", True)),
+            steps=data.get("steps", defaults.get("steps", 1)),
+            candidates=data.get("candidates", defaults.get("candidates", 2)),
+            batch_size=data.get("batch_size", defaults.get("batch_size", 8)),
+            threads=data.get("threads", defaults.get("threads", 2)),
+            max_evals=data.get("max_evals", defaults.get("max_evals")),
             min_new_traces=data.get("min_new_traces", defaults["min_new_traces"]),
             min_hours_between=data.get("min_hours_between", defaults["min_hours_between"]),
             max_budget=data.get("max_budget", defaults["max_budget"]),
@@ -244,6 +262,17 @@ optimization:
   # Tip: Use a strong model like openai/gpt-4o or anthropic/claude-3-5-sonnet
   teacher_model: {opt_teacher_model}
 
+  # Fast proxy mode (recommended): 1 LLM call per eval instead of 10-50
+  # Makes optimization 50x faster
+  fast: {opt_fast}
+
+  # Optimization parameters
+  steps: {opt_steps}              # Optimization iterations (1 for fast mode)
+  candidates: {opt_candidates}    # Candidates per step (2 for fast mode)
+  batch_size: {opt_batch_size}    # Batch size (8 for fast mode)
+  threads: {opt_threads}          # Parallel threads
+  max_evals: {opt_max_evals}      # Max evaluations for GEPA (null = auto)
+
   # Minimum new traces before triggering optimization
   min_new_traces: {opt_min_new_traces}
 
@@ -340,6 +369,12 @@ def save_config(config: dict[str, Any], use_template: bool = True) -> None:
             opt_optimizer=fmt(opt_config.get("optimizer", "gepa")),
             opt_model=fmt(opt_config.get("model")),
             opt_teacher_model=fmt(opt_config.get("teacher_model")),
+            opt_fast=fmt(opt_config.get("fast", True)),
+            opt_steps=fmt(opt_config.get("steps", 1)),
+            opt_candidates=fmt(opt_config.get("candidates", 2)),
+            opt_batch_size=fmt(opt_config.get("batch_size", 8)),
+            opt_threads=fmt(opt_config.get("threads", 2)),
+            opt_max_evals=fmt(opt_config.get("max_evals")),
             opt_min_new_traces=fmt(opt_config.get("min_new_traces", 50)),
             opt_min_hours_between=fmt(opt_config.get("min_hours_between", 24)),
             opt_max_budget=fmt(opt_config.get("max_budget", 0.50)),
