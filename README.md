@@ -1170,8 +1170,9 @@ rlm-dspy optimize run --dry-run         # Preview what would be optimized
 rlm-dspy optimize run --fast            # Fast mode
 rlm-dspy optimize run --target tips     # Only regenerate tips
 
-# Run SIMBA optimization (legacy, not recommended)
-rlm-dspy optimize simba --fast          # Fast mode
+# Run SIMBA optimization (legacy, GEPA recommended instead)
+rlm-dspy optimize simba --fast-proxy    # Fast proxy mode (~1-3 min)
+rlm-dspy optimize simba --fast          # Fast with full RLM (~5-15 min)
 rlm-dspy optimize run -o simba --fast   # Via unified command
 
 # Reset/clear optimization data
@@ -1273,22 +1274,28 @@ All components are saved to `~/.rlm/optimization/` and auto-loaded on next query
 SIMBA (Stochastic Introspective Mini-Batch Ascent) optimizes demos (few-shot examples):
 
 ```bash
-# Use SIMBA explicitly
+# Fast proxy mode (recommended if using SIMBA)
+rlm-dspy optimize simba --fast-proxy
+
+# Fast preset with full RLM
 rlm-dspy optimize simba --fast
 
 # Or customize individually
 rlm-dspy optimize simba --steps 2 --candidates 3 --threads 2
 ```
 
-| Option | Default | Fast Mode | Description |
-|--------|---------|-----------|-------------|
-| `--steps` | 4 | 1 | Optimization iterations |
-| `--candidates` | 4 | 2 | Candidate programs per step |
-| `--batch-size` | 16 | 8 | Examples evaluated per candidate |
-| `--threads` | 2 | 2 | Parallel evaluation threads |
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `--fast-proxy` | `-f` | false | Use proxy mode (50x faster, like GEPA --fast) |
+| `--fast` | | false | Fast preset: 1 step, 2 candidates (still full RLM) |
+| `--steps` | | 4 | Optimization iterations |
+| `--candidates` | `-c` | 4 | Candidate programs per step |
+| `--batch-size` | `-b` | 16 | Examples evaluated per candidate |
+| `--threads` | `-t` | 2 | Parallel evaluation threads |
 
 **Estimated time:**
-- `--fast`: ~5-15 minutes
+- `--fast-proxy`: ~1-3 minutes (recommended)
+- `--fast`: ~5-15 minutes (full RLM)
 - Default: ~1-2 hours
 
 Requirements:
