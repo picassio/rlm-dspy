@@ -1023,34 +1023,39 @@ def optimize_run(
 
 @optimize_app.command("status")
 def optimize_status() -> None:
-    """Show auto-optimization status."""
-    from .core.user_config import OptimizationConfig, load_config
+    """Show optimization status."""
+    from .core.user_config import OptimizationConfig, DaemonOptimizationConfig, load_config
     from .core.simba_optimizer import (
         load_optimization_state, load_optimized_program, get_trace_count,
         OPTIMIZED_PROGRAM_FILE,
     )
 
-    config = OptimizationConfig.from_user_config()
+    opt_config = OptimizationConfig.from_user_config()
+    daemon_config = DaemonOptimizationConfig.from_user_config()
     state = load_optimization_state()
     saved = load_optimized_program()
     current_traces = get_trace_count()
     user_config = load_config()
 
-    table = Table(title="Auto-Optimization Status")
+    table = Table(title="Optimization Status")
     table.add_column("Setting", style="cyan")
     table.add_column("Value")
 
-    # Config
-    status = "[green]Enabled[/green]" if config.enabled else "[red]Disabled[/red]"
-    table.add_row("Status", status)
-    table.add_row("Optimizer", config.optimizer)
-
-    model = config.get_model(user_config.get("model", "default"))
+    # Optimization config
+    table.add_row("[bold]Optimization Settings[/bold]", "")
+    table.add_row("Optimizer", opt_config.optimizer)
+    model = opt_config.get_model(user_config.get("model", "default"))
     table.add_row("Model", model)
-    table.add_row("Min New Traces", str(config.min_new_traces))
-    table.add_row("Min Hours Between", str(config.min_hours_between))
-    table.add_row("Max Budget", f"${config.max_budget:.2f}")
-    table.add_row("Background Mode", "Yes" if config.run_in_background else "No")
+    table.add_row("Fast Mode", "Yes" if opt_config.fast else "No")
+    table.add_row("Max Budget", f"${opt_config.max_budget:.2f}")
+    
+    # Daemon config
+    table.add_row("", "")
+    table.add_row("[bold]Daemon Settings[/bold]", "")
+    status = "[green]Enabled[/green]" if daemon_config.auto_optimize else "[red]Disabled[/red]"
+    table.add_row("Auto-Optimization", status)
+    table.add_row("Min New Traces", str(daemon_config.min_new_traces))
+    table.add_row("Min Hours Between", str(daemon_config.min_hours_between))
 
     table.add_row("", "")
     table.add_row("[bold]Current State[/bold]", "")
@@ -1085,33 +1090,34 @@ def optimize_status() -> None:
 
     console.print(table)
 
-    # Show when next optimization will trigger
-    if config.enabled:
-        needed_traces = config.min_new_traces - new_traces
+    # Show when next daemon-triggered optimization will trigger
+    if daemon_config.auto_optimize:
+        needed_traces = daemon_config.min_new_traces - new_traces
         if needed_traces > 0:
-            console.print(f"\n[dim]Next auto-optimization: {needed_traces} more traces needed[/dim]")
+            console.print(f"\n[dim]Next daemon auto-optimization: {needed_traces} more traces needed[/dim]")
         elif state.last_optimization:
             from datetime import datetime, UTC
             hours_since = (datetime.now(UTC) - state.last_optimization).total_seconds() / 3600
-            hours_left = config.min_hours_between - hours_since
+            hours_left = daemon_config.min_hours_between - hours_since
             if hours_left > 0:
-                console.print(f"\n[dim]Next auto-optimization: {hours_left:.1f} hours cooldown remaining[/dim]")
+                console.print(f"\n[dim]Next daemon auto-optimization: {hours_left:.1f} hours cooldown remaining[/dim]")
             else:
-                console.print("\n[green]Ready to optimize on next query![/green]")
+                console.print("\n[green]Daemon ready to optimize![/green]")
         else:
-            console.print("\n[green]Ready to optimize on next query![/green]")
+            console.print("\n[green]Daemon ready to optimize![/green]")
+    else:
+        console.print("\n[dim]Daemon auto-optimization is disabled. Use 'rlm-dspy optimize run' to optimize manually.[/dim]")
 
 
 @optimize_app.command("enable")
-def optimize_enable(
-    background: Annotated[bool | None, typer.Option("--background/--no-background", "-b/-B", help="Enable/disable background mode")] = None,
-) -> None:
-    """Enable auto-optimization.
+def optimize_enable() -> None:
+    """Enable daemon auto-optimization.
+    
+    This enables the daemon to automatically trigger optimization
+    when enough traces are collected.
     
     Examples:
-        rlm-dspy optimize enable              # Enable auto-optimization
-        rlm-dspy optimize enable --background # Enable with background mode
-        rlm-dspy optimize enable -B           # Enable without background mode
+        rlm-dspy optimize enable    # Enable daemon auto-optimization
     """
     from pathlib import Path
     import yaml
@@ -1126,26 +1132,25 @@ def optimize_enable(
         except Exception:
             pass
 
-    # Update optimization settings
-    if "optimization" not in config:
-        config["optimization"] = {}
-    config["optimization"]["enabled"] = True
-    
-    if background is not None:
-        config["optimization"]["background"] = background
+    # Update daemon.auto_optimize
+    if "daemon" not in config:
+        config["daemon"] = {}
+    config["daemon"]["auto_optimize"] = True
 
     # Save back
     config_file.parent.mkdir(parents=True, exist_ok=True)
     config_file.write_text(yaml.dump(config, default_flow_style=False, sort_keys=False))
 
-    bg_status = config["optimization"].get("background", True)
-    console.print("[green]✓ Auto-optimization enabled[/green]")
-    console.print(f"  Background mode: {'Yes' if bg_status else 'No'}")
+    console.print("[green]✓ Daemon auto-optimization enabled[/green]")
+    console.print("[dim]The daemon will auto-optimize when conditions are met.[/dim]")
 
 
 @optimize_app.command("disable")
 def optimize_disable() -> None:
-    """Disable auto-optimization."""
+    """Disable daemon auto-optimization.
+    
+    Manual optimization via 'rlm-dspy optimize run' still works.
+    """
     from pathlib import Path
     import yaml
 
@@ -1159,33 +1164,35 @@ def optimize_disable() -> None:
         except Exception:
             pass
 
-    # Update optimization.enabled
-    if "optimization" not in config:
-        config["optimization"] = {}
-    config["optimization"]["enabled"] = False
+    # Update daemon.auto_optimize
+    if "daemon" not in config:
+        config["daemon"] = {}
+    config["daemon"]["auto_optimize"] = False
 
     # Save back
     config_file.parent.mkdir(parents=True, exist_ok=True)
     config_file.write_text(yaml.dump(config, default_flow_style=False, sort_keys=False))
 
-    console.print("[yellow]✓ Auto-optimization disabled[/yellow]")
+    console.print("[yellow]✓ Daemon auto-optimization disabled[/yellow]")
+    console.print("[dim]Use 'rlm-dspy optimize run' to optimize manually.[/dim]")
 
 
 @optimize_app.command("config")
 def optimize_config(
-    background: Annotated[bool | None, typer.Option("--background/--no-background", "-b/-B", help="Enable/disable background mode")] = None,
-    min_traces: Annotated[int | None, typer.Option("--min-traces", help="Min new traces before optimization")] = None,
-    min_hours: Annotated[int | None, typer.Option("--min-hours", help="Min hours between optimizations")] = None,
+    optimizer: Annotated[str | None, typer.Option("--optimizer", "-o", help="Optimizer type: gepa, simba")] = None,
+    fast: Annotated[bool | None, typer.Option("--fast/--no-fast", help="Enable/disable fast proxy mode")] = None,
+    min_traces: Annotated[int | None, typer.Option("--min-traces", help="Min new traces before daemon auto-optimization")] = None,
+    min_hours: Annotated[int | None, typer.Option("--min-hours", help="Min hours between daemon auto-optimizations")] = None,
     max_budget: Annotated[float | None, typer.Option("--max-budget", help="Max budget per optimization ($)")] = None,
 ) -> None:
     """Configure optimization settings.
     
     Examples:
         rlm-dspy optimize config                    # Show current config
-        rlm-dspy optimize config --background       # Enable background mode
-        rlm-dspy optimize config -B                 # Disable background mode
-        rlm-dspy optimize config --min-traces 20    # Set min traces to 20
-        rlm-dspy optimize config --min-hours 12     # Set min hours to 12
+        rlm-dspy optimize config --optimizer gepa   # Use GEPA optimizer
+        rlm-dspy optimize config --fast             # Enable fast mode
+        rlm-dspy optimize config --min-traces 20    # Set daemon min traces to 20
+        rlm-dspy optimize config --min-hours 12     # Set daemon min hours to 12
     """
     from pathlib import Path
     import yaml
@@ -1202,20 +1209,24 @@ def optimize_config(
 
     if "optimization" not in config:
         config["optimization"] = {}
+    if "daemon" not in config:
+        config["daemon"] = {}
     
     # Check if any updates requested
-    has_updates = any(v is not None for v in [background, min_traces, min_hours, max_budget])
+    has_updates = any(v is not None for v in [optimizer, fast, min_traces, min_hours, max_budget])
     
     if has_updates:
-        # Apply updates
-        if background is not None:
-            config["optimization"]["background"] = background
-        if min_traces is not None:
-            config["optimization"]["min_new_traces"] = min_traces
-        if min_hours is not None:
-            config["optimization"]["min_hours_between"] = min_hours
+        # Apply updates to appropriate sections
+        if optimizer is not None:
+            config["optimization"]["optimizer"] = optimizer
+        if fast is not None:
+            config["optimization"]["fast"] = fast
         if max_budget is not None:
             config["optimization"]["max_budget"] = max_budget
+        if min_traces is not None:
+            config["daemon"]["min_new_traces"] = min_traces
+        if min_hours is not None:
+            config["daemon"]["min_hours_between"] = min_hours
         
         # Save back
         config_file.parent.mkdir(parents=True, exist_ok=True)
@@ -1224,12 +1235,17 @@ def optimize_config(
     
     # Show current config
     opt_config = config.get("optimization", {})
+    daemon_config = config.get("daemon", {})
+    
     console.print("\n[bold]Optimization Settings:[/bold]")
-    console.print(f"  Enabled:         {opt_config.get('enabled', True)}")
-    console.print(f"  Background:      {opt_config.get('background', True)}")
-    console.print(f"  Min New Traces:  {opt_config.get('min_new_traces', 50)}")
-    console.print(f"  Min Hours:       {opt_config.get('min_hours_between', 24)}")
-    console.print(f"  Max Budget:      ${opt_config.get('max_budget', 0.50):.2f}")
+    console.print(f"  Optimizer:   {opt_config.get('optimizer', 'gepa')}")
+    console.print(f"  Fast Mode:   {opt_config.get('fast', True)}")
+    console.print(f"  Max Budget:  ${opt_config.get('max_budget', 0.50):.2f}")
+    
+    console.print("\n[bold]Daemon Settings:[/bold]")
+    console.print(f"  Auto-Optimize:   {daemon_config.get('auto_optimize', False)}")
+    console.print(f"  Min New Traces:  {daemon_config.get('min_new_traces', 50)}")
+    console.print(f"  Min Hours:       {daemon_config.get('min_hours_between', 24)}")
 
 
 @optimize_app.command("reset")

@@ -76,211 +76,20 @@ def run_background_optimization(config: Any = None, model: str | None = None) ->
             from .user_config import load_env_file, load_config
             load_env_file()
 
-            # Get the RLM program
-            from .rlm import RLM
-            rlm = RLM()
-            
             # Get model from config
             user_cfg = load_config()
             default_model = user_cfg.get("model", "openai/gpt-4o-mini")
             model_name = config.get_model(default_model)
             
-            # Configure LM (handle custom providers)
+            # Create LM for the background thread
+            # Use dspy.settings.context() instead of dspy.configure() for thread safety
+            # dspy.configure() fails from background threads with:
+            # "dspy.settings can only be changed by the thread that initially configured it"
             import dspy
             lm = _create_lm(model_name)
-            dspy.configure(lm=lm)
-
-            optimized_program = None
-            result = None
-            instructions = {}
-
-            if config.optimizer == "gepa":
-                # Run GEPA optimization
-                if config.fast:
-                    # Fast proxy mode
-                    from .gepa_proxy import RLMProxy, create_proxy_metric, extract_proxy_instructions
-                    from .gepa_optimizer import GEPAConfig, apply_gepa_instructions
-                    
-                    proxy = RLMProxy.from_rlm(rlm._rlm)
-                    
-                    # Get teacher model
-                    teacher_model_name = config.get_teacher_model(default_model)
-                    teacher_lm = _create_lm(teacher_model_name)
-                    
-                    # Configure GEPA from nested config
-                    gepa_config = GEPAConfig(
-                        auto=config.gepa.auto if config.gepa.max_evals is None else None,
-                        max_full_evals=config.gepa.max_evals,
-                        num_threads=config.threads,
-                    )
-                    
-                    # Get training examples
-                    from .trace_collector import get_trace_collector
-                    collector = get_trace_collector()
-                    traces = [t for t in collector.traces if t.grounded_score >= 0.7][:50]
-                    
-                    if len(traces) < 4:
-                        logger.info("Not enough traces for GEPA optimization: %d < 4", len(traces))
-                        return  # finally block handles cleanup
-                    
-                    examples = [
-                        dspy.Example(query=t.query, answer=t.final_answer).with_inputs("query")
-                        for t in traces
-                    ]
-                    
-                    # Run GEPA on proxy
-                    from dspy.teleprompt import GEPA
-                    optimizer = GEPA(
-                        metric=create_proxy_metric(),
-                        reflection_lm=teacher_lm,
-                        **gepa_config.__dict__,
-                    )
-                    optimized_proxy = optimizer.compile(proxy, trainset=examples)
-                    
-                    # Extract instructions
-                    instructions = extract_proxy_instructions(optimized_proxy)
-                    
-                    # Apply to real RLM
-                    if instructions:
-                        apply_gepa_instructions(rlm._rlm, instructions)
-                    
-                    optimized_program = optimized_proxy
-                    
-                    # Create result
-                    from .optimization_state import OptimizationResult
-                    result = OptimizationResult(
-                        improved=bool(instructions),
-                        baseline_score=0.0,
-                        optimized_score=0.0,
-                        improvement=0.0,
-                        num_steps=1,
-                        num_candidates=1,
-                        best_program_idx=0,
-                    )
-                else:
-                    # Full RLM mode (slow)
-                    logger.warning("Background GEPA without fast mode is very slow, consider enabling fast mode")
-                    # Skip for now - too slow for background
-                    return  # finally block handles cleanup
-
-            elif config.optimizer == "simba":
-                # Run SIMBA optimization
-                if config.fast:
-                    # Fast proxy mode
-                    from .gepa_proxy import RLMProxy, create_proxy_metric, extract_proxy_instructions
-                    from dspy.teleprompt import SIMBA
-                    
-                    proxy = RLMProxy.from_rlm(rlm._rlm)
-                    
-                    # Get training examples
-                    from .trace_collector import get_trace_collector
-                    collector = get_trace_collector()
-                    traces = [t for t in collector.traces if t.grounded_score >= 0.7][:50]
-                    
-                    if len(traces) < 4:
-                        logger.info("Not enough traces for SIMBA optimization: %d < 4", len(traces))
-                        return  # finally block handles cleanup
-                    
-                    examples = [
-                        create_training_example(t.query, t.final_answer, "")
-                        for t in traces if create_training_example(t.query, t.final_answer, "")
-                    ]
-                    
-                    if not examples:
-                        logger.info("No valid training examples for SIMBA")
-                        return  # finally block handles cleanup
-                    
-                    # Adjust batch size using SIMBA-specific config
-                    batch_size = min(config.simba.batch_size, len(examples))
-                    
-                    # Create metric
-                    def simba_proxy_metric(example, pred):
-                        r = create_proxy_metric()(example, pred)
-                        return r.score if hasattr(r, 'score') else float(r)
-                    
-                    optimizer = SIMBA(
-                        metric=simba_proxy_metric,
-                        bsize=batch_size,
-                        num_candidates=config.simba.candidates,
-                        max_steps=config.simba.steps,
-                        num_threads=config.threads,
-                    )
-                    
-                    optimized_proxy = optimizer.compile(proxy, trainset=examples)
-                    
-                    # Extract instructions
-                    instructions = extract_proxy_instructions(optimized_proxy)
-                    optimized_program = optimized_proxy
-                    
-                    # Create result
-                    from .optimization_state import OptimizationResult
-                    result = OptimizationResult(
-                        improved=bool(instructions),
-                        baseline_score=0.0,
-                        optimized_score=0.0,
-                        improvement=0.0,
-                        num_steps=config.simba.steps,
-                        num_candidates=config.simba.candidates,
-                        best_program_idx=0,
-                    )
-                else:
-                    # Full RLM mode
-                    optimizer = get_simba_optimizer(
-                        batch_size=config.simba.batch_size,
-                        num_candidates=config.simba.candidates,
-                        max_steps=config.simba.steps,
-                        num_threads=config.threads,
-                    )
-                    
-                    optimized_program, result = optimizer.optimize_from_traces(
-                        program=rlm._rlm,
-                        min_score=0.7,
-                        max_examples=50,
-                    )
-
-            # Generate tips from failure patterns
-            tips = _generate_optimized_tips()
             
-            # Extract any rules from optimization
-            rules = _extract_simba_rules(optimized_program) if optimized_program else []
-
-            if (result and result.improved) or tips or rules or instructions:
-                # Save the optimized program with all components
-                save_optimized_program(
-                    optimized_program,
-                    result,
-                    config.optimizer,
-                    tips=tips,
-                    rules=rules,
-                    instructions=instructions,
-                )
-
-                # Update state
-                state = OptimizationState(
-                    last_optimization=datetime.now(UTC),
-                    traces_at_last_optimization=get_trace_count(),
-                    last_result=result,
-                    optimizer_type=config.optimizer,
-                )
-                save_optimization_state(state)
-
-                logger.info(
-                    "Background optimization complete: %s, %d tips, %d rules, %d instructions",
-                    f"+{result.improvement:.1f}%" if result and result.improved else "no score improvement",
-                    len(tips),
-                    len(rules),
-                    len(instructions),
-                )
-            else:
-                # Still update state to prevent re-running
-                state = OptimizationState(
-                    last_optimization=datetime.now(UTC),
-                    traces_at_last_optimization=get_trace_count(),
-                    last_result=result,
-                    optimizer_type=config.optimizer,
-                )
-                save_optimization_state(state)
-                logger.info("Background optimization complete: no improvement")
+            # Run the entire optimization inside a thread-local context
+            _run_optimization_in_context(config, lm, default_model)
 
         except Exception as e:
             logger.warning("Background optimization failed: %s", e)
@@ -295,6 +104,208 @@ def run_background_optimization(config: Any = None, model: str | None = None) ->
         logger.debug("Started background optimization thread")
     else:
         _optimize()
+
+
+def _run_optimization_in_context(config: Any, lm: Any, default_model: str) -> None:
+    """Run optimization inside dspy.settings.context() for thread safety."""
+    import dspy
+    
+    with dspy.settings.context(lm=lm):
+        # Get the RLM program with skip_dspy_config=True since we're in a context
+        from .rlm import RLM
+        rlm = RLM(skip_dspy_config=True)
+
+        optimized_program = None
+        result = None
+        instructions = {}
+
+        if config.optimizer == "gepa":
+            # Run GEPA optimization
+            if config.fast:
+                # Fast proxy mode
+                from .gepa_proxy import RLMProxy, create_proxy_metric, extract_proxy_instructions
+                from .gepa_optimizer import GEPAConfig, apply_gepa_instructions
+                
+                proxy = RLMProxy.from_rlm(rlm._rlm)
+                
+                # Get teacher model
+                teacher_model_name = config.get_teacher_model(default_model)
+                teacher_lm = _create_lm(teacher_model_name)
+                
+                # Configure GEPA from nested config
+                gepa_config = GEPAConfig(
+                    auto=config.gepa.auto if config.gepa.max_evals is None else None,
+                    max_full_evals=config.gepa.max_evals,
+                    num_threads=config.threads,
+                )
+                
+                # Get training examples
+                from .trace_collector import get_trace_collector
+                collector = get_trace_collector()
+                traces = [t for t in collector.traces if t.grounded_score >= 0.7][:50]
+                
+                if len(traces) < 4:
+                    logger.info("Not enough traces for GEPA optimization: %d < 4", len(traces))
+                    return
+                
+                examples = [
+                    dspy.Example(query=t.query, answer=t.final_answer).with_inputs("query")
+                    for t in traces
+                ]
+                
+                # Run GEPA on proxy
+                from dspy.teleprompt import GEPA
+                optimizer = GEPA(
+                    metric=create_proxy_metric(),
+                    reflection_lm=teacher_lm,
+                    **gepa_config.__dict__,
+                )
+                optimized_proxy = optimizer.compile(proxy, trainset=examples)
+                
+                # Extract instructions
+                instructions = extract_proxy_instructions(optimized_proxy)
+                
+                # Apply to real RLM
+                if instructions:
+                    apply_gepa_instructions(rlm._rlm, instructions)
+                
+                optimized_program = optimized_proxy
+                
+                # Create result
+                from .optimization_state import OptimizationResult
+                result = OptimizationResult(
+                    improved=bool(instructions),
+                    baseline_score=0.0,
+                    optimized_score=0.0,
+                    improvement=0.0,
+                    num_steps=1,
+                    num_candidates=1,
+                    best_program_idx=0,
+                )
+            else:
+                # Full RLM mode (slow)
+                logger.warning("Background GEPA without fast mode is very slow, consider enabling fast mode")
+                # Skip for now - too slow for background
+                return
+
+        elif config.optimizer == "simba":
+            # Run SIMBA optimization
+            if config.fast:
+                # Fast proxy mode
+                from .gepa_proxy import RLMProxy, create_proxy_metric, extract_proxy_instructions
+                from dspy.teleprompt import SIMBA
+                
+                proxy = RLMProxy.from_rlm(rlm._rlm)
+                
+                # Get training examples
+                from .trace_collector import get_trace_collector
+                collector = get_trace_collector()
+                traces = [t for t in collector.traces if t.grounded_score >= 0.7][:50]
+                
+                if len(traces) < 4:
+                    logger.info("Not enough traces for SIMBA optimization: %d < 4", len(traces))
+                    return
+                
+                examples = [
+                    create_training_example(t.query, t.final_answer, "")
+                    for t in traces if create_training_example(t.query, t.final_answer, "")
+                ]
+                
+                if not examples:
+                    logger.info("No valid training examples for SIMBA")
+                    return
+                
+                # Adjust batch size using SIMBA-specific config
+                batch_size = min(config.simba.batch_size, len(examples))
+                
+                # Create metric
+                def simba_proxy_metric(example, pred):
+                    r = create_proxy_metric()(example, pred)
+                    return r.score if hasattr(r, 'score') else float(r)
+                
+                optimizer = SIMBA(
+                    metric=simba_proxy_metric,
+                    bsize=batch_size,
+                    num_candidates=config.simba.candidates,
+                    max_steps=config.simba.steps,
+                    num_threads=config.threads,
+                )
+                
+                optimized_proxy = optimizer.compile(proxy, trainset=examples)
+                
+                # Extract instructions
+                instructions = extract_proxy_instructions(optimized_proxy)
+                optimized_program = optimized_proxy
+                
+                # Create result
+                from .optimization_state import OptimizationResult
+                result = OptimizationResult(
+                    improved=bool(instructions),
+                    baseline_score=0.0,
+                    optimized_score=0.0,
+                    improvement=0.0,
+                    num_steps=config.simba.steps,
+                    num_candidates=config.simba.candidates,
+                    best_program_idx=0,
+                )
+            else:
+                # Full RLM mode
+                optimizer = get_simba_optimizer(
+                    batch_size=config.simba.batch_size,
+                    num_candidates=config.simba.candidates,
+                    max_steps=config.simba.steps,
+                    num_threads=config.threads,
+                )
+                
+                optimized_program, result = optimizer.optimize_from_traces(
+                    program=rlm._rlm,
+                    min_score=0.7,
+                    max_examples=50,
+                )
+
+        # Generate tips from failure patterns
+        tips = _generate_optimized_tips()
+        
+        # Extract any rules from optimization
+        rules = _extract_simba_rules(optimized_program) if optimized_program else []
+
+        if (result and result.improved) or tips or rules or instructions:
+            # Save the optimized program with all components
+            save_optimized_program(
+                optimized_program,
+                result,
+                config.optimizer,
+                tips=tips,
+                rules=rules,
+                instructions=instructions,
+            )
+
+            # Update state
+            state = OptimizationState(
+                last_optimization=datetime.now(UTC),
+                traces_at_last_optimization=get_trace_count(),
+                last_result=result,
+                optimizer_type=config.optimizer,
+            )
+            save_optimization_state(state)
+
+            logger.info(
+                "Background optimization complete: %s, %d tips, %d rules, %d instructions",
+                f"+{result.improvement:.1f}%" if result and result.improved else "no score improvement",
+                len(tips),
+                len(rules),
+                len(instructions),
+            )
+        else:
+            # Still update state to prevent re-running
+            state = OptimizationState(
+                last_optimization=datetime.now(UTC),
+                traces_at_last_optimization=get_trace_count(),
+                last_result=result,
+                optimizer_type=config.optimizer,
+            )
+            save_optimization_state(state)
+            logger.info("Background optimization complete: no improvement")
 
 
 def _create_lm(model_name: str):

@@ -334,19 +334,22 @@ def get_trace_count() -> int:
 
 
 def should_optimize(config: Any = None) -> bool:
-    """Check if we should run background optimization.
+    """Check if daemon should run background optimization.
+    
+    This is only called by the daemon to decide whether to auto-trigger optimization.
+    Manual 'rlm-dspy optimize' commands bypass this check.
     
     Args:
-        config: OptimizationConfig (optional, loads from user config if not provided)
+        config: DaemonOptimizationConfig (optional, loads from user config if not provided)
         
     Returns:
-        True if optimization should run
+        True if daemon should trigger optimization
     """
     if config is None:
-        from .user_config import OptimizationConfig
-        config = OptimizationConfig.from_user_config()
+        from .user_config import DaemonOptimizationConfig
+        config = DaemonOptimizationConfig.from_user_config()
 
-    if not config.enabled:
+    if not config.auto_optimize:
         return False
 
     state = load_optimization_state()

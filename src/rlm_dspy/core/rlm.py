@@ -61,12 +61,14 @@ class RLM:
         interpreter: Any | None = None,
         use_tools: bool | str = True,
         progress_callback: ProgressCallback | None = None,
+        skip_dspy_config: bool = False,
     ):
         self.config = config or RLMConfig()
         self._interpreter = interpreter
         self._persistent_interpreter = None
         self._progress_callback = progress_callback
         self._tool_call_counts: dict[str, int] = {}
+        self._skip_dspy_config = skip_dspy_config
 
         # Initialize tools
         self._tools = tools.copy() if tools else {}
@@ -94,9 +96,10 @@ class RLM:
         self._metrics_callback: Any = None
         self._setup_callbacks()
 
-        # Load saved optimization and maybe trigger background optimization
+        # Load saved optimization (if any exists from previous manual optimization or daemon)
         self._load_and_apply_optimization()
-        self._maybe_trigger_background_optimization()
+        # Note: Background optimization is NOT auto-triggered here
+        # Use 'rlm-dspy optimize run' or the daemon to run optimization
 
     def _setup_callbacks(self) -> None:
         from .callbacks import get_callback_manager, LoggingCallback, MetricsCallback
@@ -183,27 +186,6 @@ class RLM:
 
         except Exception as e:
             _logger.debug("Failed to load optimization: %s", e)
-
-    def _maybe_trigger_background_optimization(self) -> None:
-        """Trigger background SIMBA optimization if conditions are met."""
-        try:
-            from .user_config import OptimizationConfig
-            from .simba_optimizer import should_optimize, run_background_optimization
-
-            config = OptimizationConfig.from_user_config()
-
-            if not config.enabled:
-                return
-
-            if should_optimize(config):
-                _logger.debug("Triggering background %s optimization", config.optimizer)
-                # Get the model to use for optimization
-                model = config.get_model(self.config.model)
-                run_background_optimization(config, model)
-
-        except Exception as e:
-            _logger.debug("Failed to check/trigger optimization: %s", e)
-
     def get_metrics(self) -> dict[str, Any] | None:
         return self._metrics_callback.get_summary() if self._metrics_callback else None
 
@@ -272,6 +254,13 @@ VERIFICATION RULES:
             WrappedSignature.__name__ = signature.__name__
             return WrappedSignature
 
+    def _configure_dspy_settings(self) -> None:
+        """Configure dspy settings if not skipped (for background thread compatibility)."""
+        if self._skip_dspy_config:
+            _logger.debug("Skipping dspy.settings.configure (running in background thread)")
+            return
+        dspy.settings.configure(async_max_workers=self.config.max_workers, num_threads=self.config.max_workers)
+
     def _setup_dspy(self) -> None:
         from .models import find_model
         
@@ -307,7 +296,7 @@ VERIFICATION RULES:
                     # Use custom LM that bypasses LiteLLM for OAuth
                     model_id = self.config.model.split("/", 1)[1]
                     self._lm = AnthropicOAuthLM(model_id, auth_token=api_key)
-                    dspy.settings.configure(async_max_workers=self.config.max_workers, num_threads=self.config.max_workers)
+                    self._configure_dspy_settings()
                     return
                 else:
                     # Regular Anthropic API key
@@ -326,7 +315,7 @@ VERIFICATION RULES:
                 model_id = self.config.model.split("/", 1)[1]
                 max_tokens = model_info.max_tokens if model_info else 8192
                 self._lm = GoogleOAuthLM(model_id, auth_token=token, project_id=project_id, max_tokens=max_tokens)
-                dspy.settings.configure(async_max_workers=self.config.max_workers, num_threads=self.config.max_workers)
+                self._configure_dspy_settings()
                 return
         
         # Check for Antigravity models - use custom LM
@@ -341,7 +330,7 @@ VERIFICATION RULES:
                 model_id = self.config.model.split("/", 1)[1]
                 max_tokens = model_info.max_tokens if model_info else 8192
                 self._lm = AntigravityLM(model_id, auth_token=token, project_id=project_id, max_tokens=max_tokens)
-                dspy.settings.configure(async_max_workers=self.config.max_workers, num_threads=self.config.max_workers)
+                self._configure_dspy_settings()
                 return
         
         # Check for MiniMax models - use custom LM with Anthropic-compatible API
@@ -352,7 +341,7 @@ VERIFICATION RULES:
             max_tokens = model_info.max_tokens if model_info else 8192
             china = "-cn" in self.config.model.lower()
             self._lm = MiniMaxLM(model_id, max_tokens=max_tokens, china=china)
-            dspy.settings.configure(async_max_workers=self.config.max_workers, num_threads=self.config.max_workers)
+            self._configure_dspy_settings()
             return
         
         # Check for OpenCode models (GLM) - use custom LM with OpenAI-compatible API
@@ -362,7 +351,7 @@ VERIFICATION RULES:
             model_id = self.config.model.split("/", 1)[1]
             max_tokens = model_info.max_tokens if model_info else 8192
             self._lm = OpenCodeLM(model_id, max_tokens=max_tokens)
-            dspy.settings.configure(async_max_workers=self.config.max_workers, num_threads=self.config.max_workers)
+            self._configure_dspy_settings()
             return
         
         # Check for Z.AI models (GLM) - native Zhipu provider
@@ -372,7 +361,7 @@ VERIFICATION RULES:
             model_id = self.config.model.split("/", 1)[1]
             max_tokens = model_info.max_tokens if model_info else 8192
             self._lm = ZaiLM(model_id, max_tokens=max_tokens)
-            dspy.settings.configure(async_max_workers=self.config.max_workers, num_threads=self.config.max_workers)
+            self._configure_dspy_settings()
             return
         
         # Check for Kimi models - Anthropic-compatible API
@@ -382,11 +371,11 @@ VERIFICATION RULES:
             model_id = self.config.model.split("/", 1)[1]
             max_tokens = model_info.max_tokens if model_info else 8192
             self._lm = KimiLM(model_id, max_tokens=max_tokens)
-            dspy.settings.configure(async_max_workers=self.config.max_workers, num_threads=self.config.max_workers)
+            self._configure_dspy_settings()
             return
         
         self._lm = dspy.LM(model=self.config.model, **lm_kwargs)
-        dspy.settings.configure(async_max_workers=self.config.max_workers, num_threads=self.config.max_workers)
+        self._configure_dspy_settings()
 
     def _create_sub_lm(self) -> dspy.LM | None:
         if self.config.sub_model == self.config.model:

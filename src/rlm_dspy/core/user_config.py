@@ -57,17 +57,13 @@ DEFAULT_CONFIG = {
     # API key location
     "env_file": None,
 
-    # Optimization settings
+    # Optimization settings (for 'rlm-dspy optimize' command)
     "optimization": {
-        "enabled": True,                # Enable auto-optimization
-        "optimizer": "gepa",            # Optimizer type: gepa (recommended), simba (legacy)
+        "optimizer": "gepa",            # Optimizer type: gepa, simba
         "model": None,                  # null = use default model
-        "fast": True,                   # Use fast proxy mode (50x faster, recommended)
+        "fast": True,                   # Use fast proxy mode (50x faster)
         "threads": 2,                   # Parallel threads
-        "min_new_traces": 50,           # Traces needed before optimizing
-        "min_hours_between": 24,        # Minimum hours between optimizations
         "max_budget": 0.50,             # Max cost per optimization run
-        "run_in_background": True,      # Run optimization in background thread
         
         # GEPA-specific settings
         "gepa": {
@@ -83,11 +79,49 @@ DEFAULT_CONFIG = {
             "batch_size": 8,            # Batch size
         },
     },
+    
+    # Daemon settings (for 'rlm-dspy daemon' background service)
+    "daemon": {
+        "pid_file": "~/.rlm/daemon.pid",
+        "log_file": "~/.rlm/daemon.log",
+        "watch_debounce": 5.0,          # Seconds to wait before re-indexing after file change
+        "max_concurrent_indexes": 2,
+        "idle_timeout": 0,              # 0 = run forever
+        
+        # Auto-optimization settings
+        "auto_optimize": False,         # Whether daemon should auto-trigger optimization
+        "min_new_traces": 50,           # Traces needed before daemon triggers optimization
+        "min_hours_between": 24,        # Minimum hours between daemon-triggered optimizations
+    },
 }
 
 
 # Optimization config defaults (for easy access)
 DEFAULT_OPTIMIZATION_CONFIG = DEFAULT_CONFIG["optimization"]
+DEFAULT_DAEMON_CONFIG = DEFAULT_CONFIG["daemon"]
+
+
+@dataclass
+class DaemonOptimizationConfig:
+    """Daemon auto-optimization settings."""
+    auto_optimize: bool = False  # Whether daemon should auto-trigger optimization
+    min_new_traces: int = 50  # Traces needed before daemon triggers optimization
+    min_hours_between: int = 24  # Minimum hours between daemon-triggered optimizations
+    
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "DaemonOptimizationConfig":
+        defaults = DEFAULT_DAEMON_CONFIG
+        return cls(
+            auto_optimize=data.get("auto_optimize", defaults.get("auto_optimize", False)),
+            min_new_traces=data.get("min_new_traces", defaults.get("min_new_traces", 50)),
+            min_hours_between=data.get("min_hours_between", defaults.get("min_hours_between", 24)),
+        )
+    
+    @classmethod
+    def from_user_config(cls) -> "DaemonOptimizationConfig":
+        config = load_config()
+        daemon_data = config.get("daemon", {})
+        return cls.from_dict(daemon_data)
 
 
 @dataclass
@@ -108,18 +142,14 @@ class SIMBASettings:
 
 @dataclass
 class OptimizationConfig:
-    """Configuration for auto-optimization."""
+    """Configuration for optimization (used by 'rlm-dspy optimize' command)."""
 
-    # General settings
-    enabled: bool = True
-    optimizer: str = "gepa"  # "gepa" (recommended), "simba" (legacy)
+    # Optimizer settings
+    optimizer: str = "gepa"  # "gepa", "simba"
     model: str | None = None  # None = use default model from config
     fast: bool = True  # Use fast proxy mode (50x faster)
     threads: int = 2  # Parallel threads
-    min_new_traces: int = 50
-    min_hours_between: int = 24
     max_budget: float = 0.50
-    run_in_background: bool = True
     
     # Optimizer-specific settings
     gepa: GEPASettings = None
@@ -141,15 +171,11 @@ class OptimizationConfig:
         simba_data = data.get("simba", {})
         
         return cls(
-            enabled=data.get("enabled", defaults["enabled"]),
             optimizer=data.get("optimizer", defaults["optimizer"]),
             model=data.get("model", defaults["model"]),
             fast=data.get("fast", defaults.get("fast", True)),
             threads=data.get("threads", defaults.get("threads", 2)),
-            min_new_traces=data.get("min_new_traces", defaults["min_new_traces"]),
-            min_hours_between=data.get("min_hours_between", defaults["min_hours_between"]),
             max_budget=data.get("max_budget", defaults["max_budget"]),
-            run_in_background=data.get("run_in_background", defaults["run_in_background"]),
             gepa=GEPASettings(
                 teacher_model=gepa_data.get("teacher_model", gepa_defaults.get("teacher_model")),
                 max_evals=gepa_data.get("max_evals", gepa_defaults.get("max_evals")),
@@ -284,42 +310,31 @@ max_timeout: {max_timeout}
 env_file: {env_file}
 
 # ============================================================================
-# Auto-Optimization Settings
+# Optimization Settings (for 'rlm-dspy optimize run' command)
 # ============================================================================
-# RLM can automatically optimize itself using collected traces.
-# GEPA (recommended) or SIMBA can run to improve prompts.
+# Use 'rlm-dspy optimize run' to manually trigger optimization.
+# Optimization improves prompts based on collected traces.
 
 optimization:
-  # Enable/disable auto-optimization
-  enabled: {opt_enabled}
-
-  # Optimizer type: gepa (recommended), simba (legacy)
+  # Optimizer type: gepa (recommended), simba
   # GEPA evolves instruction text, SIMBA selects demos
   optimizer: {opt_optimizer}
 
   # Model for optimization (null = use default model above)
-  # Tip: Use same model as main for best results
   model: {opt_model}
 
   # Fast proxy mode (50x faster, recommended)
-  # Uses lightweight proxy instead of full RLM for evaluation
   fast: {opt_fast}
 
   # Parallel threads for optimization
   threads: {opt_threads}
 
-  # Auto-optimization triggers
-  min_new_traces: {opt_min_new_traces}
-  min_hours_between: {opt_min_hours_between}
+  # Max budget per optimization run in USD
   max_budget: {opt_max_budget}
-
-  # Run optimization in background (recommended)
-  run_in_background: {opt_run_in_background}
 
   # GEPA-specific settings
   gepa:
-    # Teacher/reflection model for analyzing failures and proposing improvements
-    # Tip: Use a strong model like openai/gpt-4o or anthropic/claude-3-5-sonnet
+    # Teacher/reflection model for analyzing failures
     teacher_model: {opt_gepa_teacher_model}
     # Max evaluations (null = use 'auto' preset)
     max_evals: {opt_gepa_max_evals}
@@ -331,7 +346,27 @@ optimization:
     steps: {opt_simba_steps}           # Optimization iterations
     candidates: {opt_simba_candidates} # Candidates per step
     batch_size: {opt_simba_batch_size} # Batch size
-  run_in_background: {opt_run_in_background}
+
+# ============================================================================
+# Daemon Settings (for 'rlm-dspy daemon' background service)
+# ============================================================================
+# The daemon watches for file changes and can auto-trigger optimization.
+
+daemon:
+  # Process files
+  pid_file: {daemon_pid_file}
+  log_file: {daemon_log_file}
+
+  # File watching
+  watch_debounce: {daemon_watch_debounce}  # Seconds to wait before re-indexing
+  max_concurrent_indexes: {daemon_max_concurrent_indexes}
+  idle_timeout: {daemon_idle_timeout}      # 0 = run forever
+
+  # Auto-optimization (daemon only)
+  # Set to true to have daemon auto-trigger optimization
+  auto_optimize: {daemon_auto_optimize}
+  min_new_traces: {daemon_min_new_traces}       # Traces needed before optimizing
+  min_hours_between: {daemon_min_hours_between} # Hours between optimizations
 """
 
 
@@ -447,8 +482,9 @@ def save_config(config: dict[str, Any], use_template: bool = True) -> None:
             else:
                 return str(val)
 
-        # Get optimization config
+        # Get optimization and daemon configs
         opt_config = full_config.get("optimization", DEFAULT_OPTIMIZATION_CONFIG)
+        daemon_config = full_config.get("daemon", DEFAULT_DAEMON_CONFIG)
 
         content = CONFIG_TEMPLATE.format(
             model=fmt(full_config.get("model")),
@@ -472,15 +508,11 @@ def save_config(config: dict[str, Any], use_template: bool = True) -> None:
             max_timeout=fmt(full_config.get("max_timeout")),
             env_file=fmt(full_config.get("env_file")),
             # Optimization settings
-            opt_enabled=fmt(opt_config.get("enabled", True)),
             opt_optimizer=fmt(opt_config.get("optimizer", "gepa")),
             opt_model=fmt(opt_config.get("model")),
             opt_fast=fmt(opt_config.get("fast", True)),
             opt_threads=fmt(opt_config.get("threads", 2)),
-            opt_min_new_traces=fmt(opt_config.get("min_new_traces", 50)),
-            opt_min_hours_between=fmt(opt_config.get("min_hours_between", 24)),
             opt_max_budget=fmt(opt_config.get("max_budget", 0.50)),
-            opt_run_in_background=fmt(opt_config.get("run_in_background", True)),
             # GEPA settings
             opt_gepa_teacher_model=fmt(opt_config.get("gepa", {}).get("teacher_model")),
             opt_gepa_max_evals=fmt(opt_config.get("gepa", {}).get("max_evals")),
@@ -489,6 +521,15 @@ def save_config(config: dict[str, Any], use_template: bool = True) -> None:
             opt_simba_steps=fmt(opt_config.get("simba", {}).get("steps", 1)),
             opt_simba_candidates=fmt(opt_config.get("simba", {}).get("candidates", 2)),
             opt_simba_batch_size=fmt(opt_config.get("simba", {}).get("batch_size", 8)),
+            # Daemon settings
+            daemon_pid_file=fmt(daemon_config.get("pid_file", "~/.rlm/daemon.pid")),
+            daemon_log_file=fmt(daemon_config.get("log_file", "~/.rlm/daemon.log")),
+            daemon_watch_debounce=fmt(daemon_config.get("watch_debounce", 5.0)),
+            daemon_max_concurrent_indexes=fmt(daemon_config.get("max_concurrent_indexes", 2)),
+            daemon_idle_timeout=fmt(daemon_config.get("idle_timeout", 0)),
+            daemon_auto_optimize=fmt(daemon_config.get("auto_optimize", False)),
+            daemon_min_new_traces=fmt(daemon_config.get("min_new_traces", 50)),
+            daemon_min_hours_between=fmt(daemon_config.get("min_hours_between", 24)),
         )
 
         _atomic_write(CONFIG_FILE, content)
