@@ -17,6 +17,32 @@ models_app = typer.Typer(
 )
 
 
+def _refresh_models() -> bool:
+    """Refresh models from models.dev API."""
+    try:
+        from .scripts.generate_models import fetch_models_dev, generate_models_code
+        from pathlib import Path
+        
+        console.print("[dim]Fetching models from models.dev...[/dim]")
+        data = fetch_models_dev()
+        code = generate_models_code(data)
+        
+        # Write to models.py
+        output_path = Path(__file__).parent / "core" / "models.py"
+        output_path.write_text(code)
+        
+        # Reload the module
+        import importlib
+        from .core import models
+        importlib.reload(models)
+        
+        console.print("[green]✓ Models refreshed[/green]")
+        return True
+    except Exception as e:
+        console.print(f"[red]Failed to refresh models: {e}[/red]")
+        return False
+
+
 def _format_tokens(count: int) -> str:
     """Format token count as human-readable (e.g., 200K, 1M)."""
     if count >= 1_000_000:
@@ -45,8 +71,12 @@ def models_list(
     all_models: Annotated[bool, typer.Option("--all", "-a", help="Show all models (not just available)")] = False,
     provider: Annotated[str | None, typer.Option("--provider", "-p", help="Filter by provider")] = None,
     reasoning: Annotated[bool | None, typer.Option("--reasoning/--no-reasoning", "-r/-R", help="Filter by reasoning support")] = None,
+    refresh: Annotated[bool, typer.Option("--refresh", help="Refresh models from models.dev API")] = False,
 ) -> None:
     """List available models."""
+    
+    if refresh:
+        _refresh_models()
     
     from .core.models import get_model_registry
     
@@ -107,20 +137,21 @@ def models_list(
     models.sort(key=lambda m: (m.provider, m.id))
     
     # Build table
-    table = Table(title="Available Models" if not all_models else "All Models")
-    table.add_column("Provider", style="cyan")
-    table.add_column("Model ID")
+    table = Table(title="Available Models" if not all_models else "All Models", show_lines=False)
+    table.add_column("Provider", style="cyan", no_wrap=True)
+    table.add_column("Model ID", no_wrap=True)
     table.add_column("Context", justify="right")
     table.add_column("Max Out", justify="right")
-    table.add_column("Thinking", justify="center")
-    table.add_column("Images", justify="center")
+    table.add_column("R", justify="center", header_style="dim")  # Reasoning
+    table.add_column("I", justify="center", header_style="dim")  # Images
     table.add_column("Cost (in/out)", justify="right")
     
     for m in models:
         cost_str = f"{_format_cost(m.cost.input)}/{_format_cost(m.cost.output)}"
+        model_id = m.id.split("/", 1)[-1] if "/" in m.id else m.id
         table.add_row(
             m.provider,
-            m.id.split("/", 1)[-1] if "/" in m.id else m.id,
+            model_id,
             _format_tokens(m.context_window),
             _format_tokens(m.max_tokens),
             "✓" if m.reasoning else "",
@@ -280,6 +311,16 @@ def models_set(
     save_config(config, use_template=False)
     
     console.print(f"[green]✓ Default model set to: {model.id}[/green]")
+
+
+@models_app.command("refresh")
+def models_refresh() -> None:
+    """Refresh models from models.dev API.
+    
+    Fetches the latest model definitions from models.dev and updates
+    the local model registry.
+    """
+    _refresh_models()
 
 
 def register_models_commands(app: typer.Typer) -> None:

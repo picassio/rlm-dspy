@@ -205,6 +205,160 @@ ALL_MODELS: list[ModelInfo] = [
 _MODEL_BY_ID: dict[str, ModelInfo] = {{m.id: m for m in ALL_MODELS}}
 
 
+# ============================================================================
+# Provider API Key Detection
+# ============================================================================
+
+import os
+
+PROVIDER_ENV_VARS: dict[str, list[str]] = {{
+    "anthropic": ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN"],
+    "openai": ["OPENAI_API_KEY"],
+    "google": ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+    "openrouter": ["OPENROUTER_API_KEY"],
+    "groq": ["GROQ_API_KEY"],
+    "together": ["TOGETHER_API_KEY"],
+    "fireworks": ["FIREWORKS_API_KEY"],
+    "mistral": ["MISTRAL_API_KEY"],
+    "deepseek": ["DEEPSEEK_API_KEY"],
+    "minimax": ["MINIMAX_API_KEY"],
+    "minimax-cn": ["MINIMAX_API_KEY"],
+    "opencode": ["OPENCODE_API_KEY"],
+    "zai": ["ZAI_API_KEY"],
+    "zhipuai": ["ZHIPUAI_API_KEY", "GLM_API_KEY"],
+    "kimi": ["KIMI_API_KEY"],
+    "kimi-for-coding": ["KIMI_API_KEY"],
+    "cohere": ["COHERE_API_KEY"],
+    "xai": ["XAI_API_KEY"],
+    "alibaba": ["DASHSCOPE_API_KEY", "ALIBABA_API_KEY"],
+}}
+
+
+def _is_anthropic_oauth_authenticated() -> bool:
+    """Check if Anthropic OAuth is configured."""
+    try:
+        from .oauth import is_anthropic_authenticated
+        return is_anthropic_authenticated()
+    except ImportError:
+        return False
+
+
+def _is_google_authenticated() -> bool:
+    """Check if Google OAuth is configured."""
+    try:
+        from .oauth import get_google_token
+        return get_google_token() is not None
+    except ImportError:
+        return False
+
+
+def has_provider_auth(provider: str) -> bool:
+    """Check if a provider has authentication configured."""
+    # Check OAuth first
+    if provider == "anthropic" and _is_anthropic_oauth_authenticated():
+        return True
+    
+    if provider in ("google", "google-gemini") and _is_google_authenticated():
+        return True
+    
+    # Check environment variables
+    env_vars = PROVIDER_ENV_VARS.get(provider, [])
+    for var in env_vars:
+        if os.environ.get(var):
+            return True
+    
+    return False
+
+
+def get_provider_env_var(model_id: str) -> str | None:
+    """Get the environment variable name for a model's provider."""
+    provider = model_id.split("/")[0] if "/" in model_id else None
+    if provider and provider in PROVIDER_ENV_VARS:
+        return PROVIDER_ENV_VARS[provider][0]
+    return None
+
+
+# ============================================================================
+# Model Registry Class
+# ============================================================================
+
+class ModelRegistry:
+    """Registry of available models."""
+    
+    def __init__(self):
+        self._models: list[ModelInfo] = list(ALL_MODELS)
+        self._custom_models: list[ModelInfo] = []
+    
+    def get_all(self) -> list[ModelInfo]:
+        """Get all registered models."""
+        return self._models + self._custom_models
+    
+    def get_available(self) -> list[ModelInfo]:
+        """Get models that have authentication configured."""
+        return [m for m in self.get_all() if has_provider_auth(m.provider)]
+    
+    def get_by_provider(self, provider: str) -> list[ModelInfo]:
+        """Get models for a specific provider."""
+        return [m for m in self.get_all() if m.provider == provider]
+    
+    def find(self, model_id: str) -> ModelInfo | None:
+        """Find a model by ID (exact match)."""
+        for model in self.get_all():
+            if model.id == model_id:
+                return model
+        return None
+    
+    def search(self, pattern: str) -> list[ModelInfo]:
+        """Search models by fuzzy pattern."""
+        pattern_lower = pattern.lower()
+        results = []
+        
+        for model in self.get_all():
+            # Check ID and name
+            search_text = f"{{model.id}} {{model.name}} {{model.provider}}".lower()
+            if pattern_lower in search_text:
+                results.append(model)
+                continue
+            
+            # Fuzzy match
+            if self._fuzzy_match(pattern_lower, search_text):
+                results.append(model)
+        
+        return results
+    
+    def _fuzzy_match(self, pattern: str, text: str) -> bool:
+        """Simple fuzzy matching."""
+        pi = 0
+        for char in text:
+            if pi < len(pattern) and char == pattern[pi]:
+                pi += 1
+        return pi == len(pattern)
+    
+    def register(self, model: ModelInfo) -> None:
+        """Register a custom model."""
+        self._custom_models.append(model)
+    
+    def get_providers(self) -> list[str]:
+        """Get list of unique providers."""
+        return sorted(set(m.provider for m in self.get_all()))
+
+
+# Singleton registry
+_registry: ModelRegistry | None = None
+
+
+def get_model_registry() -> ModelRegistry:
+    """Get the global model registry."""
+    global _registry
+    if _registry is None:
+        _registry = ModelRegistry()
+    return _registry
+
+
+# ============================================================================
+# Convenience Functions
+# ============================================================================
+
 def find_model(model_id: str) -> ModelInfo | None:
     """Find model info by ID.
     
@@ -234,6 +388,16 @@ def list_models(provider: str | None = None) -> list[ModelInfo]:
 def get_model_ids(provider: str | None = None) -> list[str]:
     """Get list of model IDs, optionally filtered by provider."""
     return [m.id for m in list_models(provider)]
+
+
+def get_available_models() -> list[ModelInfo]:
+    """Get models that have authentication configured."""
+    return get_model_registry().get_available()
+
+
+def search_models(pattern: str) -> list[ModelInfo]:
+    """Search models by fuzzy pattern."""
+    return get_model_registry().search(pattern)
 '''
     
     return code
