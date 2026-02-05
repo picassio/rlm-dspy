@@ -378,7 +378,7 @@ VERIFICATION RULES:
         self._configure_dspy_settings()
 
     def _create_sub_lm(self) -> dspy.LM | None:
-        if self.config.sub_model == self.config.model:
+        if not self.config.sub_model or self.config.sub_model == self.config.model:
             return None
         
         from .models import find_model
